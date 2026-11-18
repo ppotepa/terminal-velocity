@@ -1,0 +1,156 @@
+[
+  {
+    "eventId": "evt-demo-1-correlation",
+    "type": "correlation.aircraft-link.revised.v1",
+    "schemaVersion": 1,
+    "stream": {
+      "key": "demo-stream",
+      "revision": 1
+    },
+    "occurredAt": "2026-11-18T11:00:00Z",
+    "recordedAt": "2026-11-18T11:00:01Z",
+    "causationId": null,
+    "traceId": "trace-demo",
+    "payload": {
+      "messageId": "msg-1",
+      "messageRevision": 1,
+      "candidateIndexRevision": "catalog-42",
+      "policyVersion": "identity/2",
+      "previous": null,
+      "current": {
+        "status": "MATCHED",
+        "aircraftId": "aircraft-A",
+        "evidenceRefs": [
+          "evidence-icao-001"
+        ]
+      }
+    }
+  },
+  {
+    "eventId": "evt-demo-2-correlation",
+    "type": "correlation.aircraft-link.revised.v1",
+    "schemaVersion": 1,
+    "stream": {
+      "key": "demo-stream",
+      "revision": 2
+    },
+    "occurredAt": "2026-11-18T11:00:00Z",
+    "recordedAt": "2026-11-18T11:00:01Z",
+    "causationId": null,
+    "traceId": "trace-demo",
+    "payload": {
+      "messageId": "msg-1",
+      "messageRevision": 1,
+      "candidateIndexRevision": "catalog-43",
+      "policyVersion": "identity/2",
+      "previous": {
+        "status": "MATCHED",
+        "aircraftId": "aircraft-A",
+        "evidenceRefs": [
+          "evidence-icao-001"
+        ]
+      },
+      "current": {
+        "status": "AMBIGUOUS",
+        "candidates": [
+          "aircraft-A",
+          "aircraft-B"
+        ],
+        "reason": "OVERLAPPING_BINDINGS"
+      }
+    }
+  },
+  {
+    "eventId": "evt-demo-7-publication",
+    "type": "publication.message-contribution.replaced.v1",
+    "schemaVersion": 1,
+    "stream": {
+      "key": "demo-stream",
+      "revision": 7
+    },
+    "occurredAt": "2026-11-18T11:00:00Z",
+    "recordedAt": "2026-11-18T11:00:01Z",
+    "causationId": null,
+    "traceId": "trace-demo",
+    "payload": {
+      "visibilityScope": "public",
+      "messageId": "msg-1",
+      "contributionRevision": 7,
+      "current": {
+        "state": "ASSIGNED",
+        "aircraftId": "aircraft-A",
+        "messageRevision": 1,
+        "assignmentRevision": 3,
+        "bearer": "VDL2",
+        "observedAt": "2026-11-18T10:59:00Z",
+        "timeBasis": "RECEIVER_OBSERVATION",
+        "publicationPolicyVersion": "public/4"
+      }
+    }
+  },
+  {
+    "eventId": "evt-demo-8-publication",
+    "type": "publication.message-contribution.replaced.v1",
+    "schemaVersion": 1,
+    "stream": {
+      "key": "demo-stream",
+      "revision": 8
+    },
+    "occurredAt": "2026-11-18T11:00:00Z",
+    "recordedAt": "2026-11-18T11:00:01Z",
+    "causationId": null,
+    "traceId": "trace-demo",
+    "payload": {
+      "visibilityScope": "public",
+      "messageId": "msg-1",
+      "contributionRevision": 8,
+      "current": {
+        "state": "RETRACTED",
+        "reason": "ACCESS_REVOKED",
+        "publicationPolicyVersion": "public/5"
+      }
+    }
+  },
+  {
+    "eventId": "evt-demo-12-availability",
+    "type": "availability.aircraft.changed.v1",
+    "schemaVersion": 1,
+    "stream": {
+      "key": "demo-stream",
+      "revision": 12
+    },
+    "occurredAt": "2026-11-18T11:00:00Z",
+    "recordedAt": "2026-11-18T11:00:01Z",
+    "causationId": null,
+    "traceId": "trace-demo",
+    "payload": {
+      "visibilityScope": "public",
+      "aircraftId": "aircraft-A",
+      "freshness": "RECENT",
+      "lastEligibleMessageAt": "2026-11-18T10:59:00Z",
+      "nextTransitionAt": "2026-11-18T11:09:00Z",
+      "freshnessPolicyVersion": "freshness/1"
+    }
+  },
+  {
+    "eventId": "evt-demo-13-availability",
+    "type": "availability.aircraft.changed.v1",
+    "schemaVersion": 1,
+    "stream": {
+      "key": "demo-stream",
+      "revision": 13
+    },
+    "occurredAt": "2026-11-18T11:00:00Z",
+    "recordedAt": "2026-11-18T11:00:01Z",
+    "causationId": null,
+    "traceId": "trace-demo",
+    "payload": {
+      "visibilityScope": "public",
+      "aircraftId": "aircraft-A",
+      "freshness": "NONE",
+      "lastEligibleMessageAt": null,
+      "nextTransitionAt": null,
+      "freshnessPolicyVersion": "freshness/1"
+    }
+  }
+]

@@ -1,0 +1,27 @@
+{
+  "name": "terminal-velocity",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "workspaces": [
+    "packages/backend",
+    "apps/api"
+  ],
+  "scripts": {
+    "start": "npm run start --workspace=@airframes/api",
+    "demo": "npm run demo --workspace=@airframes/backend",
+    "test": "node --test scripts/architecture/*.test.mjs && npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "check": "npm run typecheck && npm run check:boundaries && npm test",
+    "example": "node examples/send-demo-message.mjs",
+    "smoke": "node scripts/smoke-api.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "24.0.0",
+    "typescript": "5.8.3"
+  }
+}
