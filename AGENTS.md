@@ -1,28 +1,32 @@
-# Terminal Velocity — zasady implementacji
+# Terminal Velocity — implementation guidelines
 
-## Cel i zakres
+## Purpose and scope
 
-Śledzenie pozycji samolotów i powiązanych komunikatów radiowych. Aktualny etap to lokalny backend demonstracyjny. Wszystkie fixture są syntetyczne; podłączenie rzeczywistych źródeł wymaga osobnego adaptera i jawnej polityki publikacji.
+Track aircraft positions and associated radio messages. The current stage is a local demonstration backend. All fixtures are synthetic; connecting real sources requires a separate adapter and an explicit publication policy.
 
-## Granice odpowiedzialności
+## Project language
 
-- Stosuj SRP: jeden powód zmiany na moduł, małe przypadki użycia i czyste reguły. Liczba plików nie jest celem samym w sobie.
-- `packages/backend/src/modules/*/domain` nie zależy od HTTP, Node, bazy ani composition root.
-- Łącz domeny przez ich `public/index.ts`; nie importuj prywatnych warstw sąsiedniego modułu.
-- `apps/api` zna wyłącznie publiczny interfejs backendu. Transport nie rozstrzyga korelacji ani świeżości.
-- `src/demo` składa istniejące domeny, fixture i pamięciowe adaptery. Nie udawaj w nim trwałego przetwarzania, prawdziwego feedu ani produkcyjnej polityki dostępu.
-- Generyczne mechanizmy wprowadzaj dla rzeczywistego wspólnego kontraktu; nie twórz BaseService, GenericRepository ani service locatora.
-- Zawsze odróżniaj czas obserwacji od czasu przyjęcia. Backfill nie staje się świeży po ponownym imporcie.
-- Niepełna lista kandydatów, sprzeczne identyfikatory i nierozstrzygnięte dopasowania nie mogą tworzyć potwierdzonego statusu.
-- Widoczność danych musi obejmować również liczniki i statusy. Nie wyprowadzaj publicznej kropki z prywatnego komunikatu.
-- Zachowuj idempotencję, tombstone i odwracalność wkładów. Rewizje różnych agregatów nie są zamienne.
+Use English for all project-authored documentation, code comments, test names, examples, command output, user-facing text, commit messages, and pull request titles and descriptions. Preserve protocol identifiers and externally sourced message payloads in their original form.
 
-## Sprawdzenia
+## Responsibility boundaries
 
-Uruchom z katalogu głównego `npm ci` oraz `npm run check`. Istotna zmiana w przepływie uruchamiania wymaga także sprawdzenia startu i zamknięcia procesu API. Dołącz testy zachowań i regresji dla zmienionych niezmienników, nie testy kopiujące implementację.
+- Apply SRP: one reason to change per module, small use cases, and pure rules. File count is not a goal in itself.
+- `packages/backend/src/modules/*/domain` must not depend on HTTP, Node, a database, or a composition root.
+- Connect domains through their `public/index.ts` entries; do not import another module's private layers.
+- `apps/api` depends only on the backend's public interface. The transport does not decide correlation or freshness.
+- `src/demo` composes existing domains, fixtures, and in-memory adapters. Describe its actual guarantees; it does not provide durable processing, a real feed, or a production access policy.
+- Introduce generic mechanisms for a real shared contract; do not create BaseService, GenericRepository, or a service locator.
+- Always distinguish observation time from ingestion time. Reimporting backfill does not make it fresh.
+- Incomplete candidate sets, conflicting identifiers, and unresolved matches must not produce a confirmed status.
+- Data visibility must also cover counts and statuses. Do not derive a public indicator from a private message.
+- Preserve idempotency, tombstones, and reversible contributions. Revisions from different aggregates are not interchangeable.
 
-Nowe zależności muszą mieć konkretny cel. Zachowuj lockfile. Nie dodawaj sekretów, danych prawdziwych odbiorników ani produkcyjnych komunikatów do fixture.
+## Verification
 
-## Zmiany i dokumentacja
+Run `npm ci` and `npm run check` from the repository root. A material change to the startup flow also requires checking API process startup and shutdown. Add behavioral and regression tests for changed invariants, rather than tests that repeat the implementation.
 
-Pracuj na gałęzi tematycznej. Opis PR: problem, zmiana zachowania, sprawdzenia i faktyczne ograniczenia. Aktualizuj `docs/IMPLEMENTATION_STATUS.md` wraz z zakresem implementacji. Dokumenty w `docs/architecture/` opisują docelową architekturę; nie są dowodem wykonania wszystkich elementów.
+New dependencies must serve a concrete purpose. Keep the lockfile. Do not add secrets, real receiver data, or production messages to fixtures.
+
+## Changes and documentation
+
+Work on a feature branch. A PR description must cover the problem, behavior change, verification, and actual limitations. Update `docs/IMPLEMENTATION_STATUS.md` when the implemented scope changes. Documents in `docs/architecture/` describe the target architecture; they do not establish that every component has been implemented.

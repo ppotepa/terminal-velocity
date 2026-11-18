@@ -3,7 +3,7 @@ import type { AircraftCandidate } from './aircraft-candidate.ts';
 import type { StrongIdentifier } from './strong-identifier.ts';
 import { isAliasActive } from './temporal-alias.ts';
 export type CatalogConflict = 'DUPLICATE_CANDIDATE' | 'CONFLICTING_ACTIVE_ALIASES';
-/** Niespójność katalogu nie może zostać ukryta przez wybór pasującego rekordu. */
+/** Selecting a matching record must not hide a catalog inconsistency. */
 export function findCatalogConflict(candidates: readonly AircraftCandidate[], at: EpochMillis): CatalogConflict | null {
   const ids = new Set<string>();
   for (const candidate of candidates) {

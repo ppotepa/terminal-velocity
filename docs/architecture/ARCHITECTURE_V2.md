@@ -1,320 +1,320 @@
-# Airframes Tracker — architektura v2
+# Airframes Tracker — architecture v2
 
-**Data:** 18 listopada 2026. **Status:** propozycja architektury i implementacja referencyjna wybranych reguł; nie gotowa platforma produkcyjna.
-**Kontynuacja:** architektura v1 i makieta HTML uzgodnione w tej rozmowie.
-**Priorytety:** SRP, jawne niezmienniki, małe moduły, kompozycja, kontrolowane zależności, możliwość poprawiania wcześniejszych decyzji.
+**Date:** 18 November 2026. **Status:** an architecture proposal and reference implementation of selected rules; not a production-ready platform.
+**Continuation:** the v1 architecture and HTML mockup agreed in this conversation.
+**Priorities:** SRP, explicit invariants, small modules, composition, controlled dependencies, and the ability to revise earlier decisions.
 
-## 1. Decyzja przewodnia
+## 1. Guiding decision
 
-Pozostajemy przy modularnym monolicie TypeScript. Zwiększamy granulację **wewnątrz** granic domenowych: osobne typy wartości, reguły, przypadki użycia, porty i adaptery. Nie zwiększamy automatycznie liczby usług, kolejek ani pakietów npm. O rozdzieleniu procesu decydują zmierzone wymagania wykonawcze.
+We retain a modular monolith in TypeScript. We increase granularity **within** domain boundaries: separate value types, rules, use cases, ports, and adapters. This does not automatically increase the number of services, queues, or npm packages. Process separation is driven by measured runtime requirements.
 
-Przyjmujemy pięć poziomów struktury:
+We use five structural levels:
 
-1. **Bounded context:** właściciel określonego modelu, języka i reguł; np. komunikacja lotnicza.
-2. **Moduł odpowiedzialności:** spójna zdolność wewnątrz kontekstu; np. składanie fragmentów wiadomości.
-3. **Przypadek użycia:** konkretny zamiar; np. `AcceptMessageFragment`.
-4. **Czysta reguła / typ wartości:** jedna decyzja albo niezmiennik; np. `isWithinAssemblyWindow`.
-5. **Adapter:** jedno połączenie ze światem; np. zapis sesji składania do PostgreSQL.
+1. **Bounded context:** the owner of a specific model, language, and rules; for example, aviation communications.
+2. **Responsibility module:** a cohesive capability within a context; for example, message fragment reassembly.
+3. **Use case:** a specific intent; for example, `AcceptMessageFragment`.
+4. **Pure rule / value type:** one decision or invariant; for example, `isWithinAssemblyWindow`.
+5. **Adapter:** one connection to the outside world; for example, persisting an assembly session in PostgreSQL.
 
-SRP oznacza wspólny powód zmiany, a nie obowiązek jednej klasy na instrukcję. Zmiana formatu dostawcy, polityki dopasowania i sposobu zapisu mają różnych właścicieli — dlatego trafiają do różnych plików. Podział na bounded contexts oraz takie rozumienie SRP opierają się na [S1] i [S2].
+SRP means a shared reason to change, rather than a requirement for one class per statement. Changes to a provider's format, the matching policy, and the persistence mechanism have different owners, so they belong in different files. The division into bounded contexts and this interpretation of SRP are based on [S1] and [S2].
 
-### Co konkretnie poprawiamy po v1
+### Specific improvements over v1
 
-| Problem v1 | Decyzja v2 | Skutek w kodzie |
+| v1 problem | v2 decision | Effect on the code |
 |---|---|---|
-| Domeny, projekcje i transport nazwane równorzędnymi mikro-domenami | Osobno obszary biznesowe, aplikacyjne modele odczytu i platforma | Właściciel reguły jest jednoznaczny |
-| `FlightCandidate` wymagany do każdego dopasowania | Osobne `AircraftLinkDecision` i `FlightLinkDecision` | Wiadomość można przypisać do maszyny bez znanej sesji lotu |
-| `canonicalKey` sugeruje globalne usuwanie podobnych wiadomości | Trzy różne mechanizmy: idempotencja dostawy, grupowanie odbiorów, równoważność wiadomości | Kolejna rzeczywista transmisja nie znika tylko dlatego, że ma ten sam tekst |
-| `Frame`, odbiór i zdekodowana treść mieszają znaczenia | `SourceDelivery`, `Reception`, `FrameOccurrence`, `MessageRevision` | Zachowujemy ścieżkę pochodzenia i wersję interpretacji |
-| Jeden bearer i jeden protokół w spłaszczonym obiekcie | Wersjonowane drzewo/stos protokołów oraz kierunek komunikacji | VDL2 nie jest automatycznie traktowane jako ACARS |
-| Decyzja miała wiele nullable ID | Rozłączne warianty wyniku | `MATCHED` bez `AircraftId` nie daje się zwyczajnie skonstruować |
-| Aktualizacja last-seen wyłącznie przez `max()` | Rejestr aktywnych wkładów wiadomości i retrakcje | Zmiana dopasowania A→B poprawia status obu maszyn |
-| Scheduler wygaśnięcia bez obrony przed starą pracą | `expectedRevision`, trwały termin i ponowne obliczenie | Stary timer nie wygasza świeżej wiadomości |
-| Treść filtrowana, status i licznik potencjalnie z danych globalnych | Wkłady i projekcje ograniczone do uprawnionego odbiorcy | Brak ujawnienia samego istnienia niedostępnej wiadomości |
-| REST snapshot i WS aktualizacje bez bariery | Snapshot + generation + cursor z tej samej projekcji | Brak cichej dziury przy starcie subskrypcji |
-| Outbox potraktowany prawie jak broker | Osobne zadania fan-out, delivery i consumer inbox | Każdy konsument ma trwały, niezależny stan dostarczenia |
+| Domains, projections, and transport were all called equivalent micro-domains | Separate business areas, application read models, and platform capabilities | Each rule has an unambiguous owner |
+| `FlightCandidate` was required for every match | Separate `AircraftLinkDecision` and `FlightLinkDecision` | A message can be assigned to an aircraft without a known flight session |
+| `canonicalKey` suggested globally removing similar messages | Three distinct mechanisms: delivery idempotency, reception grouping, and message equivalence | A subsequent real transmission is retained even when its text is identical |
+| `Frame`, reception, and decoded content had overlapping meanings | `SourceDelivery`, `Reception`, `FrameOccurrence`, `MessageRevision` | Preserve provenance and the interpretation version |
+| One bearer and one protocol in a flattened object | A versioned protocol tree/stack and communication direction | VDL2 is not automatically treated as ACARS |
+| A decision contained many nullable IDs | Disjoint result variants | A `MATCHED` result without an `AircraftId` cannot be constructed through the normal type model |
+| Last-seen updates relied solely on `max()` | A register of active message contributions and retractions | Reassigning a message from A→B corrects the status of both aircraft |
+| The expiry scheduler had no protection against stale work | `expectedRevision`, a durable deadline, and recomputation | An old timer cannot expire a fresh message |
+| Content was filtered, but status and counts could use global data | Contributions and projections are restricted to the authorized recipient | The existence of an inaccessible message is not disclosed |
+| REST snapshots and WS updates had no synchronization barrier | Snapshot + generation + cursor from the same projection | No silent gap when a subscription starts |
+| The outbox was treated almost like a broker | Separate fan-out, delivery, and consumer inbox responsibilities | Each consumer has durable, independent delivery state |
 
-## 2. Osiem właścicieli reguł domenowych
+## 2. Eight owners of domain rules
 
-To większe granice, w których mieści się wiele małych modułów. Integracje, modele odczytu i WebSocket pozostają osobnymi obszarami technicznymi.
+These are larger boundaries containing many small modules. Integrations, read models, and WebSocket remain separate technical areas.
 
-| Kontekst | Własność modelu | Nie należy tutaj |
+| Context | Model ownership | Outside this context |
 |---|---|---|
-| `fleet-identity` | AircraftId, aliasy ICAO24/rejestracji, ich okresy ważności i pochodzenie | Bieżący lot i algorytm przypisania wiadomości |
-| `flight-tracking` | Obserwacje pozycji, ślady, segmenty lotu, aktualna pozycja | Treść komunikacji i status ramek |
-| `communications` | Dostawy danych, odbiory, ramki, składanie, rewizje wiadomości | Decyzja, do którego znanego samolotu przypisać wiadomość |
-| `correlation` | Dowody i wersjonowane decyzje Message→Aircraft oraz Message→Flight | Dekodowanie radia, kolory mapy, SQL innych kontekstów |
-| `availability` | Wkłady wiadomości w status odbioru i ich wygaśnięcie | Ocena źródeł po heurystyce mapy, zmiana tożsamości |
-| `receiver-network` | Stacja, instalacja odbiornika, możliwości, heartbeat, lokalizacja | Zarządzanie hasłami użytkowników i sekretami dostawców |
-| `publication` | Dopuszczalne pola, uprawniony zakres danych, rewizja polityki, wycofanie | Samo rozpoznawanie osób i logowanie |
-| `access` | Principal, role/uprawnienia, token stacji, ważność dostępu | Treść wiadomości i lotnicze reguły publikacji |
+| `fleet-identity` | AircraftId, ICAO24/registration aliases, their validity periods, and provenance | The current flight and the message assignment algorithm |
+| `flight-tracking` | Position observations, tracks, flight segments, and current position | Communication content and frame status |
+| `communications` | Data deliveries, receptions, frames, reassembly, and message revisions | Deciding which known aircraft a message belongs to |
+| `correlation` | Evidence and versioned Message→Aircraft and Message→Flight decisions | Radio decoding, map colors, and SQL belonging to other contexts |
+| `availability` | Message contributions to reception status and their expiry | Assessing sources through map heuristics or changing identity |
+| `receiver-network` | Stations, receiver installations, capabilities, heartbeat, and location | Managing user passwords and provider secrets |
+| `publication` | Permitted fields, authorized data scope, policy revision, and withdrawal | Identifying users and handling login |
+| `access` | Principal, roles/permissions, station tokens, and access validity | Message content and aviation publication rules |
 
-Obszary techniczne:
+Technical areas:
 
-- `source-connectors`: połączenia dostawców, schematy wejścia, retry, limity, deklaracje możliwości i kompletności feedu;
-- `read-models`: map, flight-list, message-timeline, station-list, search; projekcje należą do aplikacji, nie do adaptera HTTP;
-- `delivery`: subskrypcje, początkowa synchronizacja, delta, usuwanie obiektów z viewportu, backpressure;
-- `platform`: outbox, durable dispatch, inbox, migracje, monitoring, zegar, identyfikatory, obiektowy magazyn payloadów.
+- `source-connectors`: provider connections, input schemas, retries, limits, and declarations of feed capabilities and completeness;
+- `read-models`: map, flight-list, message-timeline, station-list, search; projections belong to the application, not the HTTP adapter;
+- `delivery`: subscriptions, initial synchronization, deltas, removing objects from the viewport, and backpressure;
+- `platform`: outbox, durable dispatch, inbox, migrations, monitoring, clock, identifiers, and object storage for payloads.
 
-**Granica transakcji nie jest granicą każdego pliku.** Odbiór i przypisanie go do wystąpienia ramki mogą wymagać jednej transakcji w `communications`, chociaż obsługują je różne małe komponenty. Rozbijanie tej operacji na usługi usunęłoby potrzebną atomowość.
+**Transaction boundaries do not follow individual file boundaries.** Recording a reception and assigning it to a frame occurrence may require one transaction in `communications`, even when separate small components handle these steps. Splitting that operation across services would remove the required atomicity.
 
-## 3. Mapa zależności
+## 3. Dependency map
 
 ```mermaid
 flowchart TD
-  S["Adaptery źródeł"] --> C["Communications"]
+  S["Source adapters"] --> C["Communications"]
   S --> T["Flight tracking"]
   I["Fleet identity"] --> R["Correlation"]
   T --> R
   C --> R
   C --> P["Publication"]
   R --> P
-  P --> A["Availability według zakresu dostępu"]
-  T --> V["Modele odczytu"]
+  P --> A["Availability by access scope"]
+  T --> V["Read models"]
   P --> V
   A --> V
-  V --> D["REST / subskrypcje"]
-  D --> W["Interfejs"]
+  V --> D["REST / subscriptions"]
+  D --> W["User interface"]
 ```
 
-Strzałka oznacza przepływ opublikowanych faktów albo jawny kontrakt odczytu. Nie oznacza prawa do importowania implementacji ani dostępu do cudzych tabel. `access` i `receiver-network` wspierają odpowiednie wejścia; nie są nadrzędnym serwisem wywoływanym przez każdą czystą regułę.
+An arrow represents a flow of published facts or an explicit read contract. It does not grant permission to import an implementation or access another context's tables. `access` and `receiver-network` support the relevant inputs; neither is a central service invoked by every pure rule.
 
-### Zależności wewnątrz kontekstu
+### Dependencies within a context
 
-`transport adapter → application use case → domain function`. Use case deklaruje port, adapter infrastruktury go implementuje. Composition root składa całość. Domain nie importuje Fastify, React, Kysely, Redis, SDK dostawcy ani systemowego zegara.
+`transport adapter → application use case → domain function`. The use case declares a port, and an infrastructure adapter implements it. The composition root assembles the components. The domain does not import Fastify, React, Kysely, Redis, a provider SDK, or the system clock.
 
-Zapytania synchroniczne przez publiczne interfejsy są dopuszczalne, jeżeli nie tworzą cykli i nie obchodzą własności danych. Zmiany między kontekstami są propagowane przez trwałe fakty. Szybkość wywołania lokalnej metody nie znosi granic architektury.
+Synchronous queries through public interfaces are allowed if they do not create cycles or bypass data ownership. Changes between contexts propagate through durable facts. A local method call's speed does not remove architectural boundaries.
 
-## 4. Słownik danych: czego nie wolno scalać
+## 4. Data vocabulary: concepts that must remain distinct
 
-### 4.1 Samolot i lot
+### 4.1 Aircraft and flight
 
-- `AircraftId`: stabilny identyfikator wewnętrzny; nie jest stringiem ICAO24.
-- `AircraftIdentityAssertion`: twierdzenie źródła o identyfikatorze wraz z okresem obowiązywania i czasem zapisania.
-- `PositionObservation`: fakt pozycji z czasem obserwacji, źródłem i typem pomiaru.
-- `FlightSession`: hipoteza o konkretnym odcinku lotu, z historią zmian przypisania.
-- `ObservedTrack`: zbiór rzeczywiście odebranych pozycji. Nie jest planem trasy.
-- `PlannedRoute` / `ScheduledService`: opcjonalne, oddzielne dane; brak nie upoważnia do zgadywania celu z kierunku lotu.
+- `AircraftId`: a stable internal identifier; it is not an ICAO24 string.
+- `AircraftIdentityAssertion`: a source's assertion about an identifier, with a validity period and recording time.
+- `PositionObservation`: a position fact with its observation time, source, and measurement type.
+- `FlightSession`: a hypothesis about a specific flight leg, with a history of assignment changes.
+- `ObservedTrack`: a collection of positions actually received. It is not a planned route.
+- `PlannedRoute` / `ScheduledService`: optional, separate data; their absence does not justify guessing a destination from the aircraft's heading.
 
-Rejestr aliasów rozróżnia `validFrom/validUntil` od `recordedAt/supersededAt`. Nie musimy wdrażać pełnej bitemporalnej bazy na starcie, ale nie wolno nadpisywać historii istotnej dla korelacji. Bieżący alias nie musi być poprawnym aliasem starego odbioru.
+The alias register distinguishes `validFrom/validUntil` from `recordedAt/supersededAt`. A fully bitemporal database is not required from the outset, but history relevant to correlation must not be overwritten. A current alias may not be valid for an old reception.
 
-### 4.2 Dostawa, odbiór, ramka i wiadomość
+### 4.2 Delivery, reception, frame, and message
 
-| Model | Tożsamość i znaczenie |
+| Model | Identity and meaning |
 |---|---|
-| `SourceDelivery` | Konkretne dostarczenie danych do integracji; dostawca może je powtórzyć po reconnect |
-| `Reception` | Znany odbiór przez konkretny receiver/stację; wiele dostaw może relacjonować ten sam odbiór |
-| `FrameOccurrence` | Hipoteza o jednej transmisji ramki widzianej przez wiele odbiorników |
-| `FrameObservation` | Interpretacja jednej obserwacji ramki: payload, jakość, kierunek i wynik dekodowania |
-| `AssemblySession` | Kontrolowany stan składania fragmentów jednego komunikatu |
-| `LogicalMessage` | Wiadomość aplikacyjna, która może powstać z kilku fragmentów |
-| `MessageRevision` | Niezmienna wersja zdekodowanej treści, z wersją dekodera i odniesieniami do dowodów |
+| `SourceDelivery` | A specific delivery of data to an integration; the provider may repeat it after reconnecting |
+| `Reception` | A known reception by a specific receiver/station; multiple deliveries may report the same reception |
+| `FrameOccurrence` | A hypothesis about one frame transmission observed by multiple receivers |
+| `FrameObservation` | An interpretation of one frame observation: payload, quality, direction, and decoding result |
+| `AssemblySession` | Controlled state for assembling fragments of one message |
+| `LogicalMessage` | An application message that may be assembled from several fragments |
+| `MessageRevision` | An immutable version of decoded content, with the decoder version and references to evidence |
 
-Nie każdy dostawca udostępnia wszystkie te poziomy. Gdy otrzymujemy gotowy `Message`, zapisujemy `ProviderMessageObservation` z jego pochodzeniem. **Nie tworzymy fikcyjnej ramki ani fikcyjnej stacji**, aby wypełnić schemat. `dataLevel` opisuje rzeczywisty poziom danych, a brak raw payloadu pozostaje jawnym brakiem.
+Not every provider exposes all these levels. When we receive a complete `Message`, we record a `ProviderMessageObservation` with its provenance. **We do not fabricate a frame or station** to fill the schema. `dataLevel` describes the actual level of data, and an absent raw payload remains explicitly absent.
 
-Reassembly wymaga identyfikacji fragmentów, kolejności i timeoutów; takie możliwości opisuje dokumentacja libacars [S3]. Istniejące dekodery VDL2 obsługują więcej niż ACARS [S4]. Korzystamy z adapterów do istniejących dekoderów, bez pisania własnego demodulatora radiowego w warstwie aplikacji webowej.
+Reassembly requires fragment identification, ordering, and timeouts; these capabilities are described in the libacars documentation [S3]. Existing VDL2 decoders support more than ACARS [S4]. We use adapters to existing decoders, without implementing a radio demodulator in the web application layer.
 
-### 4.3 Protokół jako struktura
+### 4.3 Protocol as a structure
 
-Przechowujemy `bearer`, `protocolStack` oraz `direction`. Kierunek: `AIR_TO_GROUND`, `GROUND_TO_AIR`, `UNKNOWN`. Tożsamość nadawcy nie jest automatycznie tożsamością samolotu: wiadomość uplink może być adresowana do maszyny. Parser wydobywa role adresów, a korelator używa właściwego uczestnika.
+We store `bearer`, `protocolStack`, and `direction`. Direction values are `AIR_TO_GROUND`, `GROUND_TO_AIR`, and `UNKNOWN`. The sender's identity is not automatically the aircraft's identity: an uplink message may be addressed to the aircraft. The parser extracts address roles, and the correlator uses the appropriate participant.
 
-Nie ustanawiamy globalnego enumu, którego każda nowa aplikacja radiowa wymaga przebudowy całego systemu. Rdzeń ma stabilne kategorie, registry parserów ma wersjonowane rozszerzenia; nieznana gałąź protokołu nie jest dowolnym `any`.
+We do not introduce a global enum that forces the entire system to be rebuilt for every new radio application. The core has stable categories, and the parser registry has versioned extensions; an unknown protocol branch is not arbitrary `any`.
 
-## 5. Communications: podział według realnych powodów zmiany
+## 5. Communications: separation by actual reasons to change
 
-Przepływ jednej dostawy:
+The flow of a single delivery:
 
-1. `ValidateEnvelope`: rozmiar, schemat, wymagane metadane.
-2. `ClassifyInputLevel`: raw frame, fragment, gotowa wiadomość dostawcy.
-3. `NormalizeObservationTime`: czas, jednostki, źródło czasu i tolerancja zegara.
-4. `ExtractSourceIdentity`: source, account, receiver, decoder, wersja.
-5. `CheckDeliveryIdentity`: czy tę samą dostawę już przyjęliśmy.
-6. `AppendReceptionFact`: zapis niezależnego odbioru, jeśli dostawca rzeczywiście go potwierdza.
-7. `FindFrameOccurrenceCandidates`: wyszukiwanie podobnej transmisji w ograniczonym oknie.
-8. `EvaluateFrameEquivalence`: zgodność adresów, sekwencji, częstotliwości, kierunku i czasu.
-9. `AssignFrameOccurrence`: osobna, wersjonowana decyzja; zachowujemy źródłowe odbiory.
-10. `DecodeFrame` lub `ImportDecodedMessage`: dwie różne ścieżki wejściowe.
-11. `SelectAssemblyKey`: kontekst protokołu i sekwencji; nie sam hash tekstu.
-12. `AcceptFragment` / `ExpireAssembly`: stan fragmentów, brakujące elementy i termin.
-13. `FinalizeMessageRevision`: wersja wyniku z referencjami wejściowymi.
-14. `CommitCommunicationFacts`: dane i outbox atomowo w danym use case.
+1. `ValidateEnvelope`: size, schema, and required metadata.
+2. `ClassifyInputLevel`: raw frame, fragment, or complete provider message.
+3. `NormalizeObservationTime`: time, units, time source, and clock tolerance.
+4. `ExtractSourceIdentity`: source, account, receiver, decoder, and version.
+5. `CheckDeliveryIdentity`: whether the same delivery has already been accepted.
+6. `AppendReceptionFact`: record an independent reception if the provider actually confirms it.
+7. `FindFrameOccurrenceCandidates`: search for a similar transmission within a bounded window.
+8. `EvaluateFrameEquivalence`: consistency of addresses, sequence, frequency, direction, and time.
+9. `AssignFrameOccurrence`: a separate, versioned decision; retain the original receptions.
+10. `DecodeFrame` or `ImportDecodedMessage`: two different input paths.
+11. `SelectAssemblyKey`: protocol and sequence context, rather than just a text hash.
+12. `AcceptFragment` / `ExpireAssembly`: fragment state, missing elements, and deadline.
+13. `FinalizeMessageRevision`: a version of the result with references to its inputs.
+14. `CommitCommunicationFacts`: data and outbox are atomic within the given use case.
 
-To katalog odpowiedzialności, nie lista 14 brokerów i 14 sieciowych wywołań. Niezależne małe funkcje mogą być składane w jednym procesie i jednej transakcji. Szczegółowy katalog w `docs/MODULE_CATALOG.md`.
+This is a catalog of responsibilities, not a list of 14 brokers and 14 network calls. Independent small functions can be composed within one process and one transaction. The detailed catalog is in `docs/MODULE_CATALOG.md`.
 
-### Trzy różne pojęcia duplikatu
+### Three distinct meanings of duplicate
 
-**Dostawa ponowiona:** ten sam `(source, account, stableExternalId)`, o ile stabilność ID jest potwierdzona kontraktem. Klucz uwzględnia zakres dostawcy, sesję lub receiver, jeżeli identyfikatory mogą się powtarzać. Sprzeczny payload pod tym samym kluczem jest błędem do rozpatrzenia.
+**Repeated delivery:** the same `(source, account, stableExternalId)`, provided the contract confirms ID stability. The key includes the provider scope, session, or receiver when identifiers may be reused. A conflicting payload under the same key is an error requiring investigation.
 
-**Wielokrotny odbiór jednej transmisji:** trzy odbiorniki słyszą ten sam frame. Zachowujemy trzy `Reception`, tworzymy jedno `FrameOccurrence` i trzy powiązania. Klucz fingerprint wyszukuje kandydatów, a nie gwarantuje równoważności.
+**Multiple receptions of one transmission:** three receivers hear the same frame. We retain three `Reception` records, create one `FrameOccurrence`, and create three links. A fingerprint key retrieves candidates; it does not guarantee equivalence.
 
-**Podobne wiadomości:** dwa komunikaty mają identyczny tekst o różnym czasie lub sekwencji. Domyślnie są osobnymi faktami. Retransmisja, ponowiony ACK i reassembly mają reguły właściwe protokołowi. Grupowanie według samego tekstu może niszczyć historię.
+**Similar messages:** two messages have identical text but different times or sequences. By default, they are separate facts. Retransmission, repeated ACKs, and reassembly follow protocol-specific rules. Grouping by text alone can destroy history.
 
-Okna deduplikacji nie mogą zależeć wyłącznie od `floor(timestamp / interval)`: odbiory tego samego zdarzenia mogą leżeć po obu stronach granicy przedziału. Szukamy w sąsiednich bucketach i oceniamy rzeczywistą różnicę czasu. Operacja get-or-create wymaga ochrony przed konkurencyjnym utworzeniem dwóch wystąpień; adapter DB egzekwuje unikalność bezpiecznych kluczy lub blokadę właściwego shardu.
+Deduplication windows cannot depend solely on `floor(timestamp / interval)`: receptions of the same event may fall on opposite sides of an interval boundary. We search adjacent buckets and evaluate the actual time difference. A get-or-create operation requires protection against concurrent creation of two occurrences; the DB adapter enforces uniqueness for safe keys or locks the appropriate shard.
 
-## 6. Korelacja: dwa procesy zamiast jednej wielkiej usługi
+## 6. Correlation: two processes instead of one large service
 
 ### 6.1 Message → Aircraft
 
-Use case `ResolveMessageAircraft` przyjmuje identyfikator i rewizję wiadomości, pobiera dozwolone fakty, wydobywa znormalizowane wskazówki i pobiera kandydatów z lokalnej projekcji tożsamości. Brak sesji lotu nie blokuje tego etapu.
+The `ResolveMessageAircraft` use case accepts a message identifier and revision, retrieves permitted facts, extracts normalized hints, and retrieves candidates from the local identity projection. A missing flight session does not block this stage.
 
-Małe reguły:
+Small rules:
 
-- `ValidateIcao24`: format i semantyka adresu, bez rzutowania dowolnego stringa;
-- `NormalizeRegistration`: zachowuje oryginał i wynik normalizacji; nie usuwa arbitralnie znaków;
-- `SelectAircraftAddressRole`: rozpoznaje adres statku powietrznego w uplink/downlink;
-- `ResolveIdentityAtObservationTime`: wybiera alias ważny w chwili obserwacji;
-- `CollectExactIcaoEvidence` i `CollectRegistrationEvidence`: niezależne dowody;
-- `DetectStrongIdentifierConflict`: mocne sprzeczności nie są kompensowane innymi punktami;
-- `ResolveCandidateUniqueness`: dwóch równie dobrych kandydatów daje `AMBIGUOUS`;
-- `DecideAircraftLink`: jawna polityka decyzji, bez procentu pewności udawanego przez sumę wag;
-- `BuildLinkRevision`: zapisuje wejściowe rewizje, policyVersion, dowody i identyfikator poprzedniej decyzji.
+- `ValidateIcao24`: address format and semantics, without casting an arbitrary string;
+- `NormalizeRegistration`: retains both the original and normalized values; it does not arbitrarily remove characters;
+- `SelectAircraftAddressRole`: identifies the aircraft address in uplink/downlink traffic;
+- `ResolveIdentityAtObservationTime`: selects the alias valid at observation time;
+- `CollectExactIcaoEvidence` and `CollectRegistrationEvidence`: independent evidence;
+- `DetectStrongIdentifierConflict`: strong contradictions cannot be offset by other scores;
+- `ResolveCandidateUniqueness`: two equally good candidates produce `AMBIGUOUS`;
+- `DecideAircraftLink`: an explicit decision policy, without presenting a sum of weights as a confidence percentage;
+- `BuildLinkRevision`: records input revisions, policyVersion, evidence, and the previous decision's identifier.
 
-Wynik ma warianty `MATCHED`, `AMBIGUOUS`, `CONFLICTED`, `UNMATCHED`. Nieoznaczona niepełna próbka kandydatów nie pozwala ogłosić jednoznaczności. `CandidateSet` zawiera kompletność indeksu i checkpoint; timeout albo niegotowy indeks jest błędem/retry, a nie `UNMATCHED`.
+The result has `MATCHED`, `AMBIGUOUS`, `CONFLICTED`, and `UNMATCHED` variants. An incomplete candidate sample that is not marked as such cannot establish uniqueness. `CandidateSet` includes index completeness and a checkpoint; a timeout or an index that is not ready is an error/retry condition, not `UNMATCHED`.
 
 ### 6.2 Message → FlightSession
 
-Osobny use case `ResolveMessageFlight` korzysta z zaakceptowanego dopasowania do samolotu oraz okna obserwacji. Jego reguły sprawdzają:
+A separate use case, `ResolveMessageFlight`, uses the accepted aircraft match and the observation window. Its rules check:
 
-1. Czy sesja należy do już rozpoznanej maszyny.
-2. Czy ważne okno lotu przecina przedział wiarygodnego czasu wiadomości.
-3. Czy callsign pasuje do danej sesji i nie został znormalizowany przez zgadywanie.
-4. Czy nie istnieje druga konkurencyjna sesja.
-5. Czy jakość czasu jest wystarczająca do dokładnego przypisania.
+1. Whether the session belongs to the aircraft already identified.
+2. Whether the valid flight window intersects the message's reliable time interval.
+3. Whether the callsign matches that session and has not been normalized through guesswork.
+4. Whether there is another competing session.
+5. Whether time quality is sufficient for a precise assignment.
 
-Możliwy poprawny stan: `aircraft = MATCHED`, `flight = UNMATCHED`. UI pokazuje wiadomość przy maszynie, a nie dopisuje fałszywego numeru lotu. Stan „brak dopasowania” nie może udawać awarii dostawcy.
+A valid state can be `aircraft = MATCHED`, `flight = UNMATCHED`. The UI shows the message against the aircraft without adding a false flight number. A "no match" state and a provider failure must remain distinct.
 
-### 6.3 Uzasadnienie i rewizje
+### 6.3 Rationale and revisions
 
-Każda decyzja przechowuje `messageRevision`, `identityIndexRevision`, `policyVersion`, dowody użyte i odrzucone oraz czas podjęcia decyzji. Re-evaluation emituje nową rewizję i informację o poprzednim przypisaniu. Nie nadpisujemy śladu poprzedniej decyzji.
+Each decision stores `messageRevision`, `identityIndexRevision`, `policyVersion`, accepted and rejected evidence, and the decision time. Re-evaluation emits a new revision and information about the previous assignment. We do not overwrite the previous decision's audit trail.
 
-Korelator nie składa fragmentów, nie wysyła WebSocketów i nie oblicza zielonej kropki. Może być dokładnie przetestowany na danych bez uruchamiania bazy.
+The correlator does not assemble fragments, send WebSocket messages, or calculate a green status dot. It can be thoroughly tested on data without running a database.
 
-## 7. Availability: status jako wynik odwracalnych wkładów
+## 7. Availability: status derived from reversible contributions
 
-Samo `lastMessageAt = max(lastMessageAt, eventTime)` nie wystarcza. Po odkryciu, że ostatnia wiadomość należała do innego samolotu, potrzebujemy wcześniejszej prawidłowej wiadomości.
+Using only `lastMessageAt = max(lastMessageAt, eventTime)` is insufficient. After discovering that the latest message belonged to another aircraft, we need the earlier valid message.
 
-Wprowadzamy `MessageContribution`:
+We introduce `MessageContribution`:
 
-- klucz `(visibilityScope, messageId)`;
-- własna, monotoniczna `contributionRevision`, nadawana przez właściciela publikowanego wkładu;
-- `aircraftId`, opcjonalnie flightSessionId;
+- key `(visibilityScope, messageId)`;
+- its own monotonic `contributionRevision`, assigned by the owner of the published contribution;
+- `aircraftId`, optionally flightSessionId;
 - bearer / applicationProtocol;
-- właściwy czas zdarzenia oraz wiarygodność czasu;
-- stan aktywny albo tombstone z rewizją.
+- the appropriate event time and its reliability;
+- an active state or a tombstone with a revision.
 
-Operacje:
+Operations:
 
-`assignmentRevision`, `messageRevision` oraz rewizja grantu są niezależnymi wejściami producenta wkładu. Nie porównujemy ich liczbowo i nie bierzemy ich maksimum. Producent serializuje zmiany danego `(scope,messageId)` i nadaje osobny porządek `contributionRevision`; dzięki temu późniejsze cofnięcie grantu nie zostaje odrzucone jako „starsze” od przypisania z większą liczbą.
+`assignmentRevision`, `messageRevision`, and the grant revision are independent inputs to the contribution producer. We neither compare them numerically nor take their maximum. The producer serializes changes for a given `(scope,messageId)` and assigns a separate `contributionRevision` order; this prevents a later grant revocation from being rejected as "older" than an assignment with a higher number.
 
-- `ApplyContribution`: nowa dozwolona wiadomość dodaje wkład;
-- `ReplaceContribution`: rewizja przenosi wkład z A na B, wycofując poprzedni;
-- `WithdrawContribution`: decyzja albo polityka usuwa wkład;
-- `SelectLatestEligibleContribution`: wybiera maksimum z aktywnych, zgodnych z filtrem wkładów;
-- `ComputeFreshness`: oblicza status z czasu i polityki;
-- `ScheduleNextTransition`: wyznacza dokładny następny termin;
-- `ExpireAvailability`: sprawdza expectedRevision i ponownie oblicza status;
-- `RepairAvailability`: naprawia projekcję z faktów po awarii lub zmianie polityki.
+- `ApplyContribution`: a new permitted message adds a contribution;
+- `ReplaceContribution`: a revision moves a contribution from A to B and withdraws the previous one;
+- `WithdrawContribution`: a decision or policy removes a contribution;
+- `SelectLatestEligibleContribution`: selects the maximum among active contributions matching the filter;
+- `ComputeFreshness`: calculates status from time and policy;
+- `ScheduleNextTransition`: determines the exact next deadline;
+- `ExpireAvailability`: checks expectedRevision and recalculates status;
+- `RepairAvailability`: repairs the projection from facts after a failure or policy change.
 
-Tombstone zapobiega przywróceniu wycofanego wkładu przez spóźnioną starszą rewizję. Jego retencja musi obejmować cały wspierany horyzont ponownych dostaw/replay; po skróceniu wymagamy nowej generacji projekcji i pełnego rebuild.
+A tombstone prevents a late, older revision from restoring a withdrawn contribution. Its retention must cover the entire supported redelivery/replay horizon; shortening its retention requires a new projection generation and a full rebuild.
 
-### Cztery niezależne osie
+### Four independent dimensions
 
-| Wymiar | Przykładowe wartości | Co wyświetla UI |
+| Dimension | Example values | What the UI displays |
 |---|---|---|
-| Świeżość wiadomości | `RECENT / STALE / NONE` | Kolor statusu i ostatni czas |
-| Dopasowanie | `MATCHED / AMBIGUOUS / CONFLICTED / UNMATCHED` | Opis dowodów albo ostrzeżenie o niepewności |
-| Charakter feedu | `SAMPLED / STATION_SCOPED / UNKNOWN` | Znany zakres obserwacji |
-| Zdrowie zasilania | `HEALTHY / DEGRADED / DISCONNECTED` | Problem odbioru danych |
+| Message freshness | `RECENT / STALE / NONE` | Status color and last timestamp |
+| Match | `MATCHED / AMBIGUOUS / CONFLICTED / UNMATCHED` | Evidence description or an uncertainty warning |
+| Feed characteristics | `SAMPLED / STATION_SCOPED / UNKNOWN` | Known observation scope |
+| Feed health | `HEALTHY / DEGRADED / DISCONNECTED` | A data reception problem |
 
-Osobny stan opisuje jakość pozycji (`fresh/stale/unknown`) i rodzaj jej wyznaczenia. Świeża komunikacja nie odświeża starej pozycji ADS-B. „Częściowe” nie może jednocześnie oznaczać niepełnej wiadomości, próbkowanego feedu i słabego dopasowania.
+Separate state describes position quality (`fresh/stale/unknown`) and how the position was determined. Fresh communication does not refresh an old ADS-B position. "Partial" must not simultaneously mean an incomplete message, a sampled feed, and a weak match.
 
-Przyjmujemy do demonstracji półotwarte przedziały: `RECENT` dla wieku `[0,10 min)`, `STALE` dla `[10,60 min)`, `NONE` od 60 min. Wersjonowana polityka zapisuje dokładne granice. To decyzja projektowa, nie właściwość protokołów.
+For the demonstration, we use half-open intervals: `RECENT` for age `[0,10 min)`, `STALE` for `[10,60 min)`, and `NONE` from 60 min onward. The versioned policy records the exact boundaries. This is a design decision, not a property of the protocols.
 
-**Czas backfillu:** wiadomość zaobserwowana o 10:00 i zaimportowana o 12:00 nie robi się świeża o 12:00. `TimeEvidence` rozróżnia `observedAt`, `receiverAt`, `providerAt`, `ingestedAt`; adapter wskazuje podstawę i niepewność. Brak czasu obserwacji nie daje prawa do podstawienia `now` bez oznaczenia. Zbyt przyszłe timestampy trafiają do kontroli jakości.
+**Backfill time:** a message observed at 10:00 and imported at 12:00 does not become fresh at 12:00. `TimeEvidence` distinguishes `observedAt`, `receiverAt`, `providerAt`, and `ingestedAt`; the adapter specifies the time basis and uncertainty. A missing observation time does not justify substituting `now` without marking that substitution. Timestamps too far in the future are sent for quality checks.
 
-Airframes rozróżnia próbkowany globalny stream oraz feed własnych stacji [S5]. Pełny feed jednej stacji nie oznacza pełnego pokrycia samolotu ani regionu. Nie wyliczamy procentu pokrycia z samej liczby ramek.
+Airframes distinguishes a sampled global stream from a feed of the user's own stations [S5]. A complete feed from one station does not imply complete coverage of an aircraft or region. We do not calculate coverage percentages from frame counts alone.
 
-## 8. Publication przed publicznym statusem i wysyłką
+## 8. Publication before public status and delivery
 
-Jednostką uprawnienia jest `VisibilityScope` (np. publiczny zbiór, konkretny właściciel stacji, uprawniona grupa), wraz z wersją polityki. RBAC i prawa do źródła mają odrębne role: to, że użytkownik jest zalogowany, nie oznacza prawa do wszystkich feedów.
+The unit of authorization is `VisibilityScope` (for example, a public collection, a specific station owner, or an authorized group), together with a policy version. RBAC and source access rights have distinct roles: a logged-in user is not automatically entitled to every feed.
 
-`publication` emituje dozwolony wariant danych i wersjonowany grant/wkład. Publiczna mapa, publiczne liczniki i publiczna aktywność korzystają wyłącznie z tego wariantu. Nie wolno publikować liczby ukrytych wiadomości ani świeżości wyznaczonej z danych, których odbiorca nie powinien znać.
+`publication` emits the permitted data variant and a versioned grant/contribution. The public map, public counts, and public activity use only this variant. Hidden message counts or freshness derived from data the recipient must not know about must not be published.
 
-Przy cofnięciu dostępu:
+When access is revoked:
 
-1. `PublicationGrantRevoked` zmienia autorytatywną rewizję polityki.
-2. `availability` wycofuje właściwe wkłady.
-3. Projekcje usuwają wiadomość/licznik lub tworzą nową wersję widoku.
-4. Gateway blokuje wysyłkę według nowej polityki, unieważnia buffer i stare cursory.
-5. Klient otrzymuje remove albo `resync.required`.
+1. `PublicationGrantRevoked` changes the authoritative policy revision.
+2. `availability` withdraws the relevant contributions.
+3. Projections remove the message/count or create a new view version.
+4. The gateway blocks delivery according to the new policy and invalidates the buffer and old cursors.
+5. The client receives remove or `resync.required`.
 
-Asynchroniczne odświeżenie projekcji może być opóźnione, dlatego sam projector nie jest jedyną ochroną uprawnień. Ostateczny odczyt i replay sprawdzają aktualny scope/policyVersion. Dane raz prawidłowo dostarczone do klienta nie dają się „odczytać z powrotem”; zmieniamy przyszłe dostępy i widoki.
+Asynchronous projection updates can lag, so the projector alone is not the only authorization safeguard. Final reads and replay check the current scope/policyVersion. Data already delivered legitimately to a client cannot be "unread"; we change future access and views.
 
-## 9. Granice transakcji i niezawodność
+## 9. Transaction boundaries and reliability
 
-### 9.1 Co jest atomowe
+### 9.1 What is atomic
 
-| Operacja | Jedna transakcja | Po transakcji |
+| Operation | One transaction | After the transaction |
 |---|---|---|
-| Przyjęcie odbioru | dedup dostawy + reception + link do frame + outbox | niezależne dekodowanie / reassembly |
-| Zapis rewizji wiadomości | messageRevision + wejściowe referencje + outbox | korelacja, publication |
-| Zmiana dopasowania | expectedRevision + decision + historia + outbox | aktualizacja uprawnionych wkładów |
-| Konsumpcja zdarzenia | inbox konsumenta + jego lokalne efekty + nowy outbox | ACK / oznaczenie delivery |
-| Przeniesienie wkładu | stary wkład + nowy wkład + status A i B + expiry + outbox | publikacja zmian obu maszyn |
+| Accepting a reception | delivery dedup + reception + frame link + outbox | independent decoding / reassembly |
+| Recording a message revision | messageRevision + input references + outbox | correlation, publication |
+| Changing a match | expectedRevision + decision + history + outbox | update authorized contributions |
+| Consuming an event | consumer inbox + local effects + new outbox | ACK / mark delivery |
+| Moving a contribution | old contribution + new contribution + status of A and B + expiry + outbox | publish changes for both aircraft |
 
-Ostatnia operacja pozostaje lokalna w kontekście availability i danym visibilityScope. Przy późniejszym shardowaniu, gdy A i B trafią do różnych partycji, nie obiecujemy rozproszonej atomowości: wprowadzamy versioned replace/tombstone, stan pośredni i reconciler; preferowane partycjonowanie początkowe utrzymuje tę operację razem.
+The last operation remains local to the availability context and the given visibilityScope. If later sharding places A and B in different partitions, we do not promise distributed atomicity: we introduce versioned replace/tombstone operations, an intermediate state, and a reconciler; the preferred initial partitioning keeps this operation together.
 
-### 9.2 Port transakcyjny ograniczony do use case
+### 9.2 Transaction port restricted to a use case
 
-Zamiast globalnego `UnitOfWork` udostępniającego dowolne tabele wprowadzamy capability-scoped transakcję, np. `CorrelationCommitter`, która może zapisać wyłącznie decyzję, jej wersję i zdarzenia. Use case nie otrzymuje surowego klienta SQL. Generyczna mechanika może obsługiwać transakcje, ale lista dostępnych operacji pozostaje typowana i wąska.
+Instead of a global `UnitOfWork` exposing arbitrary tables, we introduce a transaction restricted to specific capabilities, such as `CorrelationCommitter`, which can write only the decision, its version, and events. The use case does not receive a raw SQL client. Generic mechanics can handle transactions, but the available operations remain typed and narrowly scoped.
 
-Nie łączymy `saveDecision()` i `eventBus.publish()` jako niezależnych kroków krytycznej ścieżki. Awaria między nimi nie może zgubić informacji o zmianie. Outbox jest wpisywany w transakcji decyzji.
+We do not combine `saveDecision()` and `eventBus.publish()` as independent steps on the critical path. A failure between them must not lose information about the change. The outbox is written in the decision's transaction.
 
 ### 9.3 Outbox, dispatch, inbox
 
-W pierwszym deployu można użyć PostgreSQL do trwałej obsługi kolejki. Wtedy potrzebne są:
+The first deployment can use PostgreSQL for durable queue processing. This requires:
 
-- niezmienny rekord outbox;
-- trwały fan-out tworzący delivery dla każdego zarejestrowanego konsumenta;
-- unikalność `(consumerId, eventId)`;
-- claim/lease, liczba prób, termin retry i stan błędu;
-- konsumencki inbox zapisany atomowo z lokalnymi efektami;
-- mechanizm backfillu dla nowego konsumenta i przechowywanie zdarzeń do tego horyzontu.
+- an immutable outbox record;
+- durable fan-out that creates a delivery for each registered consumer;
+- uniqueness of `(consumerId, eventId)`;
+- claim/lease, attempt count, retry deadline, and error state;
+- a consumer inbox written atomically with local effects;
+- a backfill mechanism for a new consumer and event retention covering that horizon.
 
-**Nie używamy samego rosnącego ID jako bezpiecznego checkpointu zatwierdzeń.** Dwie transakcje mogą przydzielić ID w jednej kolejności, a zatwierdzić w drugiej. Dispatcher wyszukuje wszystkie niedostarczone rekordy, nie tylko `id > lastSeen`.
+**We do not use an increasing ID alone as a safe commit checkpoint.** Two transactions may allocate IDs in one order and commit in the opposite order. The dispatcher searches all undelivered records, not just `id > lastSeen`.
 
-`FOR UPDATE SKIP LOCKED` jest użyteczne do claimowania pracy, lecz PostgreSQL zaznacza, że pomijanie blokad daje niespójny widok i służy m.in. kolejkom, nie ogólnemu snapshotowi danych [S6]. Trzymamy transakcje claimowania krótkie; nie otaczamy nimi długiej operacji sieciowej.
+`FOR UPDATE SKIP LOCKED` is useful for claiming work, but PostgreSQL notes that skipping locks provides an inconsistent view and is suitable for uses such as queues, rather than a general data snapshot [S6]. Claim transactions remain short; they do not encompass long network operations.
 
-Po dodaniu JetStream transport zapewnia trwałe dostarczenia, ale adapter DB nadal musi być idempotentny. ACK po DB commit; ponowione eventId nie powtarza efektów. Mechanizmy deduplikacji brokera nie obejmują automatycznie transakcji naszej bazy [S7]. Wzorzec outbox i znaczenie aggregate key opisuje też Debezium [S8].
+After JetStream is added, the transport provides durable deliveries, but the DB adapter must still be idempotent. ACK follows DB commit; a repeated eventId does not repeat effects. Broker deduplication does not automatically cover our database transaction [S7]. Debezium also describes the outbox pattern and the meaning of the aggregate key [S8].
 
-### 9.4 Kolejność i poprawki
+### 9.4 Ordering and corrections
 
-Nie obiecujemy globalnego porządku wszystkich zdarzeń świata. Dla pojedynczego aggregate/stream obowiązuje monotoniczna `aggregateRevision`. Rozróżniamy eventy delta (wymagają kolejnych rewizji, luka wymaga backfill) od pełnego replacement state (może bezpiecznie zastąpić starszą wersję). Consumer nie zgaduje, który rodzaj otrzymał.
+We do not promise a global order for all events. A monotonic `aggregateRevision` applies to a single aggregate/stream. We distinguish delta events, which require consecutive revisions and backfill for gaps, from full replacement state, which can safely replace an older version. A consumer does not guess which kind it has received.
 
-`schemaVersion` oznacza kształt DTO; `aggregateRevision` kolejność zmian; `policyVersion` algorytm; `projectionGeneration` wersję odbudowy widoku. Żadna z tych wartości nie zastępuje pozostałych.
+`schemaVersion` describes the DTO shape; `aggregateRevision` describes change ordering; `policyVersion` identifies the algorithm; `projectionGeneration` identifies a view rebuild version. None of these values replaces another.
 
-## 10. Synchronizacja interfejsu bez luki REST→WS
+## 10. UI synchronization without a REST→WS gap
 
-Kontrakt subskrypcji zawiera `subscriptionId`, `generation`, `cursor`, fingerprint filtrów, visibilityScope oraz policyVersion. Cursory są opaque dla klienta. Nie przekazujemy sekwencji prywatnych zdarzeń jako publicznego licznika.
+The subscription contract includes `subscriptionId`, `generation`, `cursor`, a filter fingerprint, visibilityScope, and policyVersion. Cursors are opaque to the client. We do not expose private event sequences as public counters.
 
-Proponowany protokół:
+Proposed protocol:
 
-1. Klient wysyła `subscribe.viewport` albo `subscribe.aircraft`.
-2. Gateway rejestruje odbiór zmian i rozpoczyna buforowanie dla tego zakresu.
-3. Czyta snapshot i checkpoint **tej samej wersjonowanej projekcji** w spójnym widoku bazy.
-4. Wysyła `snapshot.begin`, rekordy, `snapshot.end(cursor=C, generation=G)`.
-5. Odtwarza z durable logu/bufora tylko zmiany po C, następnie przechodzi na live.
-6. Po zerwaniu klient wraca z C i G; utrata retencji, zmiana uprawnień lub generacji wymusza nowy snapshot.
+1. The client sends `subscribe.viewport` or `subscribe.aircraft`.
+2. The gateway registers for changes and starts buffering for that scope.
+3. It reads a snapshot and checkpoint of **the same versioned projection** in a consistent database view.
+4. It sends `snapshot.begin`, records, and `snapshot.end(cursor=C, generation=G)`.
+5. It replays only changes after C from the durable log/buffer, then switches to live updates.
+6. After disconnection, the client resumes with C and G; expired retention, changed permissions, or a changed generation requires a new snapshot.
 
-`MapProjectionWriter` zapisuje zmianę obiektu i wpis do swojego logu zmian atomowo. Porządek logu w MVP gwarantuje jeden writer / serializowany wiersz licznika dla shardu projekcji, nie sama sekwencja SQL. Przy shardach cursor staje się tokenem obejmującym wektor checkpointów albo stabilny wydzielony stream.
+`MapProjectionWriter` writes the object change and its change-log entry atomically. In the MVP, log ordering is guaranteed by one writer / a serialized counter row for the projection shard, rather than by a SQL sequence alone. With shards, the cursor becomes a token covering a checkpoint vector or a stable, dedicated stream.
 
-Delta ma rodzaj `upsert`, `remove`, `replace` albo `resync.required`. Samolot opuszczający bbox wymaga `remove`. Zmiana filtrów tworzy nową generację subskrypcji. Klient ignoruje spóźnione aktualizacje poprzedniej generacji.
+A delta has the kind `upsert`, `remove`, `replace`, or `resync.required`. An aircraft leaving the bbox requires `remove`. Changing filters creates a new subscription generation. The client ignores delayed updates from the previous generation.
 
-Przeciążenie: pozycje można coalescować do ostatniej wersji samolotu; wiadomości podlegają trwałej paginacji i cursorowi, a overflow daje resync. Nie przekształcamy nieograniczonego bufora WS w przypadkową bazę danych.
+Under overload, positions can be coalesced to the latest version for each aircraft; messages use durable pagination and a cursor, and overflow triggers resync. We do not turn an unbounded WS buffer into an accidental database.
 
-## 11. Model trwały i odczytowy
+## 11. Persistence and read models
 
-| Właściciel | Najważniejsze tabele |
+| Owner | Main tables |
 |---|---|
 | fleet | aircraft, identity_assertions, alias_resolution_history |
 | tracking | position_observations, current_position, session_revisions, session_observation_links |
@@ -326,24 +326,24 @@ Przeciążenie: pozycje można coalescować do ostatniej wersji samolotu; wiadom
 | application read | map_rows, map_change_log, message_timeline, station_cards, projection_generations |
 | platform | context outbox, per-consumer inbox, deliveries, retries, quarantines |
 
-Każdy kontekst posiada migracje i schemat. Wewnątrz kontekstu FK mogą wymuszać niezmienniki. Między kontekstami preferujemy identyfikatory i kontrakty, bez kaskadowego usuwania cudzych danych; rzadki cross-context FK wymaga ADR i świadomie ogranicza przyszłą separację.
+Each context owns its migrations and schema. Foreign keys within a context can enforce invariants. Between contexts, we prefer identifiers and contracts, without cascading deletion of another context's data; a rare cross-context foreign key requires an ADR and deliberately limits future separation.
 
-PostGIS obsługuje przestrzenne filtrowanie pozycji. `observedAt` i `receivedAt` są osobne. Pozycja starsza nie nadpisuje nowszej; równe czasy mają jawny tie-breaker jakości i źródła. Redis jest opcjonalnym cache, nie warunkiem poprawności ani jedynym miejscem historii.
+PostGIS handles spatial position filtering. `observedAt` and `receivedAt` are separate. An older position does not overwrite a newer one; equal timestamps have an explicit tie-breaker based on quality and source. Redis is an optional cache, not a condition for correctness or the sole history store.
 
-Payloady duże: immutable object storage, referencja + checksum + uprawnienia + retencja. Sekrety i signed URLs nie trafiają do domain events. Fakt odebrania pozostaje powiązany z prawdziwym źródłem; replay nie zmienia jego czasu.
+Large payloads use immutable object storage, a reference + checksum + permissions + retention. Secrets and signed URLs do not appear in domain events. A reception fact remains linked to its actual source; replay does not change its time.
 
-Przykładowy projekt kluczowych tabel i transakcji jest w `persistence/REFERENCE_DDL.sql`. Nie został wykonany na produkcyjnej bazie ani poddany testom integracyjnym PostgreSQL; jest materiałem do implementacji adapterów.
+An example design for the key tables and transactions is in `persistence/REFERENCE_DDL.sql`. It has not been executed against a production database or covered by PostgreSQL integration tests; it is material for implementing adapters.
 
-## 12. Granulacja repozytorium
+## 12. Repository granularity
 
-Docelowo:
+Target structure:
 
 ```text
 apps/
-  api/                 # composition root REST, auth, serializacja
-  ingest-worker/       # połączenia źródeł i intake
-  processing-worker/   # decode, correlation, projekcje, expiry
-  web/                 # routing i kompozycja UI
+  api/                 # composition root for REST, auth, serialization
+  ingest-worker/       # source connections and intake
+  processing-worker/   # decode, correlation, projections, expiry
+  web/                 # routing and UI composition
 packages/
   fleet-identity/
   flight-tracking/
@@ -360,9 +360,9 @@ packages/
   kernel/
 ```
 
-Procesy API i worker mogą na starcie współdzielić jeden artefakt wdrożeniowy. Każdy plik nie staje się paczką npm. Eksporty pakietów są małe, a wewnętrzne moduły mają własne entry pointy.
+The API and worker processes can initially share one deployment artifact. A file does not automatically become an npm package. Package exports remain small, and internal modules have their own entry points.
 
-Przykładowy wycinek:
+Example excerpt:
 
 ```text
 correlation/
@@ -396,120 +396,120 @@ correlation/
   composition/create-correlation.ts
 ```
 
-Plik use case zawiera przebieg jednej operacji i przekazanie zależności. Nie jest „god class” tylko dlatego, że orkiestruje kilka kroków. Reguła domain jest najczęściej czystą funkcją. Klasa jest uzasadniona przy własnym stanie/lifecycle, np. połączeniu, schedulerze albo buforze.
+A use-case file contains the flow of one operation and passes dependencies to its steps. Orchestrating several steps does not by itself make it a "god class." A domain rule is usually a pure function. A class is justified when it owns state or a lifecycle, such as a connection, scheduler, or buffer.
 
-## 13. Generyczność z ograniczeniami
+## 13. Generics with limits
 
-Wspólny `kernel` powinien pozostawać mały. Trafiają tam mechanizmy niezależne od lotnictwa, o stabilnej semantyce.
+The shared `kernel` should remain small. It contains mechanisms independent of aviation, with stable semantics.
 
-| Wzorzec | Zastosowanie | Ograniczenie |
+| Pattern | Use | Constraint |
 |---|---|---|
-| `Brand<T, Name>` | Rozróżnienie ID i jednostek | Każda wartość przechodzi parser/konstruktor; brand nie waliduje runtime |
-| `Result<T, E>` | Oczekiwane odmowy i nieprawidłowe wejście | Nie zamieniamy każdej usterki infrastruktury w domenowy `UNMATCHED` |
-| `Rule<Input, Evidence>` | Polityki z identyczną semantyką ewaluacji | Osobna polityka dla samolotu, sesji i deduplikacji |
-| `Parser<Raw, Canonical, Error>` | Mapowanie konkretnego schematu dostawcy | Wire JSON jest walidowany, nie propagowany jako `unknown` wszędzie |
-| `EventEnvelope<Name, Payload>` | Znana nazwa wiąże się ze znanym payloadem | Runtime schema + wersjonowanie; nie sam string + generic |
-| `Transaction<Capabilities>` | Atomowe operacje dozwolone danemu use case | Brak surowego SQL w application i dostępu do całego repo |
-| `CursorPage<T>` | Wyniki paginacji | Cursor związany z zakresem i filtrem, nie liczba stron |
-| `DataTable<Row>` | Wspólne renderowanie tabel | Reguły ramek i kolory nie trafiają do generycznej tabeli |
+| `Brand<T, Name>` | Distinguishing IDs and units | Every value passes through a parser/constructor; a brand does not validate at runtime |
+| `Result<T, E>` | Expected rejections and invalid input | Do not turn every infrastructure failure into a domain `UNMATCHED` result |
+| `Rule<Input, Evidence>` | Policies with identical evaluation semantics | Separate policies for aircraft, sessions, and deduplication |
+| `Parser<Raw, Canonical, Error>` | Mapping a specific provider schema | Wire JSON is validated, rather than propagated everywhere as `unknown` |
+| `EventEnvelope<Name, Payload>` | A known name is associated with a known payload | Runtime schema + versioning; a string + generic alone is insufficient |
+| `Transaction<Capabilities>` | Atomic operations permitted to a given use case | No raw SQL in application code or access to the entire repository |
+| `CursorPage<T>` | Pagination results | The cursor is tied to scope and filters, not a page count |
+| `DataTable<Row>` | Shared table rendering | Frame rules and colors do not belong in a generic table |
 
-Nie używamy `BaseService<T>`, globalnego `GenericRepository<T>.save()` ani katalogu `shared/business`. Porty mają czasowniki domenowe: `appendReception`, `commitLinkRevision`, `replaceContribution`. Minimalne czytniki są dopuszczalne, jeśli rzeczywiście zachowują tę samą semantykę.
+We do not use `BaseService<T>`, a global `GenericRepository<T>.save()`, or a `shared/business` directory. Ports use domain verbs: `appendReception`, `commitLinkRevision`, `replaceContribution`. Minimal readers are acceptable when they actually preserve the same semantics.
 
-Zależność do zegara jest argumentem/portem. Domain nie używa `Date.now()`. Timestamp ma parser, nie tylko cast. `schemaVersion`, `policyVersion` i typy wiadomości publicznych nie są importowane ze środka encji domenowych.
+The clock dependency is an argument/port. The domain does not use `Date.now()`. A timestamp has a parser, not just a cast. `schemaVersion`, `policyVersion`, and public message types are not imported from inside domain entities.
 
-## 14. SOLID i rzeczywiste egzekwowanie granic
+## 14. SOLID and enforceable boundaries
 
-- **SRP:** jeden właściciel decyzji i powód zmiany; osobna polityka, orkiestracja oraz I/O.
-- **OCP:** dodanie adaptera albo parsera przez registry; semantyka nowego protokołu nadal wymaga świadomej decyzji, nie „plugin magic”.
-- **LSP:** wszystkie implementacje portu mają identyczną semantykę braku wyniku, błędu, unikalności i atomowości. Test double nie może udawać gwarancji, których DB adapter nie oferuje.
-- **ISP:** `CandidateReader` nie ma metod usuwania; commit port nie wystawia wyszukiwania wszystkich tabel.
-- **DIP:** composition root wstrzykuje zależności; application nie pobiera ich z globalnego service locatora.
+- **SRP:** one decision owner and reason to change; separate policy, orchestration, and I/O.
+- **OCP:** add an adapter or parser through a registry; a new protocol's semantics still require a deliberate decision, not "plugin magic."
+- **LSP:** all implementations of a port have identical semantics for absent results, errors, uniqueness, and atomicity. A test double cannot pretend to provide guarantees that the DB adapter does not offer.
+- **ISP:** `CandidateReader` has no deletion methods; a commit port does not expose queries across all tables.
+- **DIP:** the composition root injects dependencies; application code does not retrieve them from a global service locator.
 
-W CI:
+In CI:
 
-1. strict TypeScript + `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `useUnknownInCatchVariables`.
-2. Zakaz deep imports między kontekstami i modułami; public entry points.
-3. Zakaz zależności domain→application/infrastructure/framework.
-4. Zakaz cykli zależności i niekontrolowanych dynamic imports.
-5. Osobne projekty TS dla web, backend i kontraktów; project references wspierają podział kompilacji, ale nie zastępują reguł importu [S9].
-6. Testy kontraktów adapterów, migracji i przykładów wire payloadów.
+1. Strict TypeScript + `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `useUnknownInCatchVariables`.
+2. No deep imports between contexts or modules; use public entry points.
+3. No domain→application/infrastructure/framework dependencies.
+4. No dependency cycles or uncontrolled dynamic imports.
+5. Separate TS projects for web, backend, and contracts; project references support compilation boundaries but do not replace import rules [S9].
+6. Contract tests for adapters, migrations, and wire-payload examples.
 
-Heurystyka review: funkcja istotnie przekraczająca 40–60 linii, moduł z wieloma zależnościami albo plik ponad 200 linii wymaga zastanowienia. To nie są mechaniczne zakazy; rozbicie spójnej reguły na sztuczne klasy bywa gorsze.
+Review heuristic: a function significantly exceeding 40–60 lines, a module with many dependencies, or a file exceeding 200 lines calls for review. These are not mechanical prohibitions; splitting a cohesive rule into artificial classes can be worse.
 
-## 15. Frontend: ta sama dyscyplina, odrębny model prezentacji
+## 15. Frontend: the same discipline, a separate presentation model
 
-Stały design system z makiety pozostaje wspólny dla mapy, listy i panelu. Feature code jest rozdzielony na:
+The mockup's consistent design system remains shared across the map, list, and panel. Feature code is divided into:
 
-| Feature | Małe odpowiedzialności |
+| Feature | Small responsibilities |
 |---|---|
 | aircraft-map | viewport, marker style, position layer, selected track, pointer interaction |
-| aircraft-selection | ID wyboru i synchronizacja z URL |
-| message-timeline | paginacja, wiersz wiadomości, payload viewer, opis dopasowania |
-| frame-status | kolor świeżości, opis coverage, problem zasilania |
-| flight-filters | model filtrów, walidacja URL, serializacja query |
-| realtime-session | handshake, generation, cursor, reducer delta, reconnect |
-| receiver-stations | lista stacji, health badge, formularz udostępnienia |
+| aircraft-selection | selection ID and URL synchronization |
+| message-timeline | pagination, message row, payload viewer, match description |
+| frame-status | freshness color, coverage description, feed problem |
+| flight-filters | filter model, URL validation, query serialization |
+| realtime-session | handshake, generation, cursor, delta reducer, reconnect |
+| receiver-stations | station list, health badge, sharing form |
 
-Serwerowe dane trafiają do jednego cache po identyfikatorach i zakresach; UI nie trzyma drugiej niezależnej kopii tych samych lotów w mapie i tabeli. Stan wyboru może być w URL. Biblioteka mapy ma własny render state, ale nie staje się źródłem reguł biznesowych.
+Server data goes into one cache keyed by identifiers and scopes; the UI does not keep a second independent copy of the same flights in the map and table. Selection state can live in the URL. The map library has its own render state, but it does not become the source of business rules.
 
-`applyMapDelta` jest czystym reducerem: sprawdza generation i rewizję, stosuje upsert/remove, zachowuje selection nawet przy utracie punktu, pokazując stan „poza widokiem / brak aktualnej pozycji”. API i WS korzystają z tych samych DTO. Wszystkie statusy mają etykietę tekstową; sam kolor nie niesie całej informacji.
+`applyMapDelta` is a pure reducer: it checks the generation and revision, applies upsert/remove, and preserves the selection even when the point is lost, showing "outside the viewport / no current position." API and WS use the same DTOs. Every status has a text label; color alone does not convey all the information.
 
-## 16. Stack i wdrożenie — utrzymujemy kierunek
+## 16. Stack and deployment — retaining the direction
 
-TypeScript, React + MapLibre, Fastify, PostgreSQL + PostGIS, ręczna kompozycja zależności, walidacja schematów na wejściach. Redis i NATS są opcjonalnymi adapterami włączanymi po określeniu potrzeby. Nie dodajemy kolejnego frameworka tylko do rozdzielenia plików.
+TypeScript, React + MapLibre, Fastify, PostgreSQL + PostGIS, manual dependency composition, and schema validation at inputs. Redis and NATS are optional adapters introduced after a need has been established. We do not add another framework just to separate files.
 
-Na starcie wystarczą procesy `api` i `worker` plus PostgreSQL. Worker może mieć oddzielne pule zadań intake/correlation/projection/expiry, z limitami i budżetami. Własne SDR-y wysyłają dane przez uwierzytelniony adapter feeder, a nie przez współdzielony klient DB.
+Initially, `api` and `worker` processes plus PostgreSQL are sufficient. The worker can have separate intake/correlation/projection/expiry task pools, with limits and budgets. Our own SDRs send data through an authenticated feeder adapter, rather than a shared DB client.
 
-Podział na osobne usługi jest uzasadniony, gdy np. ciężkie dekodowanie ogranicza latency API albo fan-out WebSocket wymaga niezależnego skalowania. Wtedy migrują kontrakty i dane właściciela — nie przypadkowy zbiór klas korzystający z cudzych tabel.
+Splitting into separate services is justified when, for example, heavy decoding affects API latency or WebSocket fan-out needs independent scaling. At that point, the owner's contracts and data migrate together, rather than a random collection of classes using other contexts' tables.
 
-## 17. Testy skupione na ryzyku
+## 17. Tests focused on risk
 
-Pełna macierz jest w `docs/FAILURE_MODES.md`. Najważniejsze przypadki:
+The full matrix is in `docs/FAILURE_MODES.md`. Key cases:
 
-- znany ICAO24, brak sesji → można rozpoznać Aircraft;
-- callsign bez mocnego identyfikatora → brak fałszywego confirmed;
-- dwa pasujące aliasy albo sprzeczne mocne dowody → ambiguity/conflict;
-- stary alias nie pasuje do nowej daty; backfill sprawdza starą datę;
-- powtórzona dostawa nie dubluje odbioru, ale inna stacja jest zachowana;
-- identyczny tekst po godzinie pozostaje osobną transmisją;
-- wiadomość składa się z fragmentów w innej kolejności albo wygasa niekompletna;
-- druga wersja dopasowania przenosi ostatnią wiadomość A→B;
-- stara wersja zdarzenia nie odtwarza tombstone;
-- stary timer nie cofa nowej projekcji;
-- 10 min i 60 min dokładnie odpowiadają zadeklarowanym granicom;
-- crash po commit przed ACK nie dubluje skutku;
-- luka snapshot/stream nie gubi rekordu;
-- zmiana uprawnień usuwa payload, licznik i wkład w status;
-- replay nie produkuje „nowych” świeżych zdarzeń tylko przez nowy ingestion time.
+- known ICAO24, no session → Aircraft can be identified;
+- callsign without a strong identifier → no false confirmed match;
+- two matching aliases or conflicting strong evidence → ambiguity/conflict;
+- an old alias does not match a new date; backfill checks the historical date;
+- a repeated delivery does not duplicate a reception, but a different station is retained;
+- identical text an hour later remains a separate transmission;
+- a message is assembled from out-of-order fragments or expires while incomplete;
+- the second match revision moves the latest message from A→B;
+- an older event revision does not undo a tombstone;
+- an old timer does not roll back a newer projection;
+- 10 min and 60 min exactly match the declared boundaries;
+- a crash after commit and before ACK does not duplicate the effect;
+- the snapshot/stream gap does not lose a record;
+- a permission change removes the payload, count, and status contribution;
+- replay does not produce "new" fresh events solely because of a new ingestion time.
 
-Testy unit są dla reguł, contract dla adapterów, integration dla transakcji/DB, E2E dla przepływu UI. Benchmarki i testy obciążeniowe mają konkretne parametry (region, liczba maszyn, tempo pozycji i ramek, użytkownicy), nie deklarację „obsłuży miliony”.
+Unit tests cover rules, contract tests cover adapters, integration tests cover transactions/DB, and E2E tests cover the UI flow. Benchmarks and load tests have explicit parameters (region, aircraft count, position and frame rates, users), rather than a claim that the system "handles millions."
 
-## 18. Plan następnej implementacji
+## 18. Plan for the next implementation
 
-| Iteracja | Zakres | Dowód zakończenia |
+| Iteration | Scope | Completion evidence |
 |---|---|---|
-| A | Typed kernel, kontrakty, granice importów, fixtures, reference rules | Powtarzalne testy bez feedu |
-| B | Jeden adapter pozycji i jeden poziom danych komunikacji | Zapis z prawdziwym pochodzeniem i czasem; kontrola retry |
-| C | Aircraft correlation + aktualność z retrakcjami | Zweryfikowany zestaw przykładów i brak fałszywych dopasowań w tym zestawie |
-| D | Scope-aware projekcja mapy i wiadomości + snapshot/delta | Reconnect, zmiana filtrów, revocation, brak luk |
-| E | FlightSession correlation, reassembly tam gdzie potrzebne | Brak mylenia kolejnych lotów; odtwarzalność rewizji |
-| F | Stacje, więcej providerów, cache/broker/partycje | Pomiary wskazują potrzebę i potwierdzają korzyść |
+| A | Typed kernel, contracts, import boundaries, fixtures, reference rules | Repeatable tests without a feed |
+| B | One position adapter and one communication data level | Persistence with actual provenance and time; retry control |
+| C | Aircraft correlation + freshness with retractions | A verified sample set with no false matches in that set |
+| D | Scope-aware map and message projection + snapshot/delta | Reconnect, filter changes, revocation, no gaps |
+| E | FlightSession correlation, reassembly where needed | Consecutive flights remain distinct; revisions are reproducible |
+| F | Stations, more providers, cache/broker/partitions | Measurements establish the need and confirm the benefit |
 
-Referencyjny kod dołączony do tej iteracji dotyczy A i wybranych reguł C. Nie ma połączenia do realnych dostawców, serwera HTTP, gotowego dekodera SDR ani adaptera PostgreSQL. Pełna lista wykonanych sprawdzeń i ich ograniczeń znajduje się w `VERIFICATION.md`.
+The reference code included in this iteration covers A and selected rules from C. It has no connection to real providers, HTTP server, ready-to-use SDR decoder, or PostgreSQL adapter. The complete list of checks performed and their limitations is in `VERIFICATION.md`.
 
-## 19. Źródła pierwotne i zakres twierdzeń
+## 19. Primary sources and the scope of claims
 
-Powyższe nazwy modułów, granice, progi i protokoły synchronizacji to propozycje projektu. Źródła służą do sprawdzenia bazowych zasad i możliwości technologii, nie są dowodem gotowości tej aplikacji.
+The module names, boundaries, thresholds, and synchronization protocols above are design proposals. The sources verify underlying principles and technology capabilities; they do not establish that this application is ready.
 
 - **[S1]** Robert C. Martin, [The Single Responsibility Principle](https://blog.cleancoder.com/uncle-bob/2014/05/08/SingleReponsibilityPrinciple.html).
 - **[S2]** Martin Fowler, [Bounded Context](https://martinfowler.com/bliki/BoundedContext.html).
 - **[S3]** libacars, [API Reference — reassembly](https://github.com/szpajder/libacars/blob/master/doc/API_REFERENCE.md).
-- **[S4]** dumpvdl2, [README i wspierane protokoły](https://github.com/szpajder/dumpvdl2).
+- **[S4]** dumpvdl2, [README and supported protocols](https://github.com/szpajder/dumpvdl2).
 - **[S5]** Airframes, [Realtime / Streaming](https://docs.airframes.io/api/realtime/).
 - **[S6]** PostgreSQL, [SELECT — locking clauses](https://www.postgresql.org/docs/current/sql-select.html).
-- **[S7]** NATS, [JetStream](https://docs.nats.io/concepts/jetstream) i [pull consumers](https://docs.nats.io/learn/jetstream/pull-consumers).
+- **[S7]** NATS, [JetStream](https://docs.nats.io/concepts/jetstream) and [pull consumers](https://docs.nats.io/learn/jetstream/pull-consumers).
 - **[S8]** Debezium, [Outbox Event Router](https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html).
 - **[S9]** TypeScript, [Project References](https://www.typescriptlang.org/docs/handbook/project-references.html).
-- **[S10]** Node.js, [Running TypeScript Natively](https://nodejs.org/learn/typescript/run-natively): uruchomienie z usunięciem typów nie jest sprawdzeniem typów.
+- **[S10]** Node.js, [Running TypeScript Natively](https://nodejs.org/learn/typescript/run-natively): running with type stripping is not type checking.
 
-Źródła sprawdzone 18 listopada 2026. Szczegóły dostępu/licencji providerów wymagają uzgodnienia dla faktycznie używanego konta i sposobu publikacji.
+Sources checked on 18 November 2026. Provider access and licensing details require agreement for the account and publication method actually used.

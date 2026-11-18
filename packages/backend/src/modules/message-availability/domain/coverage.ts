@@ -1,5 +1,5 @@
 import type { EpochMillis } from '../../../kernel/time/epoch-millis.ts';
-/** Zakres dostępnych obserwacji. Nie mówi o kondycji połączenia ani emisji maszyny. */
+/** The scope of available observations. It says nothing about connection health or aircraft transmissions. */
 export interface Coverage {
   readonly kind: 'UNKNOWN' | 'SAMPLED' | 'STATION_SCOPED';
   readonly assessedAt: EpochMillis;

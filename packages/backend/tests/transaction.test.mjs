@@ -4,7 +4,7 @@ import { createCorrelateMessage } from '../src/modules/aircraft-correlation/publ
 import { candidate, icao, A } from './fixtures.mjs';
 import { createDemo } from '../src/app/create-demo.ts';
 
-test('commit zapisuje decyzję i outbox atomowo', async () => {
+test('commit persists the decision and outbox atomically', async () => {
   const demo = createDemo();
   const outcome = await demo.correlate(demo.input, null);
   assert.equal(outcome.ok, true);
@@ -12,7 +12,7 @@ test('commit zapisuje decyzję i outbox atomowo', async () => {
   assert.equal(demo.memory.inspect().outbox.length, 1);
 });
 
-test('awaria outboxu wycofuje decyzję; retry może wykonać cały zapis', async () => {
+test('outbox failure rolls back the decision; retry can complete the entire write', async () => {
   const demo = createDemo(); demo.memory.failNextOutboxAppend();
   const failure = await demo.correlate(demo.input, null);
   assert.deepEqual(failure, { ok: false, error: { code: 'COMMIT_FAILED' } });
@@ -22,7 +22,7 @@ test('awaria outboxu wycofuje decyzję; retry może wykonać cały zapis', async
   assert.equal(demo.memory.inspect().outbox.length, 1);
 });
 
-test('expectedRevision blokuje stary zapis i nie produkuje zdarzenia', async () => {
+test('expectedRevision rejects a stale write without producing an event', async () => {
   const demo = createDemo();
   const first = await demo.correlate(demo.input, null);
   const stale = await demo.correlate(demo.input, null);
@@ -31,14 +31,14 @@ test('expectedRevision blokuje stary zapis i nie produkuje zdarzenia', async () 
   assert.equal((await demo.correlate(demo.input, first.value.revision)).value.revision, 2);
 });
 
-test('dwa współbieżne zapisy z tej samej rewizji: dokładnie jeden commit', async () => {
+test('two concurrent writes from the same revision produce exactly one commit', async () => {
   const demo = createDemo();
   const attempts = await Promise.all([demo.correlate(demo.input, null), demo.correlate(demo.input, null)]);
   assert.equal(attempts.filter(result => result.ok).length, 1);
   assert.equal(demo.memory.inspect().outbox.length, 1);
 });
 
-test('capability transakcyjna przestaje działać po zakończeniu callbacku', async () => {
+test('the transaction capability expires when the callback finishes', async () => {
   const demo = createDemo(); let leaked;
   await demo.memory.transaction.run(async writes => { leaked = writes; });
   await assert.rejects(() => leaked.read(demo.message), /expired/);
@@ -46,7 +46,7 @@ test('capability transakcyjna przestaje działać po zakończeniu callbacku', as
 
 
 for (const candidates of [[], [candidate(A, [icao('48C2B4')])]]) {
-  test(`niepełny zbiór ${candidates.length} kandydatów nie zatwierdza MATCHED ani UNMATCHED`, async () => {
+  test(`an incomplete set of ${candidates.length} candidates commits neither MATCHED nor UNMATCHED`, async () => {
     const demo = createDemo();
     const correlate = createCorrelateMessage({
       directory: { async find() { return { completeness:'PARTIAL', reason:'LIMIT_REACHED', revision:'directory/7', candidates }; } },

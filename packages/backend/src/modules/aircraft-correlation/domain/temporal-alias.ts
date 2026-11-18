@@ -3,7 +3,7 @@ import type { StrongIdentifier } from './strong-identifier.ts';
 export type TemporalAlias = {
   readonly identifier: StrongIdentifier;
   readonly validFrom: EpochMillis;
-  /** Przedział domknięty z lewej, otwarty z prawej: [from, until). */
+  /** Half-open interval, inclusive at the start and exclusive at the end: [from, until). */
   readonly validUntil: EpochMillis | null;
 };
 export function isAliasActive(alias: TemporalAlias, at: EpochMillis): boolean {

@@ -1,40 +1,40 @@
-# API demonstratora — v0.1
+# Demonstrator API — v0.1
 
-Adres lokalny: `http://127.0.0.1:3000`. W tym etapie nie ma uwierzytelniania. Serwer wiąże się wyłącznie z interfejsem loopback, a wszystkie identyfikatory samolotów i pozycje pochodzą z fixture.
+Local address: `http://127.0.0.1:3000`. This stage has no authentication. The server binds only to loopback, and all aircraft identifiers and positions come from fixtures.
 
-## Odczyt
+## Reads
 
-| Metoda i ścieżka | Wynik |
+| Method and path | Result |
 |---|---|
-| `GET /healthz` | Żywotność procesu, tryb demo i pamięciowy storage |
-| `GET /api/v1/aircraft` | Lista syntetycznych samolotów z pozycją i dostępnością komunikatów |
-| `GET /api/v1/aircraft/:id` | Szczegóły jednego samolotu i aktualna dostępność |
-| `GET /api/v1/aircraft/:id/messages` | Komunikaty dopasowane do wskazanego samolotu |
-| `GET /api/v1/messages/:id` | Pojedyncza wiadomość i bezpieczny DTO rozstrzygnięcia |
+| `GET /healthz` | Process liveness, demo mode, and in-memory storage |
+| `GET /api/v1/aircraft` | Synthetic aircraft with positions and message availability |
+| `GET /api/v1/aircraft/:id` | One aircraft and its current availability |
+| `GET /api/v1/aircraft/:id/messages` | Messages matched to the specified aircraft |
+| `GET /api/v1/messages/:id` | One message and a safe decision DTO |
 
-Odczyty danych korzystają z koperty `{ "data": ... }`. Brak obiektu to HTTP 404. Lista bez wiadomości jest poprawnym wynikiem z pustą tablicą. Dane pozycji nie symulują ruchu; `position.observedAt` jest stałym czasem zapisanym w fixture.
+Data reads use the `{ "data": ... }` envelope. A missing object returns HTTP 404. An aircraft without messages returns an empty list. Positions do not simulate movement; `position.observedAt` is a fixed timestamp stored in the fixture.
 
-## Przyjęcie wiadomości
+## Message ingestion
 
 `POST /api/v1/demo/messages`, `Content-Type: application/json`.
 
-Przykład kształtu żądania; rzeczywisty przykład używający aktualnego czasu i identyfikatora fixture uruchamia `npm run example`:
+The following illustrates the request shape. Run `npm run example` for a working example using the current time and a fixture identifier:
 
 ```json
 {
   "messageId": "msg_example-1",
   "observedAt": "2026-11-18T12:00:00.000Z",
   "bearer": "VDL2",
-  "text": "Syntetyczna wiadomość demonstracyjna",
+  "text": "Synthetic demonstration message",
   "icao24": "D00001"
 }
 ```
 
-Wymagane pola: `messageId`, `observedAt`, `bearer`, `text`. Opcjonalne identyfikatory: `icao24`, `registration`, `callsign`. Brak mocnego identyfikatora nie jest dowodem dopasowania. Callsign samodzielnie nie potwierdza samolotu. Bearer: `VHF_ACARS`, `VDL2`, `HFDL`, `SATCOM`.
+Required fields: `messageId`, `observedAt`, `bearer`, and `text`. Optional identifiers: `icao24`, `registration`, and `callsign`. The absence of a strong identifier does not establish a match. A callsign alone does not confirm aircraft identity. Supported bearers: `VHF_ACARS`, `VDL2`, `HFDL`, and `SATCOM`.
 
-Klient nie określa kandydatów, `publicEligible`, rewizji uprawnień ani visibility scope. Nieznane pola są odrzucane. `messageId` ma prefiks `msg_`, po którym następuje 1–64 liter ASCII, cyfr lub znaków `-`. Czas obserwacji musi być poprawnym znacznikiem UTC; przyszłe obserwacje są odrzucane.
+The client cannot supply candidates, `publicEligible`, entitlement revisions, or a visibility scope. Unknown fields are rejected. `messageId` starts with `msg_`, followed by 1–64 ASCII letters, digits, or `-` characters. Observation time must be a valid UTC timestamp; future observations are rejected.
 
-Nowy komunikat daje HTTP **201**; identyczne ponowienie daje **200** z `created: false`. Treść odpowiedzi:
+A new message returns HTTP **201**; an identical replay returns **200** with `created: false`. Response body:
 
 ```json
 {
@@ -44,7 +44,7 @@ Nowy komunikat daje HTTP **201**; identyczne ponowienie daje **200** z `created:
       "messageId": "msg_example-1",
       "observedAt": "2026-11-18T12:00:00.000Z",
       "bearer": "VDL2",
-      "text": "Syntetyczna wiadomość demonstracyjna",
+      "text": "Synthetic demonstration message",
       "correlation": {
         "outcome": "MATCHED",
         "aircraftId": "ac_demo-001"
@@ -54,38 +54,38 @@ Nowy komunikat daje HTTP **201**; identyczne ponowienie daje **200** z `created:
 }
 ```
 
-Powyższy przykład używa pierwszego syntetycznego samolotu. Rezultat jest jednym z `MATCHED`, `UNMATCHED`, `AMBIGUOUS`, `CONFLICTED`. Tylko `MATCHED` wskazuje `aircraftId`; pozostałe rezultaty mają `null`. Nierozstrzygnięta wiadomość pozostaje dostępna przez własne ID i nie daje zielonego statusu samolotowi.
+This example uses the first synthetic aircraft. Outcomes are `MATCHED`, `UNMATCHED`, `AMBIGUOUS`, and `CONFLICTED`. Only `MATCHED` identifies an `aircraftId`; other outcomes use `null`. An unresolved message remains accessible by its own ID and does not give an aircraft a green availability indicator.
 
-Zmiana faktów istniejącej wiadomości daje **409 MESSAGE_CONFLICT**. Jawna korekta z historią będzie odrębnym przypadkiem użycia. Idempotencja w tym etapie trwa do restartu procesu.
+Changing the facts of an existing message returns **409 MESSAGE_CONFLICT**. Explicit correction with history will be a separate use case. At this stage, idempotency lasts until the process restarts.
 
-Demo przechowuje maksymalnie **500 wiadomości**. Pole `text` ma limit **4096 jednostek kodowych UTF-16**. Te ograniczenia chronią niewielki pamięciowy zbiór; nie zastępują projektowanej retencji w trwałym magazynie.
+The demo stores at most **500 messages**. The `text` field is limited to **4096 UTF-16 code units**. These limits bound the small in-memory collection; they do not replace the planned retention policy for durable storage.
 
-## Dostępność komunikatów
+## Message availability
 
-`availability.freshness` jest wyliczana według wieku ostatniego kwalifikującego się komunikatu:
+`availability.freshness` uses the age of the latest eligible message:
 
-| Wiek obserwacji | Status |
+| Observation age | Status |
 |---|---|
-| `0 ≤ wiek < 10 min` | `RECENT` |
-| `10 min ≤ wiek < 60 min` | `STALE` |
-| `wiek ≥ 60 min` lub brak wkładu | `NONE` |
+| `0 ≤ age < 10 min` | `RECENT` |
+| `10 min ≤ age < 60 min` | `STALE` |
+| `age ≥ 60 min` or no contribution | `NONE` |
 
-Backfill korzysta z czasu `observedAt`, nie z chwili POST. `lastMessageAt` może pozostać ustawione dla historycznej wiadomości mimo `NONE`. Coverage w demonstratorze to `UNKNOWN`, a zdrowie realnego feedu to `DISCONNECTED`; nie uruchamiamy rzeczywistej transmisji.
+Backfill uses `observedAt`, not the time of the POST request. `lastMessageAt` may remain set for a historical message even when freshness is `NONE`. Demo coverage is `UNKNOWN` and real feed health is `DISCONNECTED`; no live transmission source is connected.
 
-## Błędy
+## Errors
 
-Koperta: `{ "error": { "code": "...", "message": "..." } }`.
+Envelope: `{ "error": { "code": "...", "message": "..." } }`.
 
-| HTTP | Znaczenie |
+| HTTP | Meaning |
 |---|---|
-| 400 | Niepoprawny JSON, kształt, ID, czas lub nieobsługiwane parametry |
-| 404 | Nieznana ścieżka lub nieistniejący obiekt |
-| 405 | Nieobsługiwana metoda dla istniejącej ścieżki |
-| 409 | Inne fakty pod istniejącym ID wiadomości |
-| 413 | Przekroczony limit 16 KiB ciała żądania |
-| 415 | Nieobsługiwany Content-Type |
-| 429 | Osiągnięty limit pamięciowej kolekcji demonstratora |
-| 500 | Błąd wewnętrzny, bez ujawniania stack trace |
-| 503 | Niepełne dane kandydatów, jeśli adapter zwróci taki błąd |
+| 400 | Invalid JSON, shape, ID, timestamp, or unsupported parameters |
+| 404 | Unknown route or missing object |
+| 405 | Unsupported method for an existing route |
+| 409 | Different facts under an existing message ID |
+| 413 | Request body exceeds 16 KiB |
+| 415 | Unsupported Content-Type |
+| 429 | The demonstrator's in-memory collection limit has been reached |
+| 500 | Internal error, without exposing a stack trace |
+| 503 | Incomplete candidate data, when reported by an adapter |
 
-Nie ma paginacji ani filtrów przestrzennych w API v0.1. Ich kontrakt powstanie wraz z trwałym modelem odczytu; nie akceptujemy nieobsługiwanych parametrów w sposób pozornie skuteczny.
+API v0.1 has no pagination or spatial filters. Their contracts will be introduced with the durable read model. Unsupported parameters are rejected rather than silently ignored.

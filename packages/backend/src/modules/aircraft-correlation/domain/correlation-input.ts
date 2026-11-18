@@ -3,7 +3,7 @@ import type { EpochMillis } from '../../../kernel/time/epoch-millis.ts';
 import type { StrongIdentifier } from './strong-identifier.ts';
 export interface CorrelationInput {
   readonly messageId: MessageId;
-  /** Czas dotyczy wiadomości/obserwacji, nie chwili przetworzenia backfillu. */
+  /** The timestamp belongs to the message/observation, not to the time when backfill is processed. */
   readonly effectiveAt: EpochMillis;
   readonly identifiers: readonly StrongIdentifier[];
   readonly callsign: string | null;

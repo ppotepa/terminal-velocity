@@ -1,26 +1,26 @@
-# Kontrola granic architektury
+# Architecture boundary checks
 
-Uruchomienie z katalogu głównego, po `npm ci`:
+Run from the repository root after `npm ci`:
 
 ```sh
 npm run check:boundaries
 node --test scripts/architecture/*.test.mjs
 ```
 
-Checker używa parsera AST TypeScript. Obejmuje pliki TS/JS w `src` jawnie wymienionych workspace'ów. Rozpoznaje importy statyczne, importy tylko typów, re-eksporty, wyrażenia `import("...").Type`, dynamiczne importy z literałem, `import = require`, literalne `require` oraz referencje triple-slash. Komentarze i napisy zawierające pozorny import nie tworzą zależności. Dynamiczna nazwa modułu jest błędem: nie można potwierdzić jej granic statycznie.
+The checker uses the TypeScript AST parser. It covers TS/JS files under `src` in explicitly listed workspaces. It recognizes static imports, type-only imports, re-exports, `import("...").Type` expressions, dynamic imports with literal specifiers, `import = require`, literal `require` calls, and triple-slash references. Comments and strings containing apparent imports do not create dependencies. A dynamic module name is an error because its boundaries cannot be verified statically.
 
-| Plik | Jedyna główna odpowiedzialność |
+| File | Single primary responsibility |
 | --- | --- |
-| `project.mjs` | Odkrycie workspace'ów, plików źródłowych i ich właścicieli. |
-| `parse.mjs` | Odczyt krawędzi zależności z AST. |
-| `resolve.mjs` | Rozwiązanie ścieżki i publicznego eksportu pakietu. |
-| `policy.mjs` | Jawne dozwolone kierunki zależności. |
-| `check.mjs` | Orkiestracja analizy i wykrywanie cykli, również typów. |
-| `report.mjs` | Format czytelnych diagnostyk z plikiem i pozycją. |
-| `check-boundaries.test.mjs` | Regresje naruszeń i poprawnych wyjątków. |
+| `project.mjs` | Discover workspaces, source files, and their owners. |
+| `parse.mjs` | Read dependency edges from the AST. |
+| `resolve.mjs` | Resolve paths and public package exports. |
+| `policy.mjs` | Define explicitly allowed dependency directions. |
+| `check.mjs` | Orchestrate analysis and detect cycles, including type dependencies. |
+| `report.mjs` | Format readable diagnostics with file names and positions. |
+| `check-boundaries.test.mjs` | Cover violations and valid exceptions with regression tests. |
 
-Kernel zależy wyłącznie od kernela. Kontrakty zależą od kernela i kontraktów. Domena modułu zależy od własnej domeny, kontraktów i kernela. Warstwy application/ports komunikują się z innymi modułami przez `public/index.ts`; nie wiążą adapterów. Mogą korzystać z lokalnego czystego `public/types.ts`, aby tworzyć jawne DTO bez importu fabryki. Typy z Node i pakiety zewnętrzne są niedozwolone w tych czystych warstwach.
+The kernel depends only on the kernel. Contracts depend on the kernel and contracts. A module's domain depends on its own domain, contracts, and the kernel. The application/ports layers communicate with other modules through `public/index.ts`; they do not wire adapters. They may use a local, pure `public/types.ts` to define explicit DTOs without importing a factory. Node types and external packages are forbidden in these pure layers.
 
-Composition root może wiązać konkretne adaptery. `demo/public/index.ts` jest jedynym publicznym wejściem, które może eksportować fabrykę z własnej warstwy composition. Produkcyjne moduły core nie zależą od demo. API może korzystać z Node oraz zadeklarowanych eksportów pakietu backend; względne odwołanie API do pliku backendu jest zabronione nawet wtedy, gdy plik leży w `public`.
+The composition root may wire concrete adapters. `demo/public/index.ts` is the only public entry point allowed to export a factory from its own composition layer. Production core modules do not depend on the demo. The API may use Node and the backend package's declared exports; a relative reference from the API to a backend file is forbidden even when that file is under `public`.
 
-Checker wymaga jawnych ścieżek workspaces i jawnych eksportów pakietów; wzorce glob/pattern exports, symlinki źródeł oraz importy zasobów spoza sprawdzanego kodu nie są obsługiwane. Analiza zależności nie zastępuje semantycznego typechecku, testów zachowania ani kontroli uprawnień podczas wykonania. Nie jest zabezpieczeniem przed celowym ukrywaniem kodu w `eval`, generowaniu kodu czy niestandardowym loaderze.
+The checker requires explicit workspace paths and explicit package exports; glob/pattern exports, source symlinks, and imports of resources outside the checked code are unsupported. Dependency analysis does not replace semantic type checking, behavioral tests, or runtime authorization checks. It is not a defense against code deliberately hidden in `eval`, code generation, or a custom loader.

@@ -6,69 +6,69 @@ import { A, B, M, M2, at, rev, assign, take } from './fixtures.mjs';
 const policy = take(freshnessPolicy(600_000, 3_600_000));
 const update = (state, change, now) => take(updateAvailability(state, change, at(now), policy));
 
-test('granice świeżości są jednoznaczne i nie wymagają nowego komunikatu', () => {
+test('freshness boundaries are unambiguous and require no new message', () => {
   assert.equal(classifyAge(at(1000), at(600_999), policy), 'RECENT');
   assert.equal(classifyAge(at(1000), at(601_000), policy), 'STALE');
   assert.equal(classifyAge(at(1000), at(3_600_999), policy), 'STALE');
   assert.equal(classifyAge(at(1000), at(3_601_000), policy), 'NONE');
 });
 
-test('niepoprawna polityka jest odrzucona', () => {
+test('an invalid policy is rejected', () => {
   for (const pair of [[0,100], [100,100], [-1,10], [50,20], [1.5,10]])
     assert.equal(freshnessPolicy(...pair).ok, false);
 });
 
-test('spóźniona starsza wiadomość nie cofa latest i nie wydłuża jego TTL', () => {
+test('a delayed older message neither regresses latest nor extends its TTL', () => {
   let s = update(emptyAvailability(), assign(A,1_000_000), 1_001_000);
   s = update(s, assign(A,100,1,M2), 1_001_000);
   assert.equal(s.snapshots.get(A).lastEligibleMessageAt,1_000_000);
   assert.equal(s.snapshots.get(A).nextTransitionAt,1_600_000);
 });
 
-test('sam backfill sprzed godziny nie daje świeżego zielonego statusu', () => {
+test('hour-old backfill alone does not produce a fresh green status', () => {
   const s = update(emptyAvailability(), assign(A,100), 3_600_100);
   assert.equal(s.snapshots.get(A).freshness,'NONE');
 });
 
-test('czas z przyszłości jest odrzucony, a nie zapisany jako wiecznie świeży', () => {
+test('a future timestamp is rejected rather than stored as permanently fresh', () => {
   assert.equal(updateAvailability(emptyAvailability(), assign(A,200), at(100), policy).error.code,'FUTURE_OBSERVATION');
 });
 
-test('korekta przypisania A→B wycofuje wkład z A i dodaje go do B', () => {
+test('correcting assignment A→B removes the contribution from A and adds it to B', () => {
   let s = update(emptyAvailability(), assign(A,1000),1000);
   s = update(s,assign(B,1000,2),1000);
   assert.equal(s.snapshots.get(A).freshness,'NONE');
   assert.equal(s.snapshots.get(B).freshness,'RECENT');
 });
 
-test('wycofanie najnowszej wiadomości przywraca poprzednią właściwą', () => {
+test('retracting the latest message restores the previous eligible message', () => {
   let s = update(emptyAvailability(), assign(A,1000,1,M2),2000);
   s = update(s,assign(A,2000),2000);
   s = update(s,{type:'RETRACTED',messageId:M,revision:rev(2)},2000);
   assert.equal(s.snapshots.get(A).lastEligibleMessageAt,1000);
 });
 
-test('tombstone blokuje spóźnione wskrzeszenie cofniętego powiązania', () => {
+test('a tombstone blocks delayed revival of a retracted assignment', () => {
   let s = update(emptyAvailability(),assign(A,1000),1000);
   s = update(s,{type:'RETRACTED',messageId:M,revision:rev(2)},1000);
   const after = update(s,assign(A,1000,1),1000);
   assert.equal(after,s); assert.equal(after.snapshots.get(A).freshness,'NONE');
 });
 
-test('ta sama rewizja jest idempotentna, inna treść pod nią jest błędem', () => {
+test('the same revision is idempotent; different content at that revision is an error', () => {
   const change = assign(A,1000); const s = update(emptyAvailability(),change,1000);
   assert.equal(update(s,change,1000),s);
   assert.equal(updateAvailability(s,assign(B,1000),at(1000),policy).error.code,'REVISION_COLLISION');
 });
 
-test('stary timer expectedRevision nie gasi nowej wiadomości', () => {
+test('an old expectedRevision timer does not expire a newer message', () => {
   let s = update(emptyAvailability(),assign(A,1000),1000); const old = s.snapshots.get(A);
   s = update(s,assign(A,2000,1,M2),2000);
   const outcome = take(expireAvailability(s,{aircraftId:A,expectedRevision:old.revision,dueAt:old.nextTransitionAt},at(601_000),policy));
   assert.equal(outcome.outcome,'STALE_TIMER'); assert.equal(outcome.state,s);
 });
 
-test('timer przed terminem nic nie zmienia, a na progu przełącza stan', () => {
+test('a timer changes nothing before its deadline and transitions at the threshold', () => {
   const s = update(emptyAvailability(),assign(A,1000),1000); const snap = s.snapshots.get(A);
   const timer = {aircraftId:A,expectedRevision:snap.revision,dueAt:snap.nextTransitionAt};
   assert.equal(take(expireAvailability(s,timer,at(600_999),policy)).outcome,'NOT_DUE');
@@ -76,20 +76,20 @@ test('timer przed terminem nic nie zmienia, a na progu przełącza stan', () => 
   assert.equal(expired.outcome,'APPLIED'); assert.equal(expired.state.snapshots.get(A).freshness,'STALE');
 });
 
-test('opóźniony scheduler przechodzi bezpośrednio do NONE', () => {
+test('a delayed scheduler transitions directly to NONE', () => {
   const s = update(emptyAvailability(),assign(A,1000),1000); const snap = s.snapshots.get(A);
   const outcome = take(expireAvailability(s,{aircraftId:A,expectedRevision:snap.revision,dueAt:snap.nextTransitionAt},at(3_601_000),policy));
   assert.equal(outcome.state.snapshots.get(A).freshness,'NONE');
   assert.equal(outcome.state.snapshots.get(A).nextTransitionAt,null);
 });
 
-test('cofnięcie publikowalności usuwa publiczny wkład', () => {
+test('revoking publication eligibility removes the public contribution', () => {
   let s = update(emptyAvailability(),assign(A,1000),1000);
   s = update(s,assign(A,1000,2,M,{publicEligible:false}),1000);
   assert.equal(s.snapshots.get(A).freshness,'NONE');
 });
 
-test('źródło próbkowane/awaria nie fałszuje freshness', () => {
+test('sampling or a source failure does not distort freshness', () => {
   const s = update(emptyAvailability(),assign(A,1000),1000);const snapshot = s.snapshots.get(A);
   const coverage = {kind:'SAMPLED',assessedAt:at(1000)};
   const sampled = availabilityView(snapshot,coverage,{state:'HEALTHY',assessedAt:at(1000)});
@@ -99,7 +99,7 @@ test('źródło próbkowane/awaria nie fałszuje freshness', () => {
   assert.notEqual(sampled.feedHealth.state,degraded.feedHealth.state);
 });
 
-test('odczyt świeżości dla konkretnego bearer nie pożycza wyniku innego kanału', () => {
+test('freshness for a specific bearer does not reuse another channel result', () => {
   let s = update(emptyAvailability(),assign(A,1000),2000);
   s = update(s,assign(A,2000,1,M2,{bearer:'HFDL'}),2000);
   assert.equal(latestEligibleContribution(s.ledger,A,at(2000),'VDL2'),1000);
@@ -107,7 +107,7 @@ test('odczyt świeżości dla konkretnego bearer nie pożycza wyniku innego kana
 });
 
 
-test('mutacja wejściowego obiektu nie zmienia wcześniej zapisanego wkładu', () => {
+test('mutating the input object does not change a previously stored contribution', () => {
   const incoming = assign(A,1000);
   const s = update(emptyAvailability(),incoming,1000);
   incoming.contribution.observedAt = at(9000);
@@ -119,13 +119,13 @@ test('mutacja wejściowego obiektu nie zmienia wcześniej zapisanego wkładu', (
   assert.equal(s.snapshots.get(A).lastEligibleMessageAt,1000);
 });
 
-test('overflow terminu po nowym wkładzie jest jawnym Result error', () => {
+test('deadline overflow after a new contribution returns an explicit Result error', () => {
   const latest = Number.MAX_SAFE_INTEGER;
   const outcome = updateAvailability(emptyAvailability(),assign(A,latest),at(latest),policy);
   assert.deepEqual(outcome,{ok:false,error:{code:'TIME_RANGE_OVERFLOW'}});
 });
 
-test('overflow kolejnego terminu przy wygaśnięciu nie mutuje istniejącego stanu', () => {
+test('overflow of the next deadline during expiry does not mutate existing state', () => {
   const huge = take(freshnessPolicy(1,Number.MAX_SAFE_INTEGER));
   const s = take(updateAvailability(emptyAvailability(),assign(A,1),at(1),huge));
   const snap = s.snapshots.get(A);

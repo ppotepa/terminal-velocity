@@ -10,7 +10,7 @@ export function decideAircraftMatch(input: CorrelationInput, candidates: readonl
   const catalogConflict = findCatalogConflict(candidates, input.effectiveAt);
   if (catalogConflict !== null) return { ...base, status: 'CONFLICTED', reason: catalogConflict };
   if (input.identifiers.length === 0) return { ...base, status: 'UNMATCHED', reason: 'NO_STRONG_IDENTIFIERS' };
-  // Dwie znane, silne przesłanki nie mogą wskazywać rozłącznych zbiorów maszyn.
+  // Two known strong identifiers must not point to disjoint sets of aircraft.
   const owners = input.identifiers.map(identifier => new Set(evaluations.filter(item =>
     item.evidence.some(evidence => evidence.verdict === 'SUPPORT' &&
       evidence.identifier.kind === identifier.kind && evidence.identifier.value === identifier.value))

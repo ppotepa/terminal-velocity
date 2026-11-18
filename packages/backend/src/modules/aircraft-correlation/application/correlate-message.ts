@@ -15,7 +15,7 @@ export interface CorrelationDependencies {
 }
 export function createCorrelateMessage(dependencies: CorrelationDependencies) {
   return async (input: CorrelationInput, expectedRevision: Revision | null) => {
-    // Odczyt katalogu jest wersjonowany; zmiana katalogu uruchamia odrębny replay.
+    // The catalog read is versioned; a catalog change triggers a separate replay.
     const snapshot = await dependencies.directory.find(input);
     if (snapshot.completeness !== 'COMPLETE')
       return err({ code: 'CANDIDATE_SET_INCOMPLETE' as const, reason: snapshot.reason });

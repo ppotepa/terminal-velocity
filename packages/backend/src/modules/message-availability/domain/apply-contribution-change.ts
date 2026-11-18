@@ -18,8 +18,8 @@ Result<AppliedContribution, { readonly code: 'REVISION_COLLISION' }> {
   const affected = new Set<AircraftId>();
   if (old?.type === 'ASSIGNED') affected.add(old.contribution.aircraftId);
   if (change.type === 'ASSIGNED') affected.add(change.contribution.aircraftId);
-  // Właściciel wywołania może zachować mutable obiekt mimo readonly w TS.
-  // Nie wolno dzielić z nim referencji przechowywanej w projekcji.
+  // The caller may retain a mutable object despite readonly types in TS.
+  // Do not share the reference stored in the projection with the caller.
   const snapshot: ContributionChange = change.type === 'ASSIGNED'
     ? Object.freeze({ ...change, contribution: Object.freeze({ ...change.contribution }) })
     : Object.freeze({ ...change });
