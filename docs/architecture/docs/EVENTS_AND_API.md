@@ -1,68 +1,68 @@
-# Kontrakty między modułami i interfejsem
+# Contracts between modules and the interface
 
-Kontrakty poniżej są propozycją docelową. `reference/` implementuje wewnętrzne typy wybranych reguł, nie całą serializację sieciową. Przykładowy JSON Schema trzech rodzin eventów jest w `../contracts/state-events.schema.json`.
+The contracts below are a proposal for the target system. `reference/` implements internal types for selected rules, not the entire network serialization layer. Example JSON Schemas for three event families are in `../contracts/state-events.schema.json`.
 
-## 1. Zdarzenie to zatwierdzony fakt
+## 1. An event is a committed fact
 
-| Rodzina zdarzeń | Producent | Konsumenci | Powód publikacji |
+| Event family | Producer | Consumers | Reason for publication |
 |---|---|---|---|
-| `communications.reception.accepted.v1` | communications | receiver health, decode processing | Zachowano nowy potwierdzony odbiór |
-| `communications.message.revised.v1` | communications | correlation, publication | Powstała nowa interpretacja / kompletna wiadomość |
-| `fleet.identity.revised.v1` | fleet-identity | indeks korelacji, reprocess planner | Zmieniło się ważne powiązanie identyfikatora |
-| `tracking.session.revised.v1` | flight-tracking | flight-link correlation | Zmieniła się sesja lotu lub jej granice |
-| `correlation.aircraft-link.revised.v1` | correlation | publication, audyt | Rozstrzygnięto lub skorygowano powiązanie maszyny |
-| `correlation.flight-link.revised.v1` | correlation | publication, odczyt sesji | Osobno rozstrzygnięto sesję lotu |
-| `publication.message-contribution.replaced.v1` | publication | availability, message timeline | Pełny nowy stan dozwolonego wkładu w danym scope |
-| `availability.aircraft.changed.v1` | availability | map projection, powiadomienia zakresu | Zmienił się wynik statusu dla maszyny |
-| `map.projection.changed.v1` | read-model writer | delivery | Powstała wersjonowana delta widoku |
+| `communications.reception.accepted.v1` | communications | receiver health, decode processing | A new confirmed reception was retained |
+| `communications.message.revised.v1` | communications | correlation, publication | A new interpretation or complete message was produced |
+| `fleet.identity.revised.v1` | fleet-identity | correlation index, reprocess planner | A significant identifier association changed |
+| `tracking.session.revised.v1` | flight-tracking | flight-link correlation | A flight session or its boundaries changed |
+| `correlation.aircraft-link.revised.v1` | correlation | publication, audit | An aircraft association was resolved or corrected |
+| `correlation.flight-link.revised.v1` | correlation | publication, session reads | The flight session was resolved separately |
+| `publication.message-contribution.replaced.v1` | publication | availability, message timeline | The full new state of a permitted contribution in the given scope |
+| `availability.aircraft.changed.v1` | availability | map projection, scope notifications | The aircraft status result changed |
+| `map.projection.changed.v1` | read-model writer | delivery | A versioned view delta was produced |
 
-Nie publikujemy osobnego trwałego eventu tylko dlatego, że wykonano `normalizeString`, `computeHash` albo jedną regułę porównania. Są to lokalne kroki i funkcje. Event wychodzi po znaczącej granicy commit.
+We do not publish a separate durable event merely because `normalizeString`, `computeHash` or one comparison rule ran. These are local steps and functions. An event is emitted after a meaningful commit boundary.
 
-## 2. Koperta i rewizje
+## 2. Envelope and revisions
 
-Koperta przykładu ma eventId, type, schemaVersion, stream key/revision, occurredAt, recordedAt, causationId, traceId i typowany payload.
+The example envelope contains eventId, type, schemaVersion, stream key/revision, occurredAt, recordedAt, causationId, traceId and a typed payload.
 
-| Pole | Gwarancja |
+| Field | Guarantee |
 |---|---|
-| `eventId` | Stabilne przy retry tego samego faktu; inne dla nowej rewizji |
-| `schemaVersion` | Wersja struktury wire, niezależna od wersji algorytmu |
-| `stream.key` | Zakres porządku, np. message albo `(scope,message)` |
-| `stream.revision` | Monotoniczna rewizja tylko wewnątrz tego streamu |
-| `occurredAt` | Czas decyzji/faktu domenowego, niekoniecznie czas transmisji RF |
-| `recordedAt` | Czas zapisu do outboxu |
-| `causationId` | Przyczyna, jeśli była innym zdarzeniem |
-| `traceId` | Diagnostyka; nie identyfikuje biznesowo danych |
+| `eventId` | Stable when retrying the same fact; different for a new revision |
+| `schemaVersion` | Wire structure version, independent of the algorithm version |
+| `stream.key` | Ordering scope, such as message or `(scope,message)` |
+| `stream.revision` | Monotonic revision only within this stream |
+| `occurredAt` | Time of the domain decision or fact, not necessarily the RF transmission time |
+| `recordedAt` | Time of the outbox write |
+| `causationId` | The cause, if it was another event |
+| `traceId` | Diagnostics; not a business identifier for the data |
 
-`observedAt` dla świeżości znajduje się w payloadzie wkładu. Nie podstawiamy za niego occurredAt/recordedAt. Eventy w tych przykładach mają pełny replacement state. Historia `previous` służy audytowi; projector wycofuje stan faktycznie zapisany lokalnie.
+The `observedAt` used for freshness is in the contribution payload. We do not substitute occurredAt or recordedAt for it. Events in these examples carry full replacement state. The `previous` history supports auditing; the projector retracts the state actually stored locally.
 
-### Dodatkowe niezmienniki poza JSON Schema
+### Additional invariants beyond JSON Schema
 
-- stream key jest wyprowadzony z właściwego klucza domenowego, a nie dowolną etykietą;
-- `contributionRevision == stream.revision` w rodzinie publikowanego wkładu;
-- eventId istniejące wcześniej nie może dostać innego payloadu;
-- wyższa rewizja może zastąpić starszą tylko dla tego samego klucza;
-- `RECENT` wymaga istniejącego, dozwolonego i dostatecznie świeżego wkładu;
-- daty i progi są zgodne z właściwą freshnessPolicyVersion;
-- UUID/string z JSON musi przejść fabrykę domenowego ID;
-- odbiorca ma uprawnienie do danego visibilityScope;
-- grant i assignment są wejściem do osobnej contributionRevision, nie wspólną skalą liczb.
+- The stream key is derived from the appropriate domain key, not an arbitrary label.
+- `contributionRevision == stream.revision` in the published contribution family.
+- An existing eventId cannot receive a different payload.
+- A higher revision can replace an older one only for the same key.
+- `RECENT` requires an existing, permitted and sufficiently fresh contribution.
+- Dates and thresholds comply with the applicable freshnessPolicyVersion.
+- A UUID/string from JSON must pass through the domain ID factory.
+- The recipient is authorized for the given visibilityScope.
+- Grants and assignments are inputs to a separate contributionRevision, not a shared numeric scale.
 
-JSON Schema odrzuca niepoprawną strukturę. Nie wykonuje autoryzacji ani nie dowodzi, że aircraftId rzeczywiście istnieje.
+JSON Schema rejects invalid structure. It does not perform authorization or prove that an aircraftId actually exists.
 
-## 3. Błędy wymagają różnych reakcji
+## 3. Errors require different responses
 
-| Wynik | Znaczenie | Reakcja |
+| Result | Meaning | Response |
 |---|---|---|
-| `UNMATCHED` | Poprawnie wykonano reguły, dowodów nie wystarczyło | Zachować fakt; reprocess przy nowej wiedzy |
-| `AMBIGUOUS` | Więcej niż jeden kandydat | Nie wybierać losowo; pokazać/utrwalić przyczynę |
-| `CONFLICTED` | Mocne dowody albo katalog są sprzeczne | Zatrzymać auto-match, zachować evidence |
-| `CANDIDATE_SET_INCOMPLETE` | Indeks lub zapytanie nie dostarczyło pełnych danych | Retry/backfill; brak nowej decyzji domenowej |
-| `VERSION_CONFLICT` | Ktoś zatwierdził nowszą zmianę | Odczyt nowszego stanu i świadoma ponowna ocena |
-| `INVALID_INPUT` | Niepoprawny kontrakt albo wartość | Odrzucenie/quarantine; brak retry bez poprawy |
-| `TEMPORARY_SOURCE_FAILURE` | Niedostępny provider/budget | Kontrolowane retry z terminem |
-| `ACCESS_REVOKED` | Zakres nie jest już dostępny | Blokada/revoke, unieważnienie starego resume |
+| `UNMATCHED` | Rules completed correctly, but the evidence was insufficient | Retain the fact; reprocess when new knowledge becomes available |
+| `AMBIGUOUS` | More than one candidate | Do not select randomly; display or persist the reason |
+| `CONFLICTED` | Strong evidence or the catalog is contradictory | Stop automatic matching and retain the evidence |
+| `CANDIDATE_SET_INCOMPLETE` | The index or query did not supply complete data | Retry/backfill; no new domain decision |
+| `VERSION_CONFLICT` | Another operation committed a newer change | Read the newer state and deliberately reevaluate |
+| `INVALID_INPUT` | Invalid contract or value | Reject/quarantine; no retry without correction |
+| `TEMPORARY_SOURCE_FAILURE` | Provider or request budget unavailable | Controlled retry with a deadline |
+| `ACCESS_REVOKED` | The scope is no longer accessible | Block/revoke access and invalidate the old resume token |
 
-## 4. REST: osobno maszyna i lot
+## 4. REST: separate aircraft and flight resources
 
 ```http
 GET /api/v1/map/aircraft?bbox=...&bearer=VDL2&freshness=RECENT
@@ -77,15 +77,15 @@ GET /api/v1/stations
 POST /api/v1/feeder/deliveries
 ```
 
-Panel otwarty z samolotu domyślnie pokazuje wiadomości maszyny. Przełączenie na konkretną sesję zawęża wynik; brak sessionId nie usuwa prawidłowo powiązanych wiadomości z widoku samolotu.
+A panel opened from an aircraft shows that aircraft's messages by default. Selecting a specific session narrows the results; a missing sessionId does not remove correctly associated messages from the aircraft view.
 
-`messages` zwraca `dataLevel` i dozwolone reprezentacje (`summary`, `decoded`, `raw available`, `withheld`). Endpoint nie deklaruje raw frame, jeśli źródło go nie dostarczyło. Cursor historii jest związany z filtrem, zakresem uprawnień i stabilnym kluczem sortowania `(observedAt,messageId,revision)`. Korekty historii obsługujemy przez rewizje/re-fetch; nie obiecujemy niezmiennego snapshotu wielodniowej paginacji bez jawnego snapshot tokena.
+`messages` returns `dataLevel` and permitted representations (`summary`, `decoded`, `raw available`, `withheld`). The endpoint does not advertise a raw frame if the source did not provide one. A history cursor is bound to the filter, permission scope and stable sort key `(observedAt,messageId,revision)`. History corrections use revisions or re-fetching; we do not promise an immutable snapshot across days of pagination without an explicit snapshot token.
 
-Upload feedera używa eventId/source epoch i weryfikowanego tokenu. ACK przyjęcia znaczy „trwale przyjęto delivery”, a nie „ramka poprawnie zdekodowana i już opublikowana”. Stan przetwarzania jest osobnym kontraktem.
+Feeder uploads use eventId/source epoch and a verified token. An acceptance ACK means “delivery durably accepted,” not “frame successfully decoded and already published.” Processing status is a separate contract.
 
 ## 5. WebSocket
 
-Żądanie subskrypcji:
+Subscription request:
 
 ```json
 {
@@ -97,7 +97,7 @@ Upload feedera używa eventId/source epoch i weryfikowanego tokenu. ACK przyjęc
 }
 ```
 
-Snapshot jest opatrzony subscriptionId, generation i opaque cursor. Dla dużej mapy może być chunkowany; klient stosuje go jako całość dopiero po `snapshot.end`.
+A snapshot carries a subscriptionId, generation and opaque cursor. Large map snapshots may be chunked; the client applies the complete snapshot only after `snapshot.end`.
 
 ```json
 {
@@ -112,12 +112,12 @@ Snapshot jest opatrzony subscriptionId, generation i opaque cursor. Dla dużej m
 }
 ```
 
-Delta pozycji nie może samodzielnie kasować metadanych ramek. Preferujemy wyraźny pełny `AircraftMapView` dla upsert albo wersjonowane fragmenty z jawnie niezależnymi rewizjami. Pusty/null payload nie ma wielu ukrytych znaczeń.
+A position delta must not independently erase frame metadata. Prefer an explicit, complete `AircraftMapView` for an upsert, or versioned fragments with explicitly independent revisions. An empty/null payload must not have multiple hidden meanings.
 
-Każdy cursor odpowiada konkretnemu scope i zestawowi filtrów. Serwer nie ufa scope wskazanemu przez klienta; wyznacza go z uprawnień. Po zmianie uprawnień token jest nieważny nawet wtedy, gdy jego zakres czasu mieści się w retencji logu.
+Each cursor corresponds to a specific scope and filter set. The server does not trust a client-supplied scope; it derives the scope from permissions. After permissions change, the token is invalid even if its time range remains within the log retention window.
 
-## 6. Zmiana wersji
+## 6. Version changes
 
-Wprowadzamy nowy event schema w trybie expand/contract: konsumenci obsługują starą i nową wersję w okresie migracji, producent przełącza się kontrolowanie, a stara obsługa znika po wygaśnięciu horyzontu replay. Jeśli upcaster nie może odtworzyć brakującego znaczenia, event trafia do jawnej ścieżki migracji; nie tworzy zmyślonych danych.
+Introduce a new event schema using expand/contract: consumers support old and new versions during migration, the producer switches in a controlled manner, and old-version support is removed after the replay horizon expires. If an upcaster cannot reconstruct missing semantics, the event goes through an explicit migration path; it does not create invented data.
 
-Zmiana policyVersion może wymagać reprocess bez zmiany JSON schema. Zmiana projekcji uruchamia nową generation, budowę od zera i cutover po checkpoint. To trzy różne procesy i osobne odpowiedzialności.
+A policyVersion change may require reprocessing without changing the JSON schema. A projection change starts a new generation, rebuilds from scratch and cuts over after a checkpoint. These are three distinct processes with separate responsibilities.

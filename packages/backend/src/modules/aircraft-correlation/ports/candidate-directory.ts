@@ -9,6 +9,6 @@ export type CandidateSnapshot = {
   | { readonly completeness: 'PARTIAL'; readonly reason: IncompleteCandidateReason }
 );
 export interface CandidateDirectory {
-  /** COMPLETE oznacza pełny zbiór dla zadanych identyfikatorów/czasu, nie cały rejestr. */
+  /** COMPLETE means the full candidate set for the requested identifiers/time, not the entire registry. */
   find(input: CorrelationInput): Promise<CandidateSnapshot>;
 }

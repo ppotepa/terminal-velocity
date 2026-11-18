@@ -6,7 +6,7 @@ import type { FreshnessPolicy } from '../domain/freshness-policy.ts';
 import { applyContributionChange } from '../domain/apply-contribution-change.ts';
 import { deriveAvailability } from '../domain/derive-availability.ts';
 import type { AvailabilityState } from './availability-state.ts';
-/** Czysta transformacja stanu. Adapter musi zapisać wynik i zdarzenia atomowo. */
+/** Pure state transformation. The adapter must persist the result and events atomically. */
 export function updateAvailability(state: AvailabilityState, change: ContributionChange,
   now: EpochMillis, policy: FreshnessPolicy): Result<AvailabilityState, { readonly code: 'REVISION_COLLISION' | 'FUTURE_OBSERVATION' | 'TIME_RANGE_OVERFLOW' }> {
   if (change.type === 'ASSIGNED' && change.contribution.observedAt > now)

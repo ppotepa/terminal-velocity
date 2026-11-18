@@ -8,7 +8,7 @@ export interface MessageContribution {
   readonly bearer: Bearer;
   readonly publicEligible: boolean;
 }
-/** Rewizja dotyczy message contribution, nie globalnego kolejnego numeru zdarzenia. */
+/** The revision belongs to the message contribution, not to a global event sequence. */
 export type ContributionChange =
   | { readonly type: 'ASSIGNED'; readonly revision: Revision; readonly contribution: MessageContribution }
   | { readonly type: 'RETRACTED'; readonly revision: Revision; readonly messageId: MessageId };

@@ -1,4 +1,4 @@
 import type { MessageId } from '../../../contracts/identity/index.ts';
 import type { ContributionChange } from './contribution.ts';
-/** Tombstone RETRACTED zostaje w ledgerze: stara wiadomość nie może jej wskrzesić. */
+/** The RETRACTED tombstone remains in the ledger: an old message cannot revive the contribution. */
 export type ContributionLedger = ReadonlyMap<MessageId, ContributionChange>;

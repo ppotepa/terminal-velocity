@@ -1,15 +1,15 @@
--- Airframes Tracker v2: fragment projektu PostgreSQL, nie komplet migracji.
--- Nie wykonywano na PostgreSQL w tej iteracji; wymaga testów integracyjnych.
--- Identyfikatory uuid nadaje aplikacja; source/account scopes są jawne.
+-- Airframes Tracker v2: a PostgreSQL design excerpt, not a complete migration set.
+-- Not executed against PostgreSQL in this iteration; integration tests are required.
+-- The application assigns UUIDs; source/account scopes are explicit.
 
 CREATE SCHEMA IF NOT EXISTS correlation;
 CREATE SCHEMA IF NOT EXISTS availability;
 CREATE SCHEMA IF NOT EXISTS event_delivery;
 CREATE SCHEMA IF NOT EXISTS map_read;
 
--- W produkcji outbox należy do transakcyjnego właściciela danych.
--- Tu jedna tabela pokazuje wzorzec; owner_context nie uprawnia obcych modułów
--- do wykonywania dowolnych INSERT. Węższe porty/role są wymagane.
+-- In production, the outbox belongs to the transactional owner of the data.
+-- One table illustrates the pattern here; owner_context does not authorize other modules
+-- to perform arbitrary INSERTs. Narrower ports/roles are required.
 CREATE TABLE event_delivery.outbox (
     event_id uuid PRIMARY KEY,
     owner_context text NOT NULL,
@@ -29,7 +29,7 @@ CREATE INDEX outbox_waiting_for_fanout
     ON event_delivery.outbox (recorded_at, event_id)
     WHERE fanout_completed_at IS NULL;
 
--- Fan-out jest trwały. published_at w outbox nie zastępuje stanu konsumenta.
+-- Fan-out is durable. An outbox published_at field does not replace consumer state.
 CREATE TABLE event_delivery.deliveries (
     consumer_id text NOT NULL,
     event_id uuid NOT NULL REFERENCES event_delivery.outbox(event_id),
@@ -51,8 +51,8 @@ CREATE INDEX expired_delivery_leases
     ON event_delivery.deliveries (lease_until)
     WHERE state = 'LEASED';
 
--- Własność logiczna: wpisy danego consumer_id są zarządzane wyłącznie przez
--- transakcję tego konsumenta. Można materializować osobną tabelę per kontekst.
+-- Logical ownership: entries for a given consumer_id are managed only by
+-- that consumer's transaction. A separate table can be materialized per context.
 CREATE TABLE event_delivery.consumer_inbox (
     consumer_id text NOT NULL,
     event_id uuid NOT NULL,
@@ -82,9 +82,9 @@ CREATE TABLE correlation.aircraft_link_heads (
         DEFERRABLE INITIALLY DEFERRED
 );
 
--- Wkład w danym visibility scope jest pełnym stanem i może stać się tombstone.
--- Zawiera autorytatywną publication/contribution revision, nie przypadkowe
--- maksimum dwóch niezależnych numerów (assignment i publication).
+-- A contribution within a visibility scope represents full state and can become a tombstone.
+-- It contains the authoritative publication/contribution revision, not an arbitrary
+-- maximum of two independent numbers (assignment and publication).
 CREATE TABLE availability.message_contributions (
     visibility_scope text NOT NULL,
     message_id uuid NOT NULL,
@@ -131,7 +131,7 @@ CREATE TABLE availability.aircraft_state (
     CHECK ((last_message_id IS NULL) = (last_observed_at IS NULL))
 );
 
--- Terminy są trwałe i zawierają rewizję. Stara praca może legalnie być no-op.
+-- Deadlines are durable and include a revision. Stale work may legitimately be a no-op.
 CREATE TABLE availability.expiry_jobs (
     job_id uuid PRIMARY KEY,
     visibility_scope text NOT NULL,
@@ -144,8 +144,8 @@ CREATE TABLE availability.expiry_jobs (
 CREATE INDEX pending_expiry_jobs ON availability.expiry_jobs(due_at, job_id)
     WHERE finished_at IS NULL;
 
--- Licznik logu projekcji jest aktualizowany pod blokadą wiersza; numery
--- zatwierdzają się w kolejności dla danego scope/shardu/generation.
+-- The projection log counter is updated under a row lock; sequence numbers
+-- commit in order for a given scope/shard/generation.
 CREATE TABLE map_read.stream_heads (
     visibility_scope text NOT NULL,
     shard_id text NOT NULL,
@@ -165,5 +165,5 @@ CREATE TABLE map_read.change_log (
         REFERENCES map_read.stream_heads(visibility_scope, shard_id, generation)
 );
 
--- Celowo brak DDL pozycji, ramek, reassembly, grantów, ról i całej aplikacji.
--- Ten plik pokazuje niezmienniki krytycznej ścieżki zmian/korekt/dostarczenia.
+-- DDL for positions, frames, reassembly, grants, roles and the complete application is intentionally omitted.
+-- This file illustrates invariants on the critical path for changes, corrections and delivery.

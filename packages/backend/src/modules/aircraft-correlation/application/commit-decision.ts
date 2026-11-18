@@ -24,7 +24,7 @@ export async function commitDecision(
       return ok(next);
     });
   } catch {
-    // Adapter ma obowiązek wycofać transakcję także przy awarii zapisu outboxu.
+    // The adapter must also roll back the transaction if the outbox write fails.
     return err({ code: 'COMMIT_FAILED' });
   }
 }

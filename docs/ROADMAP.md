@@ -1,31 +1,31 @@
-# Kolejność wdrażania
+# Implementation roadmap
 
-Każdy etap powinien kończyć się uruchamialnym przekrojem aplikacji i PR-em z testami zachowań. Podział kodu wynika z odpowiedzialności opisanych w architekturze v2.
+Each stage should produce a runnable application slice and a PR with behavioral tests. Code boundaries follow the responsibilities described in architecture v2.
 
-## Etap 1 — lokalny backend demonstracyjny
+## Stage 1 — local demonstration backend
 
-Podstawa repozytorium, npm workspaces, strict TypeScript, kontrola importów AST, CI. Istniejąca korelacja Message→Aircraft i odwracalne statusy działają przez małe API HTTP. Fixture pozycji i katalogu są syntetyczne. Przyjęcie komunikatu jest idempotentne w czasie życia jednego procesu. Powtórzone ID z innymi faktami jest konfliktem, a nie niejawną korektą historii.
+Repository foundation, npm workspaces, strict TypeScript, AST import checks, and CI configuration. The existing Message→Aircraft correlation and reversible availability statuses work through a small HTTP API. Position and catalog fixtures are synthetic. Message ingestion is idempotent during the lifetime of one process. Reusing an ID with different facts is a conflict, not an implicit history correction.
 
-## Etap 2 — trwały zapis jednego przepływu
+## Stage 2 — durable storage for one flow
 
-Adapter PostgreSQL za portem transakcji, historia decyzji, outbox i inbox konkretnego konsumenta. Testy integracyjne na rzeczywistym PostgreSQL: równoczesny pierwszy zapis, rollback przy błędzie outboxu, leasing, wznowienie po awarii i atomowa deduplikacja. Uzupełnienie projektu DDL o rzeczywiste migracje z osobnymi rolami właścicielskimi schematów. W tym etapie trwałość staje się właściwością aplikacji.
+A PostgreSQL adapter behind the transaction port, decision history, an outbox, and a consumer-specific inbox. Integration tests on real PostgreSQL cover concurrent first writes, rollback on outbox failure, leasing, crash recovery, and atomic deduplication. Turn the DDL design into real migrations with separate schema ownership roles. This stage makes durability an application property.
 
-## Etap 3 — pojedynczy rzeczywisty konektor
+## Stage 3 — one real connector
 
-Wybrać źródło, dla którego mamy dostęp i dozwolony zakres wykorzystania. Adapter osobno przechowuje source delivery, recepcję i fakty wiadomości. Zachowuje pochodzenie, niepewność czasu, bearer i wersję dekodera. Nie tworzy sztucznych ramek RF, jeśli dostawca oferuje tylko zdekodowaną wiadomość. Testy kontraktu na zanonimizowanych przykładach źródła; retry, backoff, kwarantanna i ograniczony backfill.
+Select a source for which access and permitted usage are established. The adapter stores source deliveries, receptions, and message facts separately. It preserves provenance, timestamp uncertainty, bearer, and decoder version. It must not invent RF frames when a provider supplies only decoded messages. Add contract tests using anonymized source examples, retries, backoff, quarantine, and bounded backfill.
 
-## Etap 4 — pozycje i odczyt mapy
+## Stage 4 — positions and map reads
 
-Oddzielny adapter pozycji, obserwacje z czasem i źródłem, stabilna tożsamość samolotu, model widoku mapy. W pierwszej wersji mapa może pobierać spójny snapshot przez HTTP. Historia lotu i oznaczenie świeżości pozycji nie zależą od obecności komunikatów radiowych. Frontend zachowuje uzgodniony minimalizm: mapa, lista, szczegóły i czytelne statusy.
+A separate position adapter, observations with timestamps and provenance, stable aircraft identity, and a map read model. The first map version may fetch a coherent snapshot over HTTP. Flight history and position freshness do not depend on the presence of radio messages. The frontend keeps the agreed minimal design: map, list, details, and clear statuses.
 
-## Etap 5 — widoczność i aktualizacje przyrostowe
+## Stage 5 — visibility and incremental updates
 
-Egzekwowanie publication scope przed licznikiem i kolorem samolotu. Rewizje uprawnień i grantów, wycofywanie wkładów, test braku wycieku istnienia ukrytych wiadomości. Dopiero potem snapshot + replay + strumień `upsert/remove`, generacje subskrypcji, scope-bound cursors i odtwarzanie po zerwaniu połączenia.
+Enforce publication scope before deriving aircraft counts and colors. Add entitlement and grant revisions, contribution retractions, and tests that hidden messages do not leak their existence. Then implement snapshot + replay + an `upsert/remove` stream, subscription generations, scope-bound cursors, and recovery after disconnection.
 
-## Etap 6 — rozszerzanie domen
+## Stage 6 — domain expansion
 
-Korelacja Message→FlightSession niezależnie od Message→Aircraft, reassembly, wiele stacji, różne protokoły, historia, geofiltry, telemetria i uzasadnione indeksy. Broker i oddzielne procesy wynikają z pomiarów ruchu oraz potrzeb izolacji. Nie są warunkiem rozpoczęcia implementacji domen.
+Message→FlightSession correlation independent of Message→Aircraft, reassembly, multiple stations, different protocols, history, geographic filters, telemetry, and justified indexes. Introduce a broker and separate processes when measured traffic and isolation needs warrant them. They are not prerequisites for implementing the domains.
 
-## Warunek gotowości do publicznego uruchomienia
+## Public deployment readiness
 
-Zastąpienie jawnego trybu demo rzeczywistymi portami trwałości i kontroli dostępu, ograniczenia zasobów, obsługa awarii źródeł, dopuszczone prawa do publikacji i testy integracyjne. Ograniczenia pamięciowego demonstratora nie mogą zostać opisane jako gwarancje produkcyjne.
+Replace the explicit demo mode with durable storage and access-control ports, enforce resource limits, handle source failures, establish publication rights, and add integration tests. Limitations of the in-memory demonstrator must not be presented as production guarantees.

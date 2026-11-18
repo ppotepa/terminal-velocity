@@ -1,6 +1,6 @@
 [
   {
-    "case": "MATCHED bez ID",
+    "case": "MATCHED without an ID",
     "event": {
       "eventId": "evt-demo-1-correlation",
       "type": "correlation.aircraft-link.revised.v1",
@@ -29,7 +29,7 @@
     }
   },
   {
-    "case": "UNMATCHED z polami matched",
+    "case": "UNMATCHED with matched fields",
     "event": {
       "eventId": "evt-demo-1-correlation",
       "type": "correlation.aircraft-link.revised.v1",
@@ -59,7 +59,7 @@
     }
   },
   {
-    "case": "AMBIGUOUS z jednym kandydatem",
+    "case": "AMBIGUOUS with one candidate",
     "event": {
       "eventId": "evt-demo-2-correlation",
       "type": "correlation.aircraft-link.revised.v1",
@@ -95,7 +95,7 @@
     }
   },
   {
-    "case": "Powtórzony kandydat",
+    "case": "Duplicate candidate",
     "event": {
       "eventId": "evt-demo-2-correlation",
       "type": "correlation.aircraft-link.revised.v1",
@@ -132,7 +132,7 @@
     }
   },
   {
-    "case": "RETRACTED z aktywnymi polami",
+    "case": "RETRACTED with active fields",
     "event": {
       "eventId": "evt-demo-8-publication",
       "type": "publication.message-contribution.replaced.v1",
@@ -159,7 +159,7 @@
     }
   },
   {
-    "case": "Niepoprawny czas",
+    "case": "Invalid timestamp",
     "event": {
       "eventId": "evt-demo-7-publication",
       "type": "publication.message-contribution.replaced.v1",
@@ -190,7 +190,7 @@
     }
   },
   {
-    "case": "Nieznana wersja schematu",
+    "case": "Unknown schema version",
     "event": {
       "eventId": "evt-demo-7-publication",
       "type": "publication.message-contribution.replaced.v1",
@@ -221,7 +221,7 @@
     }
   },
   {
-    "case": "Rewizja zero",
+    "case": "Zero revision",
     "event": {
       "eventId": "evt-demo-1-correlation",
       "type": "correlation.aircraft-link.revised.v1",

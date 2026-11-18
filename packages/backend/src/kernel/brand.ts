@@ -1,3 +1,3 @@
 declare const brand: unique symbol;
-/** Typ techniczny. Wyłącznie fabryki domenowe mogą nadawać markę. */
+/** Technical type. Only domain factories may assign the brand. */
 export type Brand<T, Name extends string> = T & { readonly [brand]: Name };

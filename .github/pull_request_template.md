@@ -1,15 +1,15 @@
 ## Problem
 
-Opisz konkretny problem użytkownika lub brakujący element przepływu.
+Describe the concrete user problem or missing part of the flow.
 
-## Zmiana
+## Change
 
-Jakie zachowanie powstaje i które moduły są jego właścicielami?
+What behavior does this change introduce, and which modules own it?
 
-## Weryfikacja
+## Verification
 
-Podaj wykonane polecenia i wyniki. Oddziel wykonane sprawdzenia od zaplanowanych.
+List the commands you ran and their results. Distinguish completed checks from planned checks.
 
-## Ograniczenia
+## Limitations
 
-Wymień istotne ograniczenia tej zmiany oraz zależności od kolejnych etapów.
+State the material limitations of this change and its dependencies on later stages.

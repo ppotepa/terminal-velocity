@@ -20,7 +20,7 @@ const message = {
   messageId: `msg_demo-${Date.now()}`,
   observedAt: new Date().toISOString(),
   bearer: 'VDL2',
-  text: 'Syntetyczna wiadomość demonstracyjna',
+  text: 'Synthetic demonstration message',
   icao24: aircraft.icao24,
 };
 const options = {

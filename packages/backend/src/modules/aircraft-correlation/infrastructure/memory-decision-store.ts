@@ -2,7 +2,7 @@ import type { MessageId } from '../../../contracts/identity/index.ts';
 import type { DecisionEvent } from '../application/decision-event.ts';
 import type { StoredDecision } from '../application/stored-decision.ts';
 import type { DecisionTransaction, DecisionWriteSet } from '../ports/decision-transaction.ts';
-/** Test double: klonowanie stanu + lokalna serializacja. NIE adapter PostgreSQL. */
+/** Test double: state cloning + local serialization. NOT a PostgreSQL adapter. */
 export function createMemoryDecisionStore() {
   let records = new Map<MessageId, StoredDecision>();
   let events: DecisionEvent[] = [];

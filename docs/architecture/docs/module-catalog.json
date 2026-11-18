@@ -5,624 +5,624 @@
     {
       "owner": "fleet-identity",
       "module": "identity-values",
-      "responsibility": "Walidacja ICAO24, rejestracji i wewnętrznych ID",
-      "change_reason": "Zmiana poprawności konkretnego identyfikatora",
+      "responsibility": "Validate ICAO24, registrations and internal IDs",
+      "change_reason": "Changes to validity rules for a specific identifier",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "fleet-identity",
       "module": "identity-assertions",
-      "responsibility": "Zapis twierdzeń źródeł z pochodzeniem",
-      "change_reason": "Zmiana sposobu zapisu dowodu tożsamości",
+      "responsibility": "Record source assertions with provenance",
+      "change_reason": "Changes to how identity evidence is recorded",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "fleet-identity",
       "module": "temporal-aliases",
-      "responsibility": "Odczyt aliasu dla czasu zdarzenia",
-      "change_reason": "Zmiana polityki ważności aliasów",
+      "responsibility": "Look up an alias for the event time",
+      "change_reason": "Changes to alias validity policy",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "fleet-identity",
       "module": "identity-conflicts",
-      "responsibility": "Wykrycie równoczesnych sprzecznych twierdzeń",
-      "change_reason": "Zmiana definicji konfliktu",
+      "responsibility": "Detect simultaneous contradictory assertions",
+      "change_reason": "Changes to the definition of a conflict",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "fleet-identity",
       "module": "identity-revisions",
-      "responsibility": "Historia rewizji przyjętego stanu",
-      "change_reason": "Zmiana reguł korekt i audytu",
+      "responsibility": "Retain the revision history of accepted state",
+      "change_reason": "Changes to correction and audit rules",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "flight-tracking",
       "module": "position-validation",
-      "responsibility": "Walidacja zakresów, jednostek, czasu i jakości pozycji",
-      "change_reason": "Zmiana dopuszczalności obserwacji",
+      "responsibility": "Validate position ranges, units, time and quality",
+      "change_reason": "Changes to observation acceptance rules",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "flight-tracking",
       "module": "position-ledger",
-      "responsibility": "Append obserwacji, bez nadpisania historii",
-      "change_reason": "Zmiana kontraktu zapisu faktu",
+      "responsibility": "Append observations without overwriting history",
+      "change_reason": "Changes to the fact persistence contract",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "flight-tracking",
       "module": "current-position-selection",
-      "responsibility": "Wybór aktualnej obserwacji z tie-breakerem",
-      "change_reason": "Zmiana reguł konkurujących źródeł",
+      "responsibility": "Select the current observation with a tie-breaker",
+      "change_reason": "Changes to rules for competing sources",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "flight-tracking",
       "module": "session-boundaries",
-      "responsibility": "Otwarcie, podział i zamknięcie sesji z niepewnością",
-      "change_reason": "Zmiana definicji odcinka lotu",
+      "responsibility": "Open, split and close sessions while preserving uncertainty",
+      "change_reason": "Changes to the definition of a flight segment",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "flight-tracking",
       "module": "session-assignment",
-      "responsibility": "Wersjonowane przypisanie pozycji do sesji",
-      "change_reason": "Zmiana korekt segmentacji",
+      "responsibility": "Version the assignment of positions to sessions",
+      "change_reason": "Changes to segmentation corrections",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "flight-tracking",
       "module": "track-building",
-      "responsibility": "Zbudowanie śladu z obserwacji",
-      "change_reason": "Zmiana sposobu łączenia punktów",
+      "responsibility": "Build an observed track from observations",
+      "change_reason": "Changes to how points are connected",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "flight-tracking",
       "module": "track-simplification",
-      "responsibility": "Uproszczenie geometrii pod dany zoom",
-      "change_reason": "Zmiana budżetu i jakości renderowania",
+      "responsibility": "Simplify geometry for the given zoom level",
+      "change_reason": "Changes to rendering budgets and quality",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "delivery-intake",
-      "responsibility": "Sprawdzenie i przyjęcie danych źródła",
-      "change_reason": "Zmiana kontraktu wejściowego",
+      "responsibility": "Validate and accept source data",
+      "change_reason": "Changes to the input contract",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "input-level-routing",
-      "responsibility": "Wybór ścieżki frame/fragment/provider-message",
-      "change_reason": "Zmiana obsługiwanych poziomów danych",
+      "responsibility": "Choose the frame/fragment/provider-message path",
+      "change_reason": "Changes to supported data levels",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "observation-time",
-      "responsibility": "Wybór czasu i jakości podstawy czasowej",
-      "change_reason": "Zmiana zaufania do timestampów",
+      "responsibility": "Select the time and quality of the time basis",
+      "change_reason": "Changes to timestamp trust rules",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "delivery-idempotency",
-      "responsibility": "Rozpoznanie ponownej dostawy",
-      "change_reason": "Zmiana gwarancji ID źródła",
+      "responsibility": "Recognize repeated delivery",
+      "change_reason": "Changes to source ID guarantees",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "reception-ledger",
-      "responsibility": "Zachowanie odbioru i receiver metadata",
-      "change_reason": "Zmiana zapisu dowodów odbioru",
+      "responsibility": "Retain receptions and receiver metadata",
+      "change_reason": "Changes to reception evidence persistence",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "frame-candidate-search",
-      "responsibility": "Znalezienie potencjalnie tej samej transmisji",
-      "change_reason": "Zmiana indeksu/wyszukiwania okna",
+      "responsibility": "Find potentially identical transmission occurrences",
+      "change_reason": "Changes to the index or time-window search",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "frame-equivalence",
-      "responsibility": "Rozstrzygnięcie wspólnego wystąpienia ramki",
-      "change_reason": "Zmiana reguł równoważności protokołu",
+      "responsibility": "Determine whether receptions share a frame occurrence",
+      "change_reason": "Changes to protocol equivalence rules",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "reception-assignment",
-      "responsibility": "Powiązanie odbiorów z ramką i korekty",
-      "change_reason": "Zmiana historii grupowania",
+      "responsibility": "Associate receptions with a frame and record corrections",
+      "change_reason": "Changes to grouping history",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "protocol-decoding",
-      "responsibility": "Uruchomienie właściwego adaptera dekodera",
-      "change_reason": "Nowa wersja lub rodzaj dekodera",
+      "responsibility": "Run the appropriate decoder adapter",
+      "change_reason": "A new decoder version or type",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "fragment-extraction",
-      "responsibility": "Wyodrębnienie fragmentu i metadanych sekwencji",
-      "change_reason": "Zmiana formatu fragmentacji",
+      "responsibility": "Extract a fragment and sequence metadata",
+      "change_reason": "Changes to the fragmentation format",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "assembly-key",
-      "responsibility": "Ustalenie kontekstu składania",
-      "change_reason": "Zmiana reguł identyfikacji wiadomości",
+      "responsibility": "Determine the assembly context",
+      "change_reason": "Changes to message identification rules",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "message-assembly",
-      "responsibility": "Stan collecting/complete/conflicted/expired",
-      "change_reason": "Zmiana reguł kompletności",
+      "responsibility": "Manage collecting/complete/conflicted/expired state",
+      "change_reason": "Changes to completeness rules",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "message-revisions",
-      "responsibility": "Append wyniku dekodowania z wejściowymi referencjami",
-      "change_reason": "Zmiana schematu interpretacji",
+      "responsibility": "Append a decoding result with its input references",
+      "change_reason": "Changes to the interpretation schema",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "communications",
       "module": "message-provenance",
-      "responsibility": "Odtworzenie pochodzenia payloadu i pól",
-      "change_reason": "Zmiana reguł śledzenia dowodów",
+      "responsibility": "Reconstruct payload and field provenance",
+      "change_reason": "Changes to evidence tracking rules",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "correlation",
       "module": "aircraft-hints",
-      "responsibility": "Wydobycie wskazówek wraz z rolą adresu",
-      "change_reason": "Zmiana semantyki pól źródła",
+      "responsibility": "Extract identity hints including the address role",
+      "change_reason": "Changes to source field semantics",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "correlation",
       "module": "aircraft-candidates",
-      "responsibility": "Pobranie pełnego zestawu temporalnych kandydatów",
-      "change_reason": "Zmiana pytań do indeksu",
+      "responsibility": "Retrieve the complete set of time-dependent candidates",
+      "change_reason": "Changes to index queries",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "correlation",
       "module": "aircraft-evidence",
-      "responsibility": "Porównanie mocnych identyfikatorów i dowodów",
-      "change_reason": "Zmiana pojedynczej reguły dowodowej",
+      "responsibility": "Compare strong identifiers and evidence",
+      "change_reason": "Changes to an individual evidence rule",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "correlation",
       "module": "aircraft-decision",
-      "responsibility": "Jednoznaczność, veto konfliktu, brak wyniku",
-      "change_reason": "Zmiana polityki decyzji",
+      "responsibility": "Determine uniqueness, apply conflict vetoes or return no match",
+      "change_reason": "Changes to decision policy",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "correlation",
       "module": "flight-candidates",
-      "responsibility": "Wyszukanie sesji dla maszyny i czasu",
-      "change_reason": "Zmiana wyboru sesji kandydackich",
+      "responsibility": "Find sessions for an aircraft and time",
+      "change_reason": "Changes to candidate session selection",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "correlation",
       "module": "flight-evidence",
-      "responsibility": "Porównanie czasu, callsign i zgodności maszyny",
-      "change_reason": "Zmiana reguł dopasowania sesji",
+      "responsibility": "Compare time, callsign and aircraft consistency",
+      "change_reason": "Changes to session matching rules",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "correlation",
       "module": "flight-decision",
-      "responsibility": "Osobna decyzja o sesji bez wymuszania wyniku",
-      "change_reason": "Zmiana polityki przypisania lotu",
+      "responsibility": "Make a separate session decision without forcing a match",
+      "change_reason": "Changes to flight assignment policy",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "correlation",
       "module": "link-revision-commit",
-      "responsibility": "Atomowy zapis decyzji i outbox",
-      "change_reason": "Zmiana kontraktu trwałego zatwierdzenia",
+      "responsibility": "Atomically persist the decision and outbox entry",
+      "change_reason": "Changes to the durable commit contract",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "correlation",
       "module": "correlation-reprocessing",
-      "responsibility": "Plan ponownego przeliczenia zakresu",
-      "change_reason": "Zmiana triggerów korekt/replay",
+      "responsibility": "Plan reevaluation of a scope",
+      "change_reason": "Changes to correction or replay triggers",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "availability",
       "module": "contribution-eligibility",
-      "responsibility": "Czy dozwolona wiadomość wpływa na ten status",
-      "change_reason": "Zmiana kwalifikacji do statusu",
+      "responsibility": "Determine whether a permitted message contributes to this status",
+      "change_reason": "Changes to status eligibility rules",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "availability",
       "module": "contribution-ledger",
-      "responsibility": "Replacement/retraction jednej wiadomości z rewizją",
-      "change_reason": "Zmiana semantyki wkładu",
+      "responsibility": "Replace or retract one message contribution with a revision",
+      "change_reason": "Changes to contribution semantics",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "availability",
       "module": "latest-eligible-message",
-      "responsibility": "Wybór ostatniej nadal ważnej wiadomości",
-      "change_reason": "Zmiana reguł selekcji i filtrów",
+      "responsibility": "Select the latest message that remains valid",
+      "change_reason": "Changes to selection rules and filters",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "availability",
       "module": "freshness-policy",
-      "responsibility": "Czysta klasyfikacja wieku wiadomości",
-      "change_reason": "Zmiana progów świeżości",
+      "responsibility": "Classify message age with a pure rule",
+      "change_reason": "Changes to freshness thresholds",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "availability",
       "module": "transition-planning",
-      "responsibility": "Obliczenie następnego czasu zmiany",
-      "change_reason": "Zmiana polityki terminów",
+      "responsibility": "Calculate the next transition time",
+      "change_reason": "Changes to deadline policy",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "availability",
       "module": "expiry-processing",
-      "responsibility": "Obsługa terminu z expectedRevision",
-      "change_reason": "Zmiana zachowania przeterminowanych prac",
+      "responsibility": "Process a deadline with expectedRevision",
+      "change_reason": "Changes to overdue job behavior",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "availability",
       "module": "availability-reconciliation",
-      "responsibility": "Przeliczenie z wkładów po korekcie/restart",
-      "change_reason": "Zmiana naprawy projekcji",
+      "responsibility": "Recalculate from contributions after a correction or restart",
+      "change_reason": "Changes to projection repair",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "receiver-network",
       "module": "station-registration",
-      "responsibility": "Rejestracja stacji i jej właściciela",
-      "change_reason": "Zmiana lifecycle stacji",
+      "responsibility": "Register a station and its owner",
+      "change_reason": "Changes to the station lifecycle",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "receiver-network",
       "module": "receiver-capabilities",
-      "responsibility": "Możliwości odbiornika i dekodera",
-      "change_reason": "Zmiana formatu capabilities",
+      "responsibility": "Describe receiver and decoder capabilities",
+      "change_reason": "Changes to the capabilities format",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "receiver-network",
       "module": "heartbeat",
-      "responsibility": "Fakt życia procesu i ostatnie połączenie",
-      "change_reason": "Zmiana protokołu heartbeat",
+      "responsibility": "Record process liveness and the latest connection",
+      "change_reason": "Changes to the heartbeat protocol",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "receiver-network",
       "module": "station-health",
-      "responsibility": "Stan jakości odbioru, niezależny od liczby ramek",
-      "change_reason": "Zmiana reguł zdrowia stacji",
+      "responsibility": "Determine reception quality independently of frame counts",
+      "change_reason": "Changes to station health rules",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "receiver-network",
       "module": "location-exposure",
-      "responsibility": "Dopuszczalna precyzja lokalizacji stacji",
-      "change_reason": "Zmiana preferencji właściciela",
+      "responsibility": "Determine the permitted precision of station location",
+      "change_reason": "Changes to owner preferences",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "publication",
       "module": "source-entitlements",
-      "responsibility": "Prawa do pól i danych konkretnego źródła",
-      "change_reason": "Zmiana warunków wykorzystania",
+      "responsibility": "Determine usage rights for a source's fields and data",
+      "change_reason": "Changes to usage terms",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "publication",
       "module": "message-eligibility",
-      "responsibility": "Decyzja dopuszczenia wiadomości dla scope",
-      "change_reason": "Zmiana polityki widoczności",
+      "responsibility": "Decide whether a message is permitted within a scope",
+      "change_reason": "Changes to visibility policy",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "publication",
       "module": "published-view",
-      "responsibility": "Budowa publicznego zestawu pól i pochodzenia",
-      "change_reason": "Zmiana schematu ekspozycji",
+      "responsibility": "Build the public field set and provenance",
+      "change_reason": "Changes to the exposure schema",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "publication",
       "module": "visibility-grants",
-      "responsibility": "Wersjonowane pozwolenia i wycofania",
-      "change_reason": "Zmiana lifecycle prawa do danych",
+      "responsibility": "Version permissions and revocations",
+      "change_reason": "Changes to the data access rights lifecycle",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "publication",
       "module": "scope-epochs",
-      "responsibility": "Unieważnienie cache i replay po zmianie polityki",
-      "change_reason": "Zmiana reguł synchronizacji uprawnień",
+      "responsibility": "Invalidate caches and replay after policy changes",
+      "change_reason": "Changes to permission synchronization rules",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "access",
       "module": "principal-resolution",
-      "responsibility": "Ustalenie użytkownika lub feedera",
-      "change_reason": "Zmiana sposobu uwierzytelniania",
+      "responsibility": "Identify the user or feeder",
+      "change_reason": "Changes to the authentication mechanism",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "access",
       "module": "capability-authorization",
-      "responsibility": "Sprawdzenie uprawnienia do konkretnej operacji",
-      "change_reason": "Zmiana matrycy uprawnień",
+      "responsibility": "Check permission for a specific operation",
+      "change_reason": "Changes to the authorization matrix",
       "implementation_status": "planned_or_partial_reference"
     },
     {
       "owner": "access",
       "module": "feeder-credentials",
-      "responsibility": "Wydanie, rotacja i odwołanie tokenu stacji",
-      "change_reason": "Zmiana lifecycle poświadczeń",
+      "responsibility": "Issue, rotate and revoke station tokens",
+      "change_reason": "Changes to the credential lifecycle",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "source-connectors (techniczne)",
+      "owner": "source-connectors (technical)",
       "module": "connection-lifecycle",
-      "responsibility": "Connect/reconnect/shutdown dostawcy",
-      "change_reason": "Zmiana transportu providera",
+      "responsibility": "Connect, reconnect and shut down the provider connection",
+      "change_reason": "Changes to provider transport",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "source-connectors (techniczne)",
+      "owner": "source-connectors (technical)",
       "module": "provider-budget",
-      "responsibility": "Limity, retry-after i harmonogram odpytywania",
-      "change_reason": "Zmiana budżetu API",
+      "responsibility": "Manage limits, retry-after and polling schedules",
+      "change_reason": "Changes to the API request budget",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "source-connectors (techniczne)",
+      "owner": "source-connectors (technical)",
       "module": "wire-codecs",
-      "responsibility": "Walidacja konkretnej wersji payloadu",
-      "change_reason": "Zmiana kontraktu JSON dostawcy",
+      "responsibility": "Validate a specific payload version",
+      "change_reason": "Changes to the provider's JSON contract",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "source-connectors (techniczne)",
+      "owner": "source-connectors (technical)",
       "module": "coverage-descriptors",
-      "responsibility": "Znany zakres feedu i jego próbkowanie",
-      "change_reason": "Zmiana możliwości źródła",
+      "responsibility": "Describe known feed coverage and sampling",
+      "change_reason": "Changes to source capabilities",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "source-connectors (techniczne)",
+      "owner": "source-connectors (technical)",
       "module": "source-health",
-      "responsibility": "Pomiar lag i dostępności połączenia",
-      "change_reason": "Zmiana operacyjnej definicji jakości",
+      "responsibility": "Measure lag and connection availability",
+      "change_reason": "Changes to the operational definition of quality",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "read-models (aplikacyjne)",
+      "owner": "read-models (application)",
       "module": "map-projection",
-      "responsibility": "Zdenormalizowany rekord mapy per scope",
-      "change_reason": "Zmiana potrzeb odczytu mapy",
+      "responsibility": "Maintain a denormalized map record per scope",
+      "change_reason": "Changes to map read requirements",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "read-models (aplikacyjne)",
+      "owner": "read-models (application)",
       "module": "map-change-log",
-      "responsibility": "Atomowy zapis delty i checkpointu projekcji",
-      "change_reason": "Zmiana synchronizacji mapy",
+      "responsibility": "Atomically record the delta and projection checkpoint",
+      "change_reason": "Changes to map synchronization",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "read-models (aplikacyjne)",
+      "owner": "read-models (application)",
       "module": "message-timeline",
-      "responsibility": "Lista wiadomości z keyset pagination",
-      "change_reason": "Zmiana potrzeb panelu wiadomości",
+      "responsibility": "List messages with keyset pagination",
+      "change_reason": "Changes to message panel requirements",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "read-models (aplikacyjne)",
+      "owner": "read-models (application)",
       "module": "flight-list",
-      "responsibility": "Wydajna tabela i wyszukiwanie lotów",
-      "change_reason": "Zmiana potrzeb wyszukiwarki",
+      "responsibility": "Provide an efficient flight table and search",
+      "change_reason": "Changes to search requirements",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "read-models (aplikacyjne)",
+      "owner": "read-models (application)",
       "module": "station-cards",
-      "responsibility": "Lista i podgląd stacji",
-      "change_reason": "Zmiana potrzeb widoku stacji",
+      "responsibility": "Provide a station list and preview",
+      "change_reason": "Changes to station view requirements",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "read-models (aplikacyjne)",
+      "owner": "read-models (application)",
       "module": "projection-rebuild",
-      "responsibility": "Nowa generacja, backfill, kontrolowany cutover",
-      "change_reason": "Zmiana procesu odbudowy odczytu",
+      "responsibility": "Build a new generation, backfill and perform controlled cutover",
+      "change_reason": "Changes to read-model rebuilding",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "delivery (aplikacyjne)",
+      "owner": "delivery (application)",
       "module": "subscription-validation",
-      "responsibility": "Bbox, filtry i limity żądania",
-      "change_reason": "Zmiana dopuszczalnych subskrypcji",
+      "responsibility": "Validate the bbox, filters and request limits",
+      "change_reason": "Changes to permitted subscriptions",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "delivery (aplikacyjne)",
+      "owner": "delivery (application)",
       "module": "subscription-authorization",
-      "responsibility": "Aktualny scope i policy epoch",
-      "change_reason": "Zmiana dostępu klienta",
+      "responsibility": "Resolve the current scope and policy epoch",
+      "change_reason": "Changes to client access",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "delivery (aplikacyjne)",
+      "owner": "delivery (application)",
       "module": "snapshot-barrier",
-      "responsibility": "Spójne uruchomienie snapshot i delta",
-      "change_reason": "Zmiana protokołu startu",
+      "responsibility": "Start snapshot and delta delivery consistently",
+      "change_reason": "Changes to the startup protocol",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "delivery (aplikacyjne)",
+      "owner": "delivery (application)",
       "module": "resume-tokens",
-      "responsibility": "Podpisany opaque cursor i zgodność zakresu",
-      "change_reason": "Zmiana formatu wznowienia",
+      "responsibility": "Handle a signed opaque cursor and scope compatibility",
+      "change_reason": "Changes to the resume format",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "delivery (aplikacyjne)",
+      "owner": "delivery (application)",
       "module": "viewport-membership",
-      "responsibility": "Wejście i wyjście obiektu z filtra/bbox",
-      "change_reason": "Zmiana semantyki widoczności",
+      "responsibility": "Track objects entering or leaving the filter/bbox",
+      "change_reason": "Changes to visibility semantics",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "delivery (aplikacyjne)",
+      "owner": "delivery (application)",
       "module": "delta-batching",
-      "responsibility": "Upsert/remove i batching per subskrypcja",
-      "change_reason": "Zmiana pakietowania danych",
+      "responsibility": "Batch upserts and removals per subscription",
+      "change_reason": "Changes to data packaging",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "delivery (aplikacyjne)",
+      "owner": "delivery (application)",
       "module": "backpressure",
-      "responsibility": "Budżet kolejki i decyzja resync",
-      "change_reason": "Zmiana obsługi powolnego klienta",
+      "responsibility": "Manage the queue budget and resync decision",
+      "change_reason": "Changes to slow-client handling",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "platform (techniczne)",
+      "owner": "platform (technical)",
       "module": "event-codecs",
-      "responsibility": "Walidacja wersji koperty i payloadu",
-      "change_reason": "Zmiana kontraktu eventu",
+      "responsibility": "Validate envelope and payload versions",
+      "change_reason": "Changes to the event contract",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "platform (techniczne)",
+      "owner": "platform (technical)",
       "module": "outbox-append",
-      "responsibility": "Zapis eventu w transakcji właściciela",
-      "change_reason": "Zmiana mechaniki zapisu",
+      "responsibility": "Write the event within the owner's transaction",
+      "change_reason": "Changes to persistence mechanics",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "platform (techniczne)",
+      "owner": "platform (technical)",
       "module": "outbox-dispatch",
-      "responsibility": "Trwały fan-out dla niezależnych konsumentów",
-      "change_reason": "Zmiana mechaniki routingu",
+      "responsibility": "Provide durable fan-out to independent consumers",
+      "change_reason": "Changes to routing mechanics",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "platform (techniczne)",
+      "owner": "platform (technical)",
       "module": "delivery-lease",
-      "responsibility": "Claim pracy i token próby",
-      "change_reason": "Zmiana konkurencyjnego wykonania",
+      "responsibility": "Claim work and issue an attempt token",
+      "change_reason": "Changes to concurrent execution",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "platform (techniczne)",
+      "owner": "platform (technical)",
       "module": "consumer-inbox",
-      "responsibility": "Deduplikacja efektu per consumer,event",
-      "change_reason": "Zmiana semantyki konsumpcji",
+      "responsibility": "Deduplicate effects per consumer,event",
+      "change_reason": "Changes to consumption semantics",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "platform (techniczne)",
+      "owner": "platform (technical)",
       "module": "retry-planning",
-      "responsibility": "Czysty backoff i kwalifikacja retry",
-      "change_reason": "Zmiana polityki awarii",
+      "responsibility": "Calculate backoff and determine retry eligibility with pure rules",
+      "change_reason": "Changes to failure policy",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "platform (techniczne)",
+      "owner": "platform (technical)",
       "module": "quarantine",
-      "responsibility": "Zachowanie odrzuconej pracy i powodu",
-      "change_reason": "Zmiana obsługi trwałych błędów",
+      "responsibility": "Retain rejected work and its reason",
+      "change_reason": "Changes to permanent failure handling",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "platform (techniczne)",
+      "owner": "platform (technical)",
       "module": "payload-storage",
-      "responsibility": "Immutable bytes, checksum, retencja",
-      "change_reason": "Zmiana adaptera storage",
+      "responsibility": "Manage immutable bytes, checksums and retention",
+      "change_reason": "Changes to the storage adapter",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "platform (techniczne)",
+      "owner": "platform (technical)",
       "module": "observability",
-      "responsibility": "Spójne trace i metryki bez treści payloadów",
-      "change_reason": "Zmiana wymagań operacyjnych",
+      "responsibility": "Provide consistent traces and metrics without payload content",
+      "change_reason": "Changes to operational requirements",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "frontend (prezentacja)",
+      "owner": "frontend (presentation)",
       "module": "viewport-state",
-      "responsibility": "Zoom i bbox",
-      "change_reason": "Zmiana interakcji mapy",
+      "responsibility": "Maintain zoom and bbox",
+      "change_reason": "Changes to map interactions",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "frontend (prezentacja)",
+      "owner": "frontend (presentation)",
       "module": "aircraft-selection",
-      "responsibility": "Wybrana maszyna/sesja w URL",
-      "change_reason": "Zmiana nawigacji użytkownika",
+      "responsibility": "Keep the selected aircraft/session in the URL",
+      "change_reason": "Changes to user navigation",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "frontend (prezentacja)",
+      "owner": "frontend (presentation)",
       "module": "status-presentation",
-      "responsibility": "Etykieta, kolor, obrys i opis danych",
-      "change_reason": "Zmiana języka wizualnego",
+      "responsibility": "Present labels, colors, outlines and data descriptions",
+      "change_reason": "Changes to the visual language",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "frontend (prezentacja)",
+      "owner": "frontend (presentation)",
       "module": "map-delta-reducer",
-      "responsibility": "Stosowanie generation,cursor,revision",
-      "change_reason": "Zmiana protokołu klienta",
+      "responsibility": "Apply generation,cursor,revision",
+      "change_reason": "Changes to the client protocol",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "frontend (prezentacja)",
+      "owner": "frontend (presentation)",
       "module": "message-expansion",
-      "responsibility": "Otwarcie treści pojedynczej wiadomości",
-      "change_reason": "Zmiana interakcji panelu",
+      "responsibility": "Open the content of a single message",
+      "change_reason": "Changes to panel interactions",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "frontend (prezentacja)",
+      "owner": "frontend (presentation)",
       "module": "filter-serialization",
-      "responsibility": "URL i query filtrów",
-      "change_reason": "Zmiana modelu filtrów",
+      "responsibility": "Serialize filters into the URL and query",
+      "change_reason": "Changes to the filter model",
       "implementation_status": "planned_or_partial_reference"
     },
     {
-      "owner": "frontend (prezentacja)",
+      "owner": "frontend (presentation)",
       "module": "design-primitives",
-      "responsibility": "Button,Panel,Input,DataTable<Row>",
-      "change_reason": "Zmiana wspólnego design systemu",
+      "responsibility": "Button, Panel, Input, DataTable<Row>",
+      "change_reason": "Changes to the shared design system",
       "implementation_status": "planned_or_partial_reference"
     }
   ]

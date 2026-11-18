@@ -3,7 +3,7 @@ import { epochMillis } from '../kernel/time/epoch-millis.ts';
 import { createCorrelateMessage, icao24, registration, type AircraftCandidate } from '../modules/aircraft-correlation/public/index.ts';
 import { createMemoryDecisionStore } from '../modules/aircraft-correlation/infrastructure/memory-decision-store.ts';
 import { unwrap } from './unwrap.ts';
-/** Jawny composition root — jedyne miejsce spinające use case z adapterem. */
+/** Explicit composition root: the only place that wires the use case to its adapter. */
 export function createDemo() {
   const aircraft = unwrap(aircraftId('ac_A'));
   const secondAircraft = unwrap(aircraftId('ac_B'));

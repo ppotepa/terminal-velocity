@@ -1,65 +1,65 @@
-# Decyzje architektoniczne v2
+# Architectural decisions v2
 
-Wszystkie decyzje poniżej mają status **proponowane dla implementacji**. Implementacja referencyjna potwierdza wybrane reguły; nie jest ukończonym monorepo aplikacji.
+All decisions below are **proposed for implementation**. The reference implementation demonstrates selected rules; it is not a completed application monorepo.
 
-## ADR-201 — Granulacja wewnątrz kontekstu
+## ADR-201 — Granularity within a context
 
-**Kontekst:** v1 używał jednego pojęcia mikro-domeny dla reguł biznesowych, projekcji i mechanizmów transportu.
+**Context:** v1 used the same micro-domain concept for business rules, projections and transport mechanisms.
 
-**Decyzja:** osiem właścicieli modeli biznesowych; integracje, odczyt, delivery i platforma osobno. Małe moduły SRP wewnątrz tych granic. Katalog odpowiedzialności jest mapą projektu, nie listą osobnych deployów.
+**Decision:** eight owners of business models; integrations, reads, delivery and the platform remain separate. Small SRP modules sit within these boundaries. The responsibility catalog is a design map, not a list of separate deployments.
 
-**Konsekwencje:** możliwy duży podział kodu przy zachowaniu lokalnych transakcji; mniej ukrytych zależności. Wydzielenie usługi dotyczy właściciela danych, nie pojedynczej funkcji.
+**Consequences:** substantial code decomposition while retaining local transactions and reducing hidden dependencies. Extracting a service follows data ownership, not an individual function.
 
-## ADR-202 — Fakty komunikacji oddzielone od interpretacji
+## ADR-202 — Communication facts are separate from interpretation
 
-**Decyzja:** SourceDelivery, Reception, FrameOccurrence, AssemblySession i MessageRevision są różnymi pojęciami. Import gotowej wiadomości nie tworzy sztucznej ramki/stacji.
+**Decision:** SourceDelivery, Reception, FrameOccurrence, AssemblySession and MessageRevision are distinct concepts. Importing a complete message does not create an artificial frame or station.
 
-**Konsekwencje:** więcej precyzyjnych modeli, ale możliwość reprocess/redecode bez zmieniania faktów. Deduplikacja nie usuwa pochodzenia.
+**Consequences:** more precise models, with the ability to reprocess or decode again without changing the facts. Deduplication does not remove provenance.
 
-## ADR-203 — Dwa etapy korelacji
+## ADR-203 — Two correlation stages
 
-**Decyzja:** Message→Aircraft i Message→FlightSession mają osobne modele, porty i polityki. Aircraft można potwierdzić bez session.
+**Decision:** Message→Aircraft and Message→FlightSession have separate models, ports and policies. Aircraft identity can be confirmed without a session.
 
-**Konsekwencje:** panel rozróżnia wiadomości maszyny od wiadomości przypisanych do konkretnego odcinka lotu. Brak sesji nie jest błędem identyfikacji samolotu. Callsign sam nie potwierdza fizycznej maszyny.
+**Consequences:** the panel distinguishes aircraft messages from messages assigned to a specific flight segment. An absent session is not an aircraft identification error. A callsign alone does not confirm the physical aircraft.
 
-## ADR-204 — Wersjonowane, odwracalne decyzje
+## ADR-204 — Versioned, reversible decisions
 
-**Decyzja:** link i publikowany wkład mają historię i rewizje. Wyższa pełna rewizja zastępuje lokalnie zapamiętany stan; retrakcja zostawia tombstone.
+**Decision:** links and published contributions retain history and revisions. A higher full-state revision replaces the locally retained state; a retraction leaves a tombstone.
 
-**Konsekwencje:** korekta A→B aktualizuje oba końce, a `max(lastSeen)` przestaje być jedyną pamięcią. Koszt przechowywania wkładów jest świadomie większy niż jednej daty.
+**Consequences:** an A→B correction updates both ends, and `max(lastSeen)` is no longer the only retained information. Storing contributions deliberately costs more than storing a single timestamp.
 
-## ADR-205 — Cztery osie dostępności
+## ADR-205 — Four availability dimensions
 
-**Decyzja:** freshness, match outcome, coverage i feed health są niezależne. Publiczny status liczy się tylko z dozwolonych wkładów. Pozycja ma własną świeżość.
+**Decision:** freshness, match outcome, coverage and feed health are independent. Public status is calculated only from permitted contributions. Position data has its own freshness.
 
-**Konsekwencje:** brak jednej etykiety „częściowe” o wielu znaczeniach. UI potrafi wyjaśnić brak ramek bez stwierdzenia, że samolot nie nadaje.
+**Consequences:** no single “partial” label with multiple meanings. The UI can explain missing frames without asserting that the aircraft is not transmitting.
 
-## ADR-206 — Port commit z atomowością i konkurencją
+## ADR-206 — Commit port with atomicity and concurrency guarantees
 
-**Decyzja:** use case otrzymuje wąski capability set do zapisu lokalnej decyzji i outbox. Adapter musi gwarantować serializację/CAS per klucz także dla pierwszego INSERT.
+**Decision:** a use case receives a narrow capability set for writing the local decision and outbox entry. The adapter must guarantee serialization or CAS per key, including the first INSERT.
 
-**Konsekwencje:** domena nie zna SQL, ale port mówi więcej niż „save”. Test double ma ograniczony zakres; implementacja DB musi przejść osobne testy konkurencji i awarii.
+**Consequences:** the domain does not know SQL, but the port says more than “save.” The test double has a limited scope; the database implementation must pass separate concurrency and failure tests.
 
-## ADR-207 — Trwała dostawa od pierwszego wdrożenia
+## ADR-207 — Durable delivery from the first deployment
 
-**Decyzja:** outbox + trwałe deliveries/inbox w PostgreSQL jako wariant początkowy, albo od razu outbox + trwały broker. Zwykły EventEmitter nie potwierdza wykonania wszystkich odbiorców.
+**Decision:** start with an outbox plus durable deliveries/inbox in PostgreSQL, or use an outbox plus a durable broker immediately. A plain EventEmitter does not confirm that every consumer has completed its work.
 
-**Konsekwencje:** retry, lease, quarantine i niezależne consumer IDs są częścią projektu, nie przypadkowym dodatkiem po pierwszym incydencie. Nie potrzeba pełnego event sourcingu; stan domenowy i historia ważnych decyzji wystarczają.
+**Consequences:** retry, leasing, quarantine and independent consumer IDs are part of the design, not accidental additions after the first incident. Full event sourcing is unnecessary; domain state and a history of significant decisions are sufficient.
 
-## ADR-208 — Snapshot i delta z tej samej projekcji
+## ADR-208 — Snapshot and deltas from the same projection
 
-**Decyzja:** model odczytu ma generation i porządek zmian; snapshot posiada checkpoint w tym porządku. Gateway najpierw zabezpiecza replay/buffering, potem zwraca snapshot.
+**Decision:** the read model has a generation and an ordered change stream; its snapshot carries a checkpoint in that order. The gateway establishes replay or buffering before returning the snapshot.
 
-**Konsekwencje:** REST i WS nie działają jako dwie niezależne prawdy. Kontrakt obsługuje remove, restart, zmianę filtrów i wygasły cursor.
+**Consequences:** REST and WS do not operate as two independent sources of truth. The contract handles removals, restarts, filter changes and expired cursors.
 
-## ADR-209 — Abstrakcje przez kompozycję
+## ADR-209 — Abstractions through composition
 
-**Decyzja:** generyki dla stabilnych mechanizmów technicznych; konkretne nazwy dla reguł lotniczych. Ręczny composition root; brak globalnego kontenera zależności w domenie.
+**Decision:** use generics for stable technical mechanisms and concrete names for aviation rules. Use a manual composition root; no global dependency container in the domain.
 
-**Konsekwencje:** małe funkcje są naturalną jednostką SRP. Klasy powstają tam, gdzie jest stan i lifecycle. Dodawanie nowego adaptera nie wymaga dziedziczenia po uniwersalnym BaseService.
+**Consequences:** small functions are a natural SRP unit. Classes are introduced where state and lifecycle require them. Adding an adapter does not require inheritance from a universal BaseService.
 
-## ADR-210 — Wdrożenie etapowe i jawny stan gotowości
+## ADR-210 — Staged implementation and explicit readiness
 
-**Decyzja:** implementacja zaczyna się od jednego kompletnego przepływu na dwóch źródłach danych. Nie generujemy dziesiątek pustych serwisów z metodami TODO tylko po to, by drzewo wyglądało na pełne.
+**Decision:** implementation starts with one complete flow using two data sources. We do not generate dozens of empty services with TODO methods merely to make the directory tree appear complete.
 
-**Konsekwencje:** katalog docelowy może być rozbudowany, lecz każdy dostarczony fragment kodu ma uruchamialne zachowanie i opis ograniczeń. Produkcja wymaga adapterów, praw do danych, testów trwałości i pomiarów.
+**Consequences:** the target catalog can be extensive, but each delivered code slice has executable behavior and documented limitations. Production requires adapters, data usage rights, durability tests and measurements.

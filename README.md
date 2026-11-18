@@ -1,14 +1,14 @@
 # Terminal Velocity
 
-Backend aplikacji łączącej mapę samolotów z ich komunikatami radiowymi. Projekt rozwijamy jako modularny monolit: małe moduły domenowe, SRP, jawne porty i kontrolowane zależności.
+A backend for an application that connects an aircraft map with aircraft radio messages. The project uses a modular monolith: small domain modules, SRP, explicit ports, and controlled dependencies.
 
-Repozytorium: [ppotepa/terminal-velocity](https://github.com/ppotepa/terminal-velocity). Dokumentacja wcześniejszego etapu projektowego używa nazwy roboczej Airframes Tracker; wewnętrzne pakiety zachowują przestrzeń nazw `@airframes`.
+Repository: [ppotepa/terminal-velocity](https://github.com/ppotepa/terminal-velocity). Earlier design documents use the working name Airframes Tracker; internal packages retain the `@airframes` namespace. All project-authored documentation and text use English.
 
-**Etap 1: lokalny demonstrator API.** Działa przyjmowanie syntetycznej wiadomości, korelacja z samolotem, wyznaczenie dostępności komunikatów i odczyt danych dla przyszłej mapy. Pozycje są fixture. Dane żyją w pamięci jednego procesu; restart je usuwa.
+**Stage 1: local API demonstrator.** It accepts synthetic messages, correlates them with aircraft, determines message availability, and exposes data for the future map. Positions are fixtures. Data lives in one process's memory and is lost on restart.
 
-## Uruchomienie
+## Quick start
 
-Wymagany Node.js 24.x i npm. Z katalogu głównego:
+Requires Node.js 24.x and npm. From the repository root:
 
 ```bash
 npm ci
@@ -16,59 +16,59 @@ npm run check
 npm start
 ```
 
-API nasłuchuje na `http://127.0.0.1:3000`. Inny port ustaw przez zmienną `PORT`. Host jest celowo stały: demonstrator nie ma jeszcze produkcyjnego uwierzytelniania ani polityki publikacji.
+The API listens on `http://127.0.0.1:3000`. Set `PORT` to use a different port. The host is fixed because the demonstrator does not yet provide production authentication or a publication policy.
 
-W drugim terminalu uruchom przykład, który pobiera samolot z fixture, przyjmuje nowy komunikat i pokazuje wynik:
+In a second terminal, run the example client. It selects a fixture aircraft, submits a message, and displays the result:
 
 ```bash
 npm run example
 ```
 
-Możesz też odpytać API:
+You can also query the API directly:
 
 ```bash
 curl http://127.0.0.1:3000/healthz
 curl http://127.0.0.1:3000/api/v1/aircraft
 ```
 
-## Działający przepływ
+## Implemented flow
 
-Żądanie HTTP przechodzi przez limit i parsowanie JSON, walidację faktów wiadomości, regułę korelacji i aktualizację wkładu dostępności. Zatwierdzenie stanu demo odbywa się w jednym procesie pod kolejką serializującą operacje. Ponowienie tego samego `messageId` z tymi samymi faktami zwraca wcześniejszy wynik. Inne fakty pod tym samym ID zwracają konflikt.
+An HTTP request passes through body limits and JSON parsing, message fact validation, the correlation rule, and the availability contribution update. Demo state is committed in one process through a queue that serializes operations. Repeating the same `messageId` with the same facts returns the earlier result. Different facts under the same ID produce a conflict.
 
-Świeżość liczymy od **czasu obserwacji**, także dla danych historycznych. Na odczycie aktualizujemy wygasłe statusy. `RECENT`, `STALE`, coverage i kondycja źródła są osobnymi informacjami; syntetyczny komunikat nie oznacza połączenia z prawdziwym odbiornikiem. Szczegóły kontraktu: [API.md](docs/API.md).
+Freshness uses **observation time**, including for historical data. Expired statuses are recalculated on reads. Message freshness (`RECENT`, `STALE`, or `NONE`), coverage, and feed health are separate dimensions; a synthetic message does not indicate a connection to a real receiver. See [API.md](docs/API.md) for the contract.
 
-## Struktura
+## Structure
 
-| Ścieżka | Odpowiedzialność |
+| Path | Responsibility |
 |---|---|
-| `packages/backend/src/kernel` | Małe typy wspólne, Result, czas |
-| `packages/backend/src/contracts` | Typowane identyfikatory |
-| `packages/backend/src/modules/aircraft-correlation` | Identyfikacja samolotu na podstawie dowodów temporalnych |
-| `packages/backend/src/modules/message-availability` | Odwracalne wkłady, świeżość, wygasanie |
-| `packages/backend/src/demo` | Złożenie scenariusza, syntetyczny katalog, pamięciowy stan i DTO |
-| `apps/api/src` | Transport HTTP, routing, konfiguracja procesu i shutdown |
-| `scripts/architecture` | Kontrola zależności przez AST TypeScript i testy naruszeń |
-| `docs/architecture` | Uzgodniona architektura v2, katalog odpowiedzialności i projekty kontraktów |
+| `packages/backend/src/kernel` | Small shared types, Result, and time |
+| `packages/backend/src/contracts` | Typed identifiers |
+| `packages/backend/src/modules/aircraft-correlation` | Aircraft identity based on temporal evidence |
+| `packages/backend/src/modules/message-availability` | Reversible contributions, freshness, and expiry |
+| `packages/backend/src/demo` | Scenario composition, synthetic catalog, in-memory state, and DTOs |
+| `apps/api/src` | HTTP transport, routing, process configuration, and shutdown |
+| `scripts/architecture` | Dependency checks using the TypeScript AST and violation tests |
+| `docs/architecture` | Agreed architecture v2, responsibility catalog, and proposed contracts |
 
-Granulacja dotyczy odpowiedzialności kodu. Nie tworzymy osobnego procesu ani pakietu npm dla każdego pliku.
+Granularity follows code responsibilities. Each file does not require a separate process or npm package.
 
-## Komendy
+## Commands
 
-| Komenda | Zakres |
+| Command | Scope |
 |---|---|
-| `npm run check` | Typecheck strict, granice modułów i wszystkie testy |
-| `npm run typecheck` | Rzeczywiste sprawdzenie TypeScript przez `tsc` |
-| `npm run check:boundaries` | Statyczna kontrola zależności i cykli |
-| `npm test` | Testy domen, scenariusza API i kontroli architektury |
-| `npm run demo` | Referencyjny przykład korelacji, outboxu i korekty A→B |
-| `npm start` | Serwer demonstracyjny na localhost |
-| `npm run example` | Przykładowy klient działającego serwera |
-| `npm run smoke` | Start rzeczywistego entrypointu, przykład klienta i zamknięcie procesu |
+| `npm run check` | Strict type checking, module boundaries, and all tests |
+| `npm run typecheck` | TypeScript verification with `tsc` |
+| `npm run check:boundaries` | Static dependency and cycle checks |
+| `npm test` | Domain, API scenario, and architecture checker tests |
+| `npm run demo` | Reference example of correlation, outbox, and an A→B correction |
+| `npm start` | Demonstration server on localhost |
+| `npm run example` | Example client for a running server |
+| `npm run smoke` | Actual entrypoint startup, example client, and process shutdown |
 
-CI wykonuje te same bramki na GitHub Actions. Node usuwa typy podczas uruchomienia źródeł `.ts`; kontrolę typów wykonuje osobno `tsc`. Aplikacja nie wymaga zewnętrznych pakietów runtime.
+The GitHub Actions workflow is configured to run the same checks. Node strips types when executing `.ts` sources; `tsc` checks types separately. The application requires no external runtime packages.
 
-## Status i dalszy rozwój
+## Status and next steps
 
-[IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) rozdziela wykonaną funkcjonalność od docelowej architektury. [ROADMAP.md](docs/ROADMAP.md) opisuje następne przekroje: PostgreSQL, jeden rzeczywisty konektor, pozycje/mapa, publication scope i aktualizacje przyrostowe.
+[IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) distinguishes implemented behavior from the target architecture. [ROADMAP.md](docs/ROADMAP.md) describes the next slices: PostgreSQL, one real connector, positions and map reads, publication scope, and incremental updates.
 
-Obecny etap nie zawiera rzeczywistych źródeł ADS-B/Airframes, pełnego dekodera RF, reassembly, bazy PostgreSQL, produkcyjnego outbox relay ani frontendu. Pliki SQL i JSON Schema w architekturze są projektami do dalszej implementacji. Udostępnienie demonstratora publicznie wymaga najpierw zbudowania warstwy dostępu i publikacji.
+The current stage does not include real ADS-B/Airframes sources, a complete RF decoder, reassembly, PostgreSQL, a production outbox relay, or a frontend. SQL and JSON Schema files in the architecture documentation are designs for future implementation. Public deployment requires the access and publication layers first.
