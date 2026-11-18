@@ -1,0 +1,13 @@
+export { icao24, type Icao24 } from '../domain/icao24.ts';
+export { registration, type Registration } from '../domain/registration.ts';
+export type { StrongIdentifier } from '../domain/strong-identifier.ts';
+export type { TemporalAlias } from '../domain/temporal-alias.ts';
+export type { AircraftCandidate } from '../domain/aircraft-candidate.ts';
+export type { CorrelationInput } from '../domain/correlation-input.ts';
+export type { MatchDecision } from '../domain/match-decision.ts';
+export { decideAircraftMatch } from '../domain/decide-aircraft-match.ts';
+export { createCorrelateMessage, type CorrelationDependencies } from '../application/correlate-message.ts';
+export type { StoredDecision } from '../application/stored-decision.ts';
+export type { CandidateDirectory, CandidateSnapshot, IncompleteCandidateReason } from '../ports/candidate-directory.ts';
+export type { DecisionTransaction } from '../ports/decision-transaction.ts';
+export type { EventIdGenerator } from '../ports/event-id-generator.ts';

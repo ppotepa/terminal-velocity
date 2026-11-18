@@ -1,0 +1,16 @@
+{
+  "name": "@airframes/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./demo": "./src/demo/public/index.ts",
+    "./correlation": "./src/modules/aircraft-correlation/public/index.ts",
+    "./availability": "./src/modules/message-availability/public/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "demo": "node src/app/demo.ts"
+  }
+}
