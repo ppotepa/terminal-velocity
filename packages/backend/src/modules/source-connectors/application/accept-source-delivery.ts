@@ -1,6 +1,6 @@
 import { epochMillis } from '../../../kernel/time/epoch-millis.ts';
 import { err, ok, type Result } from '../../../kernel/result.ts';
-import { hasOnlyKeys, isToken, plainRecord } from '../domain/input-validation.ts';
+import { hasOnlyKeys, hasOwn, isToken, plainRecord } from '../domain/input-validation.ts';
 import { parseSourceObservation } from '../domain/source-observation.ts';
 import type { SourceCapabilities } from '../domain/source-capabilities.ts';
 import type { SourceDeliveryIdentity } from '../domain/source-delivery-identity.ts';
@@ -31,9 +31,30 @@ function parseOrigin(input: unknown): SourceDeliveryOrigin | null {
   return { pageUrl, parserVersion: record['parserVersion'], retrievedAt: retrieved.value, ingestedAt: ingested.value };
 }
 
+/** A parsed #5 time carries both UTC text and milliseconds. Check their equivalence
+ * before reusing the envelope parser for all clock and level invariants. */
+function envelopeTime(value: unknown): unknown {
+  const time = plainRecord(value);
+  if (!time || !hasOwn(time, 'iso')) return value;
+  if (!hasOnlyKeys(time, ['iso', 'at', 'basis', 'precision', 'uncertaintyMs'])
+    || typeof time['at'] !== 'number' || typeof time['iso'] !== 'string'
+    || Date.parse(time['iso']) !== time['at']) return null;
+  return { at: time['iso'], basis: time['basis'], precision: time['precision'], uncertaintyMs: time['uncertaintyMs'] };
+}
+
+function parseAcceptanceObservation(input: unknown) {
+  const record = plainRecord(input);
+  if (record) {
+    for (const field of ['receivedAt', 'observedAt']) {
+      if (hasOwn(record, field)) record[field] = envelopeTime(record[field]);
+    }
+  }
+  return parseSourceObservation(record);
+}
+
 export async function acceptSourceDelivery(scope: VerifiedSourceScope, transaction: SourceAcceptanceTransaction,
   envelope: unknown, provenance: unknown): Promise<AcceptanceResult> {
-  const parsed = parseSourceObservation(envelope);
+  const parsed = parseAcceptanceObservation(envelope);
   if (!parsed.ok) return err({ code: 'INVALID', field: 'observation' });
   const observation = parsed.value;
   const { provider, accountScope, sourceEpoch } = observation.sourceDeliveryId;

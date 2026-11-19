@@ -79,6 +79,22 @@ test('a worker killed after commit and before reply can be retried without anoth
   assert.equal(rows[0].delivery_id, retry.value.deliveryId);
 });
 
+test('a validated #5 observation and its serialized envelope produce the same acceptance receipt', async () => {
+  const item = envelope();
+  item.observedAt = { ...item.receivedAt, basis: 'OBSERVED' };
+  const parsed = parseSourceObservation(item);
+  assert.ok(parsed.ok);
+  const created = await accept(parsed.value);
+  assert.equal(created.value.outcome, 'CREATED');
+  const retry = await accept(item);
+  assert.equal(retry.value.outcome, 'DUPLICATE');
+  assert.equal(retry.value.deliveryId, created.value.deliveryId);
+  for (const change of [{ at: 999 }, { iso: 'not UTC' }, { extra: true }]) {
+    const inconsistent = { ...parsed.value, observedAt: { ...parsed.value.observedAt, ...change } };
+    assert.deepEqual((await accept(inconsistent)).error, { code: 'INVALID', field: 'observation' });
+  }
+});
+
 test('canonical facts conflict even with an unchanged provider digest; query and page retrieval clocks do not', async () => {
   const item = envelope();
   const created = await accept(item);
