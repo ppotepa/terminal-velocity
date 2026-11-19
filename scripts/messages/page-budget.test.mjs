@@ -6,13 +6,13 @@ import { boundPage } from './page-budget.mjs';
 const url = 'https://app.airframes.io/messages/live';
 const limit = 8 * 1024 * 1024;
 
-async function fixture() {
+async function fixture(readDocument = () => ({ data: '<html></html>', eof: true })) {
   const session = new EventEmitter();
   const failures = [], decisions = [];
   let nextId = 0, open;
   session.send = async (method, params) => {
     if (method === 'Fetch.takeResponseBodyAsStream') return { stream: 'document' };
-    if (method === 'IO.read') return { data: '<html></html>', eof: true };
+    if (method === 'IO.read') return readDocument(params.size);
     if (method === 'Fetch.fulfillRequest') decisions.push(params);
     if (method === 'Fetch.continueRequest' || method === 'Fetch.failRequest') decisions.push(method);
   };
@@ -126,4 +126,42 @@ test('a successful HTTP/2 document response can omit the reason phrase', async (
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(decisions.at(-1).responsePhrase, 'OK');
   assert.equal(decisions.at(-1).responseCode, 200);
+});
+
+test('streamed document bytes spend the shared budget once across response fulfillment', async () => {
+  const { session, failures, decisions } = await fixture();
+  const html = '<html></html>';
+  const originalPolicy = { name: 'Content-Security-Policy', value: "object-src 'none'" };
+  session.emit('Fetch.requestPaused', { requestId: 'fetch', networkId: 'document', resourceType: 'Document',
+    responseStatusCode: 200, responseHeaders: [originalPolicy, { name: 'Content-Encoding', value: 'gzip' }] });
+  await new Promise(resolve => setImmediate(resolve));
+  const response = decisions.at(-1);
+  assert.equal(Buffer.from(response.body, 'base64').toString(), html);
+  assert.deepEqual(response.responseHeaders[0], originalPolicy);
+  assert.equal(response.responseHeaders.length, 2);
+  assert.equal(response.responseHeaders[1].name, 'Content-Security-Policy');
+  assert.match(response.responseHeaders[1].value, /frame-src 'none'/);
+  const received = (requestId, dataLength) => session.emit('Network.dataReceived', { requestId, dataLength });
+  received('document', html.length);
+  received('script-a', limit);
+  received('script-b', limit);
+  received('script-c', limit - html.length);
+  assert.deepEqual(failures, []);
+  received('script-c', 1);
+  assert.deepEqual(failures, [{ status: 413 }]);
+});
+
+test('a chunked document over the decoded response limit never reaches the renderer', async () => {
+  const chunk = 'x'.repeat(65536);
+  let bytes = 0;
+  const { session, failures, decisions } = await fixture(size => {
+    assert.equal(size, chunk.length);
+    bytes += size;
+    return { data: chunk, eof: bytes > limit };
+  });
+  session.emit('Fetch.requestPaused', { requestId: 'fetch', networkId: 'document', resourceType: 'Document',
+    responseStatusCode: 200 });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(failures, [{ status: 413 }]);
+  assert.deepEqual(decisions, []);
 });

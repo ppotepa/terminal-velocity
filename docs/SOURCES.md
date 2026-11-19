@@ -20,6 +20,8 @@ The existing `crawl ABC123` strategy is a private, one-shot preview. Its program
 | Delivery and stop | One callback at a time. The handler can bind a source parser, verified scope and #8 transaction. Only its committed CREATED or DUPLICATE receipt increments accepted. An unavailable result or interrupted callback retries the identical envelope up to twice after 1 and 2 seconds. A conflict or invalid result ends the run. Stop cancels browser work and waits for an outstanding acceptance call. Unaccepted rows have no durable checkpoint. A subsequent start opens a fresh selected-aircraft window. |
 | Health | DISCONNECTED between windows, DEGRADED during retry, HEALTHY while delivering a validated window. Last receipt time is the local retrieval clock. Coverage stays UNKNOWN. No timestamps are inferred for the aircraft message. |
 
+The browser adapter reads the decoded document in bounded chunks before handing it to the renderer with the additional content security policy. The document spends its decoded size once against both the 8 MiB response limit and the 24 MiB window limit, including when HTTP/2 omits a reason phrase.
+
 Run `npm run test:messages` for transport policy and budget checks. Run `npm run test:browser` for the offline rendered-browser suite. Its CLI fixture renders cards only after a first-party bootstrap response and a socket update. The HTTP/2 regression uses OpenSSL to generate an ephemeral certificate and serves the synthetic document on loopback so Chromium processes its response headers. `npm run test:postgres:local` includes a synthetic delivery replay through the connector and #8 transaction.
 
 The adsb.lol public API is a separate candidate for **positions**, not messages.

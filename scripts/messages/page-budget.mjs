@@ -12,6 +12,7 @@ function firstParty(url, protocol) {
 export async function boundPage(context, page, liveUrl, cancel, syntheticShell) {
   let requests = 0, totalBytes = 0, navigationStarted = false, closed = false;
   const active = new Map();
+  let streamedDocumentId;
   const session = await context.newCDPSession(page);
   let socket, server, socketMessages = 0;
 
@@ -51,6 +52,7 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
         // Chromium applies the replacement policy when it receives a new document
         // response. Read decoded bytes in bounded chunks before supplying that body.
         if (Number(headers.get('content-length')) > maxResponseBytes) return;
+        streamedDocumentId = networkId;
         const { stream } = await session.send('Fetch.takeResponseBodyAsStream', { requestId });
         const chunks = [];
         let bytes = 0;
@@ -110,6 +112,8 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
     checkResponse(response.status, headers, type);
   });
   session.on('Network.dataReceived', ({ requestId, dataLength }) => {
+    // The IO stream already charged these decoded bytes before fulfillment.
+    if (requestId === streamedDocumentId) return;
     const size = (active.get(requestId) ?? 0) + dataLength;
     active.set(requestId, size);
     countBytes(dataLength, size);
