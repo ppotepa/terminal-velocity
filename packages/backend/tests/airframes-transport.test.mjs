@@ -176,3 +176,15 @@ for (const status of ['PARTIAL_LAYOUT', 'TRUNCATED']) test(`${status} validates 
     assert.equal(transport.health().accepted, 0);
   }
 });
+
+test('a rate limit without a usable cooldown ends the lookup and a refused upgrade retains any cooldown', async () => {
+  for (const retryAfter of [undefined, 'invalid']) {
+    const { connection, starts } = setup(() => ({ status: 429, retryAfter }));
+    assert.equal(await connection.start(assert.fail), 'RATE_LIMITED');
+    assert.deepEqual(starts, [1000]);
+  }
+  const { connection, starts } = setup(() => ({ status: 429, retryAfter: '60', stopAfterResponse: true }));
+  assert.equal(await connection.start(assert.fail), 'RATE_LIMITED');
+  assert.equal(await connection.start(assert.fail), 'RATE_LIMITED');
+  assert.deepEqual(starts, [1000]);
+});

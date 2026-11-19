@@ -73,6 +73,8 @@ test('only one first-party socket may connect; frames in both directions share t
   const client = peer(), server = peer();
   open({ ...peer(), url: () => 'wss://analytics.airframes.io/track', connectToServer: assert.fail });
   open(Object.assign(client, { url: () => 'wss://stream.airframes.io/live', connectToServer: () => server }));
+  session.emit('Network.webSocketCreated', { requestId: 'ws', url: client.url() });
+  session.emit('Network.webSocketHandshakeResponseReceived', { requestId: 'ws', response: { status: 101 } });
   client.receive('ready');
   assert.deepEqual(server.sent, ['ready']);
   const large = Buffer.alloc(limit);
@@ -164,4 +166,33 @@ test('a chunked document over the decoded response limit never reaches the rende
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(failures, [{ status: 413 }]);
   assert.deepEqual(decisions, []);
+});
+
+test('only the active native handshake can end the window before a successful upgrade', async () => {
+  const cases = [
+    ['Error during WebSocket handshake: Unexpected response code: 429', 429],
+    ['HTTP Authentication failed; no valid credentials available', 401],
+    ['Error in connection establishment: net::ERR_INVALID_AUTH_CREDENTIALS', 401],
+    ['Unexpected response code: 403', 403],
+    ['Connection closed before receiving a handshake response', 503],
+  ];
+  for (const [errorMessage, status] of cases) {
+    const { open, session, failures } = await fixture();
+    const url = 'wss://ws.airframes.io/live';
+    open({ ...peer(), url: () => url, connectToServer: peer });
+    session.emit('Network.webSocketCreated', { requestId: 'active', url });
+    session.emit('Network.webSocketFrameError', { requestId: 'other', errorMessage });
+    session.emit('Network.webSocketFrameError', { requestId: 'active', errorMessage });
+    assert.deepEqual(failures, [{ status, stopAfterResponse: true }]);
+  }
+});
+
+test('a handshake with visible refusal headers passes through its cooldown', async () => {
+  const { open, session, failures } = await fixture();
+  const url = 'wss://ws.airframes.io/live';
+  open({ ...peer(), url: () => url, connectToServer: peer });
+  session.emit('Network.webSocketCreated', { requestId: 'active', url });
+  session.emit('Network.webSocketHandshakeResponseReceived', { requestId: 'active',
+    response: { status: 429, headers: { 'Retry-After': '60' } } });
+  assert.deepEqual(failures, [{ status: 429, retryAfter: '60', stopAfterResponse: true }]);
 });

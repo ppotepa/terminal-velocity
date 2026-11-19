@@ -1,11 +1,10 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash, X509Certificate } from 'node:crypto';
 import { once } from 'node:events';
 import { createSecureServer } from 'node:http2';
 import test from 'node:test';
 import { promisify } from 'node:util';
-import { chromium } from 'playwright-core';
 import { liveUrl } from './airframes-live.mjs';
 
 const bootstrap = 'https://api.airframes.io/stream/visitor-token';
@@ -27,19 +26,14 @@ fetch('${analytics}').catch(() => {});
   const socket = new WebSocket(config.stream);
   socket.onopen = () => socket.send('ready');
   socket.onmessage = event => {
-    if (event.data === 'disconnect') {
-      document.querySelector('main').innerHTML = '<div class="messages-scroller"></div>';
-      socket.close();
-      return;
-    }
     document.querySelector('main').innerHTML = '<div class="messages-scroller">' + event.data + '</div>';
   };
 })();
 </script>`;
 
 // HTTP/2 supplies :status without a reason phrase. Keep TLS material in memory
-// and resolve only the selected hostname to this per-test loopback server.
-async function http2Document(t, upgradeStatus) {
+// and resolve only the document, bootstrap and socket hosts to loopback.
+async function loopbackProvider(t, { upgradeStatus, denied, redirect, partial, disconnect, onReady, burst }) {
   const { stdout: pem } = await promisify(execFile)('openssl', ['req', '-x509', '-newkey', 'ec',
     '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-subj', '/CN=app.airframes.io',
     '-days', '1', '-keyout', '-', '-out', '-']);
@@ -48,125 +42,86 @@ async function http2Document(t, upgradeStatus) {
   const spki = new X509Certificate(cert).publicKey.export({ type: 'spki', format: 'der' });
   const pin = createHash('sha256').update(spki).digest('base64');
   const server = createSecureServer({ cert, key, allowHTTP1: true });
-  const paths = [], upgrades = [];
+  const paths = [], sockets = [], bootstraps = [], peers = new Set();
   server.on('upgrade', (req, socket) => {
-    upgrades.push(req.url);
-    socket.end(`HTTP/1.1 ${upgradeStatus} Denied\r\nRetry-After: 60\r\nContent-Length: 0\r\n\r\n`);
+    peers.add(socket);
+    socket.once('close', () => peers.delete(socket));
+    socket.on('error', error => { if (error.code !== 'ECONNRESET') throw error; });
+    sockets.push('wss://' + req.headers.host + req.url);
+    assert.equal(req.headers.origin, new URL(liveUrl).origin);
+    if (upgradeStatus === 'drop') return socket.destroy();
+    if (upgradeStatus) {
+      socket.end(`HTTP/1.1 ${upgradeStatus} Denied\r\nContent-Length: 0\r\n\r\n`);
+      return;
+    }
+    const accept = createHash('sha1').update(req.headers['sec-websocket-key']
+      + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+    socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+      + `Sec-WebSocket-Accept: ${accept}\r\n\r\n`);
+    // Wait for Chromium's first frame after the page opens the connection.
+    socket.once('data', () => {
+      if (onReady) { onReady(); return; }
+      if (disconnect && sockets.length === 1) { socket.end(Buffer.from([0x88, 0])); return; }
+      const body = Buffer.from(burst
+        ? Array.from({ length: 26 }, (_, i) => card('ABC123', String(i))).join('')
+        : card('ABC123', 'selected') + card('DEF456', 'other') + (partial ? card('ABC123', 'live') : ''));
+      const header = Buffer.from([0x81, 126, 0, 0]);
+      header.writeUInt16BE(body.length, 2);
+      socket.write(Buffer.concat([header, body]));
+    });
+    socket.on('end', () => socket.end());
   });
-  server.on('stream', (stream, headers) => {
+  server.on('stream', (response, headers) => {
+    if (headers[':authority'] === new URL(bootstrap).host && headers[':path'] === new URL(bootstrap).pathname) {
+      bootstraps.push(headers[':method']);
+      response.respond({ ':status': denied ?? 200, 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+      response.end(JSON.stringify({ stream }));
+      return;
+    }
     paths.push(headers[':path']);
-    stream.respond({ ':status': 200, 'content-type': 'text/html' });
+    if (redirect) {
+      response.respond({ ':status': 302, location: outside });
+      response.end();
+      return;
+    }
+    response.respond({ ':status': 200, 'content-type': 'text/html' });
     // A frame navigation blocked before reaching the loopback server proves Chromium
     // enforced the response header that the document interceptor appended.
-    stream.end(shell + `<script>
+    response.end(shell + `<script>
       document.addEventListener('securitypolicyviolation', event => console.log(event.effectiveDirective));
       const frame = document.createElement('iframe'); frame.src = '/fixture-child'; document.body.append(frame);
     </script>`);
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
-  t.after(() => new Promise(resolve => server.close(resolve)));
-  return { paths, upgrades, upgradeStatus, args: ['--no-proxy-server', '--ignore-certificate-errors-spki-list=' + pin,
-    `--host-resolver-rules=MAP app.airframes.io 127.0.0.1:${server.address().port}, MAP ws.airframes.io 127.0.0.1:${server.address().port}, MAP * ~NOTFOUND`] };
+  t.after(() => {
+    for (const peer of peers) peer.destroy();
+    return new Promise(resolve => server.close(resolve));
+  });
+  return { paths, sockets, bootstraps, peers, pin, port: server.address().port };
 }
 
-// Replace only the upstream peer and HTTP responses. Chromium still performs
-// navigation, redirects, cross-origin fetch, socket events and DOM rendering.
-async function crawl(t, { denied, redirect, partial, disconnect, stop, burst, documentServer } = {}) {
-  const requested = [], blocked = [], sockets = [], closed = [], output = [];
-  const documentResponses = [], pageLogs = [], browsers = [];
-  const launch = chromium.launch.bind(chromium);
-  t.mock.method(chromium, 'launch', async options => {
-    const browser = await launch({ ...options, args: documentServer?.args });
-    browsers.push(browser);
-    const newContext = browser.newContext.bind(browser);
-    browser.newContext = async config => {
-      const context = await newContext({ ...config, offline: !documentServer });
-      if (documentServer?.upgradeStatus) await context.grantPermissions(['local-network-access'], { origin: new URL(liveUrl).origin });
-      const newSession = context.newCDPSession.bind(context);
-      context.newCDPSession = async page => {
-        const session = await newSession(page);
-        const urls = new Map();
-        page.on('console', message => pageLogs.push(message.text()));
-        session.on('Fetch.requestPaused', event => {
-          urls.set(event.requestId, event.request.url);
-          if (event.resourceType === 'Document' && event.responseStatusCode)
-            documentResponses.push([event.responseStatusCode, event.responseStatusText]);
-        });
-        const send = session.send.bind(session);
-        session.send = async (method, params) => {
-          if (method === 'Fetch.failRequest') blocked.push(urls.get(params.requestId));
-          if (method !== 'Fetch.continueRequest') return send(method, params);
-          const url = urls.get(params.requestId);
-          requested.push(url);
-          let responseCode = 404, body = '', headers = {};
-          if (url === liveUrl) {
-            if (documentServer) return send(method, params);
-            responseCode = redirect ? 302 : 200;
-            headers = redirect ? { Location: outside } : { 'Content-Type': 'text/html' };
-            body = redirect ? '' : shell;
-          } else if (url === bootstrap) {
-            responseCode = denied ?? 200;
-            headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' };
-            body = JSON.stringify({ stream });
-          }
-          return send('Fetch.fulfillRequest', { requestId: params.requestId, responseCode,
-            responseHeaders: Object.entries(headers).map(([name, value]) => ({ name, value })),
-            body: Buffer.from(body).toString('base64') });
-        };
-        return session;
-      };
-      const routeWebSocket = context.routeWebSocket.bind(context);
-      context.routeWebSocket = (pattern, handler) => routeWebSocket(pattern, route => {
-        if (documentServer?.upgradeStatus) return handler(route);
-        route.connectToServer = () => {
-          sockets.push(route.url());
-          let receive;
-          return {
-            onMessage(handler) { receive = handler; },
-            onClose() {},
-            close: async () => { closed.push(route.url()); },
-            send(message) {
-              if (message !== 'ready') return;
-              if (stop) { process.emit('SIGINT'); return; }
-              if (disconnect && sockets.length === 1) { receive('disconnect'); return; }
-              if (burst) {
-                receive(Array.from({ length: 26 }, (_, i) => card('ABC123', String(i))).join(''));
-                return;
-              }
-              receive(card('ABC123', 'selected') + card('DEF456', 'other') + (partial ? card('ABC123', 'live') : ''));
-            },
-          };
-        };
-        return handler(route);
-      });
-      return context;
-    };
-    return browser;
-  });
-  t.mock.method(console, 'log', value => output.push(value));
-  const argv = process.argv, previousCode = process.exitCode;
-  let code;
-  try {
-    process.argv = [process.execPath, 'cli.mjs', 'crawl', 'ABC123'];
-    process.exitCode = 0;
-    await import('./cli.mjs?case=' + encodeURIComponent(t.name));
-    code = process.exitCode;
-  } finally {
-    process.argv = argv;
-    process.exitCode = previousCode;
-  }
-  assert.equal(output.length, 1);
-  assert.ok(!requested.includes(analytics));
-  assert.deepEqual(closed, sockets);
-  assert.ok(browsers.every(browser => !browser.isConnected()));
-  return { result: JSON.parse(output[0]), requested, blocked, sockets, code, documentResponses, pageLogs };
+async function crawl(t, { stop, ...options } = {}) {
+  let child;
+  const provider = await loopbackProvider(t, { ...options, onReady: stop ? () => child.kill('SIGINT') : undefined });
+  child = spawn(process.execPath, ['scripts/messages/synthetic-browser-cli.mjs', String(provider.port), provider.pin],
+    { stdio: ['ignore', 'pipe', 'inherit'], cwd: new URL('../../', import.meta.url), timeout: 90000, killSignal: 'SIGKILL' });
+  let stdout = '';
+  child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk; });
+  const [code, signal] = await once(child, 'close');
+  assert.equal(signal, null);
+  const lines = stdout.trim().split('\n');
+  assert.equal(lines.length, 2);
+  const [result, evidence] = lines.map(line => JSON.parse(line));
+  assert.equal(evidence.browsersClosed, true);
+  assert.ok(!evidence.requested.includes(analytics));
+  assert.deepEqual(provider.bootstraps, evidence.requested.filter(url => url === bootstrap).map(() => 'POST'));
+  return { result, ...evidence, sockets: provider.sockets, code, provider };
 }
 
 test('a phrase-less HTTP/2 document enforces its policy and previews the selected card after bootstrap', async t => {
-  const documentServer = await http2Document(t);
-  const { result, code, documentResponses, pageLogs, blocked } = await crawl(t, { documentServer });
-  assert.deepEqual(documentServer.paths, ['/messages/live']);
+  const { result, code, documentResponses, pageLogs, blocked, provider } = await crawl(t);
+  assert.deepEqual(provider.paths, ['/messages/live']);
   assert.deepEqual(documentResponses, [[200, '']]);
   assert.ok(pageLogs.includes('frame-src'), JSON.stringify(pageLogs));
   assert.ok(blocked.includes(analytics));
@@ -235,19 +190,21 @@ test('a same-origin redirect outside the live page is blocked before the destina
   assert.ok(blocked.includes(outside));
 });
 
-test('cancelling the CLI closes the active socket without another page attempt', async t => {
-  const { result, sockets } = await crawl(t, { stop: true });
+test('SIGINT stops the CLI browser and returns control to the embedding process', async t => {
+  const { result, code, provider } = await crawl(t, { stop: true });
+  assert.equal(code, 1);
   assert.equal(result.status, 'STOPPED');
   assert.deepEqual(result.messages, []);
-  assert.deepEqual(sockets, [stream]);
+  assert.deepEqual(provider.sockets, [stream]);
+  assert.deepEqual(provider.bootstraps, ['POST']);
+  await Promise.all([...provider.peers].map(socket => once(socket, 'close', { signal: AbortSignal.timeout(3000) })));
 });
 
-for (const [status, expected] of [[429, 'RATE_LIMITED'], [403, 'PERMANENT_FAILURE']]) {
+for (const [status, expected] of [[429, 'RATE_LIMITED'], [401, 'PERMANENT_FAILURE'], [403, 'PERMANENT_FAILURE'], ['drop', 'TEMPORARY_FAILURE']]) {
   test(`Chromium rejects a native WebSocket upgrade with HTTP ${status} without another lookup`, async t => {
-    const documentServer = await http2Document(t, status);
-    const { result, requested } = await crawl(t, { documentServer });
+    const { result, requested, sockets } = await crawl(t, { upgradeStatus: status });
     assert.equal(result.status, expected);
-    assert.deepEqual(documentServer.upgrades, [new URL(stream).pathname + new URL(stream).search]);
+    assert.deepEqual(sockets, [stream]);
     assert.deepEqual(requested.filter(url => url === bootstrap), [bootstrap]);
     assert.equal(result.accepted, 0);
     assert.deepEqual(result.messages, []);

@@ -86,6 +86,9 @@ export async function observePage(page, icao, windowMs = 10000, expiresAt = Infi
       retrievedAt: Number.MAX_SAFE_INTEGER })) - 4; // JSON null is replaced by the serialized card.
     const deadline = Math.min(Date.now() + windowMs, expiresAt);
     do {
+      // A sample needs a browser round trip. Once a validated sample exists,
+      // finish the window before the outer deadline makes that round trip fail.
+      if (sawCards && deadline - Date.now() < 100) break;
       const sample = await scroller.evaluate(readCards, { icao, selector: cardSelector, maxCards, maxEnvelopeBytes, maxWindowBytes, envelopeOverhead, liveUrl }, { timeout: remaining(3000) });
       if (!sample || leftScope) return denied;
       sawCards ||= sample.cards > 0;

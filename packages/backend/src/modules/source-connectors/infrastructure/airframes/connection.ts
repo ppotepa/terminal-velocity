@@ -36,9 +36,11 @@ export function airframesConnection(icao: string, read: ReadWindow, time = clock
       if (response.status === 429 || (response.status >= 500 && response.status <= 599)) {
         const outcome = response.status === 429 ? 'RATE_LIMITED' : 'TEMPORARY_FAILURE';
         health = { ...health, state: 'DEGRADED', outcome };
-        if ('stopAfterResponse' in response && response.stopAfterResponse) return outcome;
         const retry = retryAfterMs('retryAfter' in response ? response.retryAfter : undefined, time.now());
-        nextRequest = Math.max(nextRequest, time.now() + Math.max(retry, Math.floor(time.random() * (2000 * 2 ** attempt))));
+        nextRequest = Math.max(nextRequest, time.now() + retry);
+        if (('stopAfterResponse' in response && response.stopAfterResponse)
+          || (response.status === 429 && retry === 0)) return outcome;
+        nextRequest = Math.max(nextRequest, time.now() + Math.floor(time.random() * (2000 * 2 ** attempt)));
         if (attempt === 2) return outcome;
         continue;
       }

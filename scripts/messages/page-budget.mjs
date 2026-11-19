@@ -122,10 +122,29 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
     session.on(event, ({ requestId }) => active.delete(requestId));
   // Chromium owns the upgrade. It exposes rejected status codes in the frame
   // error but can withhold response headers, including a provider cooldown.
-  session.on('Network.webSocketFrameError', ({ errorMessage }) => {
-    if (closed || !socket) return;
-    const match = /Unexpected response code: (\d{3})/.exec(errorMessage);
-    if (match) cancel({ status: Number(match[1]), stopAfterResponse: true });
+  let socketId, upgraded = false;
+  session.on('Network.webSocketCreated', ({ requestId, url }) => {
+    if (socket && url === socket.url()) socketId = requestId;
+  });
+  session.on('Network.webSocketHandshakeResponseReceived', ({ requestId, response }) => {
+    if (closed || requestId !== socketId) return;
+    upgraded = response.status === 101 || response.status === 200;
+    if (!upgraded) {
+      const cooldown = Object.entries(response.headers).find(([name]) => name.toLowerCase() === 'retry-after');
+      cancel({ status: response.status >= 400 ? response.status : 503, retryAfter: cooldown?.[1], stopAfterResponse: true });
+    }
+  });
+  session.on('Network.webSocketFrameError', ({ requestId, errorMessage }) => {
+    if (closed || requestId !== socketId || upgraded) return;
+    const match = /Unexpected response code: (\d{3})/i.exec(errorMessage);
+    // Chromium can describe an authentication refusal without exposing its code.
+    const authFailure = /HTTP Authentication failed|ERR_(?:INVALID|MISSING)_AUTH_CREDENTIALS/i.test(errorMessage);
+    const status = match ? Number(match[1]) : (authFailure ? 401 : 503);
+    cancel({ status: status >= 400 ? status : 503, stopAfterResponse: true });
+  });
+  session.on('Network.webSocketClosed', ({ requestId }) => {
+    if (!closed && requestId === socketId)
+      cancel(upgraded ? { status: 503 } : { status: 503, stopAfterResponse: true });
   });
   await session.send('Network.enable');
   await session.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
@@ -147,8 +166,8 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
     }
     server.onMessage(message => forward(route, message));
     route.onMessage(message => forward(server, message));
-    // Retry the whole scoped window if either end disappears during observation.
-    const disconnected = () => { if (!closed) cancel({ status: 503 }); };
+    // Before acceptance, use the ordered Network events for the refusal status.
+    const disconnected = () => { if (!closed && upgraded) cancel({ status: 503 }); };
     route.onClose(disconnected);
     server.onClose(disconnected);
   });
