@@ -173,7 +173,7 @@ for (const phase of ['LEASED','COMMITTED']) test(`worker killed at ${phase} reco
 });
 
 test('runtime cannot mutate immutable provider facts, canonical evidence or registry provenance', async () => {
-  for (const table of ['source_ingestion.message_revisions','source_ingestion.synthetic_inputs','event_delivery.events']) {
+  for (const table of ['source_ingestion.message_revisions','source_ingestion.retained_inputs','event_delivery.events']) {
     await assert.rejects(pools.runtime.query(`DELETE FROM ${table}`), { code: '42501' });
   }
   await assert.rejects(pools.runtime.query('UPDATE source_ingestion.message_revisions SET canonical=canonical'), { code: '42501' });
@@ -200,14 +200,20 @@ test('separate deliveries of one provider message share a revision and preserve 
 
 test('reimporting a backfill does not refresh status and changed normalized registration cannot replay an old receipt', async () => {
   const p = pipeline(), raw = fixture(); raw.sourceObservedAt.at = '2026-11-18T10:00:00Z';
-  assert.ok((await accept(p, raw)).ok);
+  const first = await accept(p, raw);
+  assert.ok(first.ok);
+  const original = (await pools.admin.query('SELECT canonical FROM source_ingestion.retained_inputs WHERE delivery_id=$1', [first.value.deliveryId])).rows[0].canonical;
   const later = { ...context(raw), ingestedAt: { ...context(raw).ingestedAt, at: '2026-11-19T11:00:00Z' }, retrievedAt: NOW + 1000 };
   assert.equal((await p.acceptFixture(raw, later, scope, { ...origin, ingestedAt: NOW + 3_600_000 })).value.outcome, 'DUPLICATE');
+  assert.deepEqual((await pools.admin.query('SELECT canonical FROM source_ingestion.retained_inputs WHERE delivery_id=$1', [first.value.deliveryId])).rows[0].canonical, original);
+  const replay = await p.acceptFixture(raw, later, scope, { ...origin, ingestedAt: NOW + 3_600_000 });
+  assert.deepEqual(replay.value.origin, first.value.origin);
   // Keep the envelope digest fixed to verify the full normalized evidence comparison itself.
   const changed = { ...raw, aircraft: { ...raw.aircraft, registration: 'DEMO-002' } };
   assert.equal((await p.acceptFixture(changed, context(raw), scope, origin)).error.code, 'CONFLICTED');
   await p.drain();
   assert.equal((await p.readPrivateStatus('ac_demo-001')).freshness, 'NONE');
+  assert.deepEqual((await messages()).rows[0].canonical, original);
 });
 
 test('a disconnected COMMIT response leaves one durable import and resolves safely on retry', async () => {
@@ -283,7 +289,7 @@ test('injected rendered page reader feeds accepted source events into private co
       ingestedAt: { at: new Date(ingestedAt).toISOString(), basis: 'INGESTED', precision: 'MILLISECOND', uncertaintyMs: 0 } }, scope.capabilities);
     assert.ok(canonical.ok, JSON.stringify(canonical));
     receipt = await acceptSourceDelivery(scope,
-      postgresSourceAcceptanceTransaction(pools.runtime, randomUUID, canonical.value), canonical.value.observation,
+      postgresSourceAcceptanceTransaction(pools.runtime, randomUUID, { canonical: canonical.value, permission: { ...scope, retentionAllowed: true, purpose: 'PRIVATE_PROCESSING', evidenceReference: 'repository-synthetic-fixtures-only' } }), canonical.value.observation,
       { pageUrl: delivery.source, parserVersion: 'airframes-rendered-extractor-v1', retrievedAt: delivery.retrievedAt, ingestedAt });
     return receipt;
   });
@@ -294,4 +300,79 @@ test('injected rendered page reader feeds accepted source events into private co
   assert.equal(status.freshness, 'RECENT');
   assert.equal(status.contributions[0].source_delivery_id, receipt.value.deliveryId);
   assert.equal((await messages()).rows[0].canonical.provenance.originalSourceId, card.messagePath);
+});
+
+
+test('permitted non-synthetic namespace imports synthetic content privately and rejects absent or mismatched permission', async () => {
+  const { createPermittedProviderPipeline } = await import('../../src/modules/source-connectors/composition/create-permitted-provider-pipeline.ts');
+  const configured = { ...scope, sourceId: 'src_test-provider', provider: 'test-provider' };
+  const permission = { sourceId: configured.sourceId, provider: configured.provider,
+    accountScope: configured.accountScope, sourceEpoch: configured.sourceEpoch,
+    purpose: 'PRIVATE_PROCESSING', retentionAllowed: true, evidenceReference: 'test-only-synthetic-content-permission' };
+  const raw = fixture(), ctx = { ...context(raw), ...configured };
+  for (const denied of [undefined, { ...permission, retentionAllowed: false },
+    { ...permission, evidenceReference: '' }, { ...permission, purpose: 'PUBLIC' },
+    ...['sourceId','provider','accountScope','sourceEpoch'].map(key => ({ ...permission, [key]: 'different' }))]) {
+    const p = createPermittedProviderPipeline(pools.runtime, directory, denied, () => NOW);
+    await assert.rejects(p.accept(raw, ctx, configured, origin), /Retention permission/);
+    assert.equal(await count('source_ingestion.deliveries'), 0);
+  }
+  const p = createPermittedProviderPipeline(pools.runtime, directory, permission, () => NOW);
+  const receipt = await p.accept(raw, ctx, configured, origin);
+  assert.equal(receipt.value.outcome, 'CREATED');
+  assert.equal((await p.accept(raw, ctx, configured, origin)).value.outcome, 'DUPLICATE');
+  // A new composition consumes the durable accepted event after restart.
+  await createPermittedProviderPipeline(pools.runtime, directory, permission, () => NOW).drain();
+  const status = await p.readPrivateStatus('ac_demo-001');
+  assert.equal(status.freshness, 'RECENT');
+  assert.equal(status.contributions[0].source_delivery_id, receipt.value.deliveryId);
+  assert.deepEqual((await pools.admin.query('SELECT permission FROM source_ingestion.retained_inputs')).rows[0].permission, permission);
+  assert.equal((await messages()).rows[0].canonical.observation.sourceDeliveryId.provider, 'test-provider');
+  assert.equal(await count('availability.contributions'), 0);
+  assert.equal(await count('message_ingestion.messages'), 0);
+});
+
+test('same delivery cannot change original provider identity or original registration spelling', async () => {
+  const p = pipeline(), raw = fixture();
+  assert.ok((await accept(p, raw)).ok);
+  // Fix the raw digest so the normalized provenance comparison is tested directly.
+  const variants = [{ ...raw, originalSourceId: raw.originalSourceId + '-changed' },
+    { ...raw, aircraft: { ...raw.aircraft, registration: 'demo-001' } }];
+  for (const changed of variants) {
+    const normalized = normalizeSourceObservation(changed, context(raw), scope.capabilities);
+    assert.ok(normalized.ok);
+    assert.equal(normalized.value.aircraftHints.registration, 'DEMO-001');
+    assert.equal((await p.acceptFixture(changed, context(raw), scope, origin)).error.code, 'CONFLICTED');
+  }
+  await p.drain();
+  assert.equal(await count('source_ingestion.deliveries'), 1);
+  assert.equal((await messages()).rows[0].canonical.provenance.originalSourceId, raw.originalSourceId);
+});
+
+test('queued provider decisions cannot starve demo fanout and neither subscription receives the other owner events', async () => {
+  const p = pipeline();
+  // More than the demo fanout batch, all queued before the demo event.
+  for (let i = 0; i < 3; i++) {
+    await accept(p);
+    await p.consumeSource(await lease(p));
+  }
+  // lease() also routes previous decisions; reset only their fanout in this isolated fixture.
+  await pools.admin.query('DELETE FROM event_delivery.deliveries WHERE consumer_id=$1', [PRIVATE_AVAILABILITY_CONSUMER]);
+  await pools.admin.query('UPDATE correlation.outbox SET fanout_completed_at=NULL');
+  const demo = await createPostgresDemoTracker({ connectionString: process.env.TEST_RUNTIME_DATABASE_URL, now: () => NOW, startWorker: false });
+  try {
+    const result = await demo.tracker.ingest({ messageId: 'msg_mixed-demo', observedAt: new Date(NOW - 1000).toISOString(),
+      icao24: 'D00001', text: 'Synthetic mixed fanout', bearer: 'VDL2' });
+    assert.ok(result.ok, JSON.stringify(result));
+    assert.equal(await p.queue.fanOut(['demo-availability-v1'], 2), 1);
+    const routed = await pools.admin.query('SELECT consumer_id,event_id FROM event_delivery.deliveries WHERE consumer_id=$1', ['demo-availability-v1']);
+    assert.equal(routed.rows.length, 1);
+    const event = await pools.admin.query('SELECT stream_key FROM correlation.outbox WHERE event_id=$1', [routed.rows[0].event_id]);
+    assert.equal(event.rows[0].stream_key, 'msg_mixed-demo');
+    await p.drain();
+    await demo.drain();
+    assert.equal(await count('availability.contributions'), 1);
+    assert.equal(await count('source_ingestion.private_contributions'), 3);
+    assert.equal((await pools.admin.query('SELECT count(*) AS n FROM event_delivery.deliveries WHERE consumer_id=$1', [PRIVATE_AVAILABILITY_CONSUMER])).rows[0].n, '3');
+  } finally { await demo.close(); }
 });

@@ -1,6 +1,8 @@
 # Issue #11 local execution and handoff
 
 Status: IN PROGRESS (local record; coordinator owns the GitHub issue).
+Review revision started: 2026-11-19 20:27 UTC, same owner/branch and #10 prerequisite.
+Plan: add explicit scoped retention permission and normal provider composition, migration 005 preserving existing lineage, provenance conflict and mixed fanout regressions. External rights remain blocked; no GitHub writes authorized.
 Owner: implementation agent for the Terminal Velocity coordinator.
 Started: 2026-11-19 19:51 UTC. Branch: `feature/epic4-issue-11`.
 Dependency: #10 is merged in checkout HEAD `75c9536` (PR #61); DONE/verified supplied by coordinator.
@@ -9,7 +11,7 @@ Plan: bridge heterogeneous producer events without losing Stage2 deliveries; add
 Touched areas: migration 004, source-connectors application/ports/adapters/composition, event-delivery transaction adapter, integration tests and documentation.
 Constraints: no GitHub writes, commits, branch changes, external messages, real content retention or deployment. Real provider acceptance is BLOCKED pending confirmed retention/use rights and an approved private ingestion policy. Engineering proceeds with explicitly synthetic data only. PR/merge/remote CI evidence belongs to coordinator.
 
-## Final local handoff — 2026-11-19 20:25 UTC
+## Historical initial local handoff — 2026-11-19 20:25 UTC
 
 Engineering implementation is ready for coordinator review. Local acceptance is
 BLOCKED on executable PostgreSQL verification and external provider rights; this
@@ -116,3 +118,58 @@ messages/browser sequence under the authorized private systemd user with Node
 resolve any failures before merging. Separately retain the live-provider rights
 block until documented approval exists. Update the existing issue/EPIC records
 only with actual evidence; do not mark DONE or advance #12 from this handoff.
+
+
+## Review revision handoff — 2026-11-19
+
+Status: IN PROGRESS locally; changes prepared for coordinator review. This section
+supersedes the initial synthetic-only implementation description above. Coordinator
+feedback supplies passing exact-SHA evidence for **be0f946**, not for these edits.
+No GitHub issue/status writes, commits, merges, real captures or external operations
+were performed. #10 prerequisite and PR #61 are confirmed in local ancestry;
+closure/verification is supplied by the coordinator.
+
+Implemented P1: the normal `createPermittedProviderPipeline` accepts normalized
+provider records only with explicit operator retention/private-processing permission
+matching source/provider/account/epoch and a recorded evidence reference. Migration
+005 preserves snapshots and FKs while replacing synthetic identity restrictions
+with required scoped evidence. Runtime cannot modify retained inputs/permission.
+The synthetic helper delegates to that path. No actual Airframes permission is
+configured; rendered on-demand preview remains transient and API adapter inactive.
+
+Added regressions: non-synthetic provider namespace with synthetic content and test
+permission reaches private availability after worker reconstruction; absent/false/
+mismatched permission fails before writes; changed original source ID and original
+registration spelling conflict under the same delivery identity; later-clock replay
+preserves first canonical ingestion evidence and receipt origin; a provider backlog
+larger than the demo fanout batch cannot starve or leak into demo deliveries.
+Migration coverage verifies 004 snapshots survive 005 with FK targets and permission
+checks intact. Existing Stage2 queue upgrade coverage includes migration 005.
+
+Verification used Node 24.22.3 via `PATH="$PWD/tmp/node24/bin:$PATH"` and npm 9.2.0:
+
+| Command | Actual result for review revision |
+|---|---|
+| `npm ci --offline --no-audit --no-fund` | PASS, 21 packages, sandbox fchown warnings |
+| `npm run check` | Typecheck and boundaries PASS (204 files / 733 edges); architecture 1/1 files, backend 13/13 files PASS; API 2/6 files pass, 4 fail |
+| `node --test --test-isolation=none packages/backend/tests/*.test.mjs scripts/architecture/*.test.mjs scripts/messages/page-budget.test.mjs` | PASS 165/165 tests, zero skipped |
+| `npm run test:postgres:local` | BLOCKED before tests: initdb requires an unprivileged user |
+| `npm run test:messages` | PASS 3/3 test files |
+| `npm run test:browser` | FAIL 0/2 test files in this sandbox |
+| `node scripts/messages/airframes-live.test.mjs` | FAIL 1/13 pass; Chromium shutdown operation not permitted |
+| `node apps/api/tests/api.test.mjs` | FAIL 0/22 pass; loopback listen EPERM |
+| `npm run typecheck` (final) | PASS, both workspaces |
+| `node --check` on both edited integration test files | PASS syntax checks only |
+| `git diff --check` | PASS |
+| `npm run demo` | PASS, exit 0 |
+| `npm run smoke` | FAIL, loopback listen EPERM |
+
+Logs: ignored `tmp/issue11-revision-*.log`. SQL migration and new PostgreSQL tests
+remain unexecuted here. Coordinator must run the full exact-SHA private CI sequence
+before accepting these changes; earlier 69/69 PostgreSQL evidence does not cover
+migration 005 or new tests. Migration/rollback and lineage query are documented in
+[PROVIDER_PIPELINE.md](../PROVIDER_PIPELINE.md).
+
+External acceptance remains unchecked: owner must establish retention/use rights
+and supply approved private payload/permission evidence before live verification.
+Merged PR/checks remain coordinator-owned and unchecked. No later issue started.

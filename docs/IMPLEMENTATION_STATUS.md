@@ -134,14 +134,17 @@ The worktree adds the [private provider pipeline](PROVIDER_PIPELINE.md): migrati
 004 bridges source/correlation producers into a durable registry; source imports
 atomically record inbox, immutable provider message revision, all source delivery
 links, correlation and outbox; a separate consumer projects private availability.
-The explicit synthetic composition reuses #10 normalization and existing
-correlation policies. Demo REST records, counts and availability remain separate.
+Migration 005 replaces the synthetic-only retained-input restriction with explicit
+permission scoped to source/provider/account/epoch. The normal permitted-provider
+composition reuses #10 normalization and existing correlation policies; its
+synthetic helper is retained. Permission evidence stays immutable with lineage.
+Tests use synthetic content, including a non-synthetic provider namespace. Demo REST records, counts and availability remain separate.
 The actual rendered Airframes lookup and metadata-only live acceptance remain in
 place. No provider rights, retention permission, public disclosure or deployment
 is inferred from synthetic fixtures.
 
-Verification is **partial**: 162 database-independent tests pass, including 12
-new import tests, with Node 24.22.3. Type checking and boundaries pass. Real
+Verification is **partial**: 165 database-independent tests pass, including 12
+import tests and 3 retention permission tests, with Node 24.22.3. Type checking and boundaries pass. Real
 PostgreSQL verification is blocked because this shell is root; API/smoke and
 browser execution encounter sandbox restrictions. These results do not replace
 remote/exact-SHA CI. See [the issue #11 handoff](handoffs/issue-11.md) for command

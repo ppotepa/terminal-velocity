@@ -33,3 +33,5 @@ export type { CanonicalSourceObservation, NormalizationError, AircraftHints } fr
 export { EXTRACTED_RECORD_VERSION } from '../domain/decode-source-record.ts';
 export { importProviderMessage } from '../application/import-provider-message.ts';
 export type { ProviderMessageCommit, ProviderImportResult, ImportQuarantine } from '../ports/provider-message-commit.ts';
+
+export { permitsRetention, type RetentionPermission } from '../domain/retention-permission.ts';

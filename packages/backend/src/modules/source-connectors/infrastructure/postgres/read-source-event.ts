@@ -1,3 +1,4 @@
+import { permitsRetention, type RetentionPermission } from '../../domain/retention-permission.ts';
 import { createHash } from 'node:crypto';
 import type { SqlExecutor } from '../../../../contracts/database/index.ts';
 import { messageId, type MessageId } from '../../../../contracts/identity/index.ts';
@@ -21,12 +22,12 @@ export async function readSourceEvent(sql: SqlExecutor, id: string): Promise<{ e
   const result = await sql.query<{ event_id: string; delivery_id: string; event_type: string; stream_revision: string;
     payload: unknown; canonical_v1_sha256: string | null; normalized_v1_sha256: string | null; source_id: string; provider_id: string;
     account_scope: string; source_epoch: string; external_id: string; provenance: { parserVersion: string };
-    canonical: CanonicalSourceObservation | null }>(`SELECT o.event_id,o.delivery_id,o.event_type,o.stream_revision,
+    canonical: CanonicalSourceObservation | null; permission: RetentionPermission | null }>(`SELECT o.event_id,o.delivery_id,o.event_type,o.stream_revision,
       o.payload,o.canonical_v1_sha256,o.normalized_v1_sha256,d.source_id,d.provider_id,d.account_scope,d.source_epoch,d.external_id,
-      d.provenance,s.canonical FROM event_delivery.events e
+      d.provenance,s.canonical,s.permission FROM event_delivery.events e
       JOIN source_ingestion.outbox o ON o.event_id=e.source_event_id
       JOIN source_ingestion.deliveries d ON d.delivery_id=o.delivery_id AND d.state='ACCEPTED'
-      LEFT JOIN source_ingestion.synthetic_inputs s ON s.delivery_id=d.delivery_id WHERE e.event_id=$1`, [id]);
+      LEFT JOIN source_ingestion.retained_inputs s ON s.delivery_id=d.delivery_id WHERE e.event_id=$1`, [id]);
   const row = result.rows[0];
   if (!row || id !== 'evt_source-' + row.event_id || row.event_type !== 'source.delivery-accepted.v1'
     || String(row.stream_revision) !== '1') throw new Error('Invalid source event envelope.');
@@ -34,6 +35,7 @@ export async function readSourceEvent(sql: SqlExecutor, id: string): Promise<{ e
   if (canonical) {
     if (normalizedFingerprint(canonical) !== row.normalized_v1_sha256) throw new Error('Normalized evidence mismatch.');
     const obs = canonical.observation;
+    if (!permitsRetention(row.permission ?? undefined, obs)) throw new Error('Invalid retained permission evidence.');
     const wireTime = (t: typeof obs.receivedAt) => ({ at: t.iso, basis: t.basis, precision: t.precision, uncertaintyMs: t.uncertaintyMs });
     const parsed = parseSourceObservation({ ...obs, receivedAt: wireTime(obs.receivedAt),
       ...(obs.observedAt ? { observedAt: wireTime(obs.observedAt) } : {}) });
@@ -46,6 +48,8 @@ export async function readSourceEvent(sql: SqlExecutor, id: string): Promise<{ e
   const parsedId = messageId('msg_' + hash(['provider-message/1', row.source_id, row.provider_id,
     row.account_scope, row.source_epoch, canonical?.provenance.originalSourceId ?? row.external_id]));
   if (!parsedId.ok) throw new Error('Invalid deterministic provider identity.');
+  // Permission is immutable retention evidence; preserve the v1 inbox digest across migration 005.
+  const { permission: _permission, ...envelope } = row;
   return { event: { messageId: parsedId.value, sourceDeliveryId: row.delivery_id, canonical },
-    digest: hash({ transformation: 'provider-message/1', event: row }) };
+    digest: hash({ transformation: 'provider-message/1', event: envelope }) };
 }
