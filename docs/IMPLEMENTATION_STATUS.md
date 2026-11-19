@@ -101,7 +101,7 @@ Local verification used Node.js **24.22.3** and Debian PostgreSQL **17.12**:
 
 The PostgreSQL run exercised the existing durable message flow; S4-01 adds no database changes. The ephemeral database was started on loopback by the local integration harness and removed after the run. GitHub Actions results remain separate; this local run does not claim a remote CI pass. No public listener or deployment was started.
 
-## Stage 4 private position source — S4-02 implementation
+## Stage 4 private position source — S4-02 in review (PR #57)
 
 The `feature/s4-02-adsblol-position-source` branch adds an adsb.lol v2 point/radius parser and bounded HTTPS transport over the S4-01 observation contract. It maps age-derived timestamps, ADS-B/MLAT/other source types, coordinates, tagged altitude and track, optional measurements, ICAO/source-local ID hints, and source quality. Snapshot coverage is explicitly sampled with unknown completeness. The transport has an 8-second timeout, 1 MB response limit, 50 NM radius cap, and a process-shared budget of one request per 10 minutes and 200 per rolling 24 hours. Its explicit poller honors `Retry-After`, uses capped exponential backoff, exposes separate transport health, and stops cleanly on abort. Creation alone never polls.
 
@@ -119,4 +119,4 @@ Local verification used Node.js **24.22.3** and Debian PostgreSQL **17.12**:
 | Bounded private adsb.lol smoke | PASS; 1 NM query returned zero positions; 10 NM query parsed 7 canonical observations; only aggregate counts were printed and no response rows were retained |
 | `git diff --check` | PASS |
 
-S4-02 has no SQL change, so PostgreSQL was run as repository regression verification only. The ephemeral cluster bound to loopback and was removed by the harness; the system PostgreSQL service remains inactive. Manual source checks were two outbound HTTPS requests and opened no local listener. These results are local; GitHub Actions has not produced a passing run for this branch, and no remote green result is claimed. No deployment or public listener was started. PR link will be added after publishing the review branch.
+S4-02 has no SQL change, so PostgreSQL was run as repository regression verification only. The ephemeral cluster bound to loopback and was removed by the harness; the system PostgreSQL service remains inactive. Manual source checks were two outbound HTTPS requests and opened no local listener. Issue #15 is IN REVIEW in [PR #57](https://github.com/ppotepa/terminal-velocity/pull/57), stacked on [S4-01 PR #56](https://github.com/ppotepa/terminal-velocity/pull/56). Both GitHub Actions `verify` runs for commit `672d850` failed before any steps and provided no job logs; the exact cause is unknown. Local results are green; no remote CI pass is claimed. No deployment or public listener was started.
