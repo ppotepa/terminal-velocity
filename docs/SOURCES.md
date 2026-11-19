@@ -10,11 +10,14 @@ access and licensing are still under development in its public documentation,
 and this project has no feeder account, credential, or receiver. Do not build a
 live message transport from the synthetic examples in this guide.
 
-The adsb.lol public API is a separate candidate for **positions**, not messages.
-Its position source selection, ODbL obligations, quotas, and endpoint contract
-must be recorded in a separate Stage 4 decision before implementation. Sending
-contributor data to its ACARS/VDL2/HFDL endpoints is not an API for reading
-messages back.
+The adsb.lol public API is a **positions** source, not a message API. The
+Stage 4 position decision is recorded in
+[`docs/adr/0002-position-source.md`](adr/0002-position-source.md): private/local
+ingestion only, ODbL 1.0, no API key, and a conservative per-process request
+budget. Its point/radius API does not provide a bbox or complete receiver
+coverage. Public display and deployment are not authorized by this decision.
+Sending contributor data to its ACARS/VDL2/HFDL endpoints is not an API for
+reading messages back.
 
 Until a source is authorized, synthetic fixtures may exercise only the
 provider-neutral contract. They must not be labeled as provider examples or

@@ -11,6 +11,7 @@ import {
   positionObservedAtBasis, positionTimePrecision, sourceAgeSeconds, timestampUncertainty, utcTimestamp,
   type PositionObservedAtBasis, type PositionTimePrecision, type UtcTimestamp,
 } from './position-time.ts';
+import { positionQuality, type PositionQuality } from './position-quality.ts';
 
 export const POSITION_OBSERVATION_SCHEMA_VERSION = 1 as const;
 
@@ -40,6 +41,7 @@ export interface PositionObservation {
   readonly latitude: LatitudeDegrees;
   readonly longitude: LongitudeDegrees;
   readonly identifierHints?: PositionIdentifierHints;
+  readonly quality?: PositionQuality;
   /** Absent means the provider omitted the field; null means it explicitly reported it unavailable. */
   readonly groundSpeedKnots?: number | null;
   readonly trackDegrees?: number | null;
@@ -58,7 +60,8 @@ export type PositionParseError =
   | { readonly code: 'INVALID_COORDINATE'; readonly field: 'latitude' | 'longitude' }
   | { readonly code: 'INVALID_POSITION_MEASUREMENT'; readonly field: 'measurementKind' | 'measurementDetail' | 'altitude' | 'groundSpeedKnots' | 'trackDegrees' | 'trackKind' }
   | { readonly code: 'INVALID_POSITION_IDENTIFIER'; readonly field: 'sourceId' | 'sourceObservationId' }
-  | { readonly code: 'INVALID_IDENTIFIER_HINTS' };
+  | { readonly code: 'INVALID_IDENTIFIER_HINTS' }
+  | { readonly code: 'INVALID_POSITION_QUALITY'; readonly field: 'quality' | 'nic' | 'nacP' | 'containmentRadiusMeters' };
 
 type PlainRecord = Record<string, unknown>;
 
@@ -114,7 +117,7 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
   const allowed = [
     'schemaVersion', 'sourceId', 'sourceObservationId', 'observedAt', 'observedAtBasis',
     'sourceTimeReferenceAt', 'sourceAgeSeconds', 'ingestedAt', 'timestampPrecision',
-    'timestampUncertaintyMs', 'measurementKind', 'latitude', 'longitude', 'identifierHints',
+    'timestampUncertaintyMs', 'measurementKind', 'latitude', 'longitude', 'identifierHints', 'quality',
     'groundSpeedKnots', 'trackDegrees', 'trackKind', 'altitude', 'measurementDetail',
   ];
   if (!hasOnlyKeys(record, allowed)) return err({ code: 'INVALID_INPUT', field: 'unknown' });
@@ -187,6 +190,7 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
     latitude: LatitudeDegrees;
     longitude: LongitudeDegrees;
     identifierHints?: PositionIdentifierHints;
+    quality?: PositionQuality;
     groundSpeedKnots?: number | null;
     trackDegrees?: number | null;
     trackKind?: PositionTrackKind;
@@ -213,6 +217,11 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
     const hints = parseIdentifierHints(record['identifierHints']);
     if (!hints.ok) return hints;
     output.identifierHints = hints.value;
+  }
+  if (Object.hasOwn(record, 'quality')) {
+    const quality = positionQuality(record['quality']);
+    if (!quality.ok) return quality;
+    output.quality = quality.value;
   }
   if (Object.hasOwn(record, 'groundSpeedKnots')) {
     const speed = groundSpeedKnots(record['groundSpeedKnots']);

@@ -58,7 +58,7 @@ Memory remains the default. It stages a single `DemoState` swap under a mutex, i
 
 ### Shared scope
 
-Aircraft positions and identities remain synthetic fixtures. Coverage is `UNKNOWN`; real feed health is `DISCONNECTED`. Messages are decoded text examples, not captured RF frames. No real Airframes/ADS-B connector, moving map frontend, flight sessions, reassembly, entitlement enforcement, or public deployment has been added.
+Aircraft position storage, identity, projection, and UI remain unimplemented. S4-02 adds an opt-in private adsb.lol adapter, but no live result is persisted or publicly served. Messages are decoded text examples, not captured RF frames. No real Airframes message connector, moving map frontend, flight sessions, reassembly, entitlement enforcement, or public deployment has been added.
 
 The architecture v2 catalog still describes 89 intended responsibilities rather than 89 completed services. Stage 3 currently has only the provider-neutral S3-01 contracts; there is no selected or authorized real source, transport, provider fixture, or source persistence. Its source contracts do not grant publication rights. The historical DDL and target event envelope remain design documents; the implemented schema is under `db/migrations`, and the current event is `correlation.aircraft-decision-revised.v1`.
 
@@ -87,7 +87,7 @@ The first-party source review is recorded in [`adr/0001-first-message-source.md`
 
 ## Stage 4 position contract work — S4-01 in review (PR #56)
 
-The `feature/s4-01-position-contracts` branch adds a versioned, provider-neutral position observation parser, typed coordinate/source identifiers, an adapter port, and contract tests. It preserves ADS-B versus MLAT, observed versus ingested time, timestamp uncertainty, tagged barometric/geometric feet, and omitted/null/zero optional measurements. It does not include a provider parser, live feed, storage, aircraft identity resolution, freshness projection, or map. No live-data or authorization claim is made.
+The `feature/s4-01-position-contracts` branch adds a versioned, provider-neutral position observation parser, typed coordinate/source identifiers, an adapter port, and contract tests. It preserves ADS-B versus MLAT, observed versus ingested time, direct versus age-derived timestamp basis and uncertainty, tagged altitude/track kinds, source-reported position quality, and omitted/null/zero optional measurements. It does not include a provider parser, live feed, storage, aircraft identity resolution, freshness projection, or map. No live-data or authorization claim is made.
 
 Local verification used Node.js **24.22.3** and Debian PostgreSQL **17.12**:
 
@@ -100,3 +100,23 @@ Local verification used Node.js **24.22.3** and Debian PostgreSQL **17.12**:
 | `npm run smoke` | PASS; API startup, health, replay, and clean SIGTERM shutdown |
 
 The PostgreSQL run exercised the existing durable message flow; S4-01 adds no database changes. The ephemeral database was started on loopback by the local integration harness and removed after the run. GitHub Actions results remain separate; this local run does not claim a remote CI pass. No public listener or deployment was started.
+
+## Stage 4 private position source — S4-02 implementation
+
+The `feature/s4-02-adsblol-position-source` branch adds an adsb.lol v2 point/radius parser and bounded HTTPS transport over the S4-01 observation contract. It maps age-derived timestamps, ADS-B/MLAT/other source types, coordinates, tagged altitude and track, optional measurements, ICAO/source-local ID hints, and source quality. Snapshot coverage is explicitly sampled with unknown completeness. The transport has an 8-second timeout, 1 MB response limit, 50 NM radius cap, and a process-shared budget of one request per 10 minutes and 200 per rolling 24 hours. Its explicit poller honors `Retry-After`, uses capped exponential backoff, exposes separate transport health, and stops cleanly on abort. Creation alone never polls.
+
+The source decision in [`adr/0002-position-source.md`](adr/0002-position-source.md) permits private/local use under ODbL 1.0 only. The fixture is synthetic, no database/API/UI wiring or persistent storage was added, and public use/deployment remains NO-GO pending Stage 5 publication controls and issue #46 licensing review.
+
+Local verification used Node.js **24.22.3** and Debian PostgreSQL **17.12**:
+
+| Command | Result |
+|---|---|
+| `npm ci --ignore-scripts --no-audit --no-fund` | PASS; 20 locked packages installed |
+| `PATH=/root/work/toolchains/node-24.22.3:$PATH npm run check` | PASS; 191 source files / 637 AST dependencies, 28/28 architecture tests, 100/100 backend tests, 30/30 API tests (158 total) |
+| `PATH=/root/work/toolchains/node-24.22.3:$PATH npm run test:postgres:local` | PASS; 37/37 integration tests on isolated PostgreSQL 17.12 with durability enabled; temporary cluster removed |
+| `PATH=/root/work/toolchains/node-24.22.3:$PATH npm run demo` | PASS; durable-domain example completed |
+| `PATH=/root/work/toolchains/node-24.22.3:$PATH npm run smoke` | PASS; loopback API startup, health, replay, and clean SIGTERM shutdown |
+| Bounded private adsb.lol smoke | PASS; 1 NM query returned zero positions; 10 NM query parsed 7 canonical observations; only aggregate counts were printed and no response rows were retained |
+| `git diff --check` | PASS |
+
+S4-02 has no SQL change, so PostgreSQL was run as repository regression verification only. The ephemeral cluster bound to loopback and was removed by the harness; the system PostgreSQL service remains inactive. Manual source checks were two outbound HTTPS requests and opened no local listener. These results are local; GitHub Actions has not produced a passing run for this branch, and no remote green result is claimed. No deployment or public listener was started. PR link will be added after publishing the review branch.
