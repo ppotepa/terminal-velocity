@@ -95,13 +95,31 @@ position or a provider fixture.
 ingestion time, and returns a validated observation or typed parse error. It
 must preserve a real provider observation ID, measurement method, source
 timestamp precision, and uncertainty. The contract does not define retries,
-poll frequency, source health, storage, or current-position freshness.
+poll frequency, source health, or storage. `acceptPositionObservation` is the
+source boundary: it revalidates the adapter result against canonical v1, checks
+that its ingestion time matches the supplied context, and checks its source ID,
+measurement kind, and time basis against `PositionSourceCapabilities`. A source
+configured for ADS-B cannot silently relabel an MLAT position, and an adapter
+cannot claim an undeclared receiver time basis. Missing coordinates fail
+validation; the adapter must not fill them from a prior position. A future
+provider adapter must map its own units and null semantics explicitly before
+calling this boundary.
+
+`positionFreshnessPolicy` requires a positive `currentWithinMs` threshold.
+`classifyPositionFreshness` compares **observedAt**, not `ingestedAt`, with
+the current instant. It returns `CURRENT` only when the oldest plausible event
+time is within the threshold, `STALE` only when the newest plausible event
+time is outside it, and `UNKNOWN` when the uncertainty interval crosses the
+threshold, uncertainty is absent, the clock is ahead, or no position exists.
+This is an event-age rule only; it does not assert source health, identity
+resolution, visibility rights, or map suitability. A later projection must
+combine those separate checks before displaying a current position.
 
 Position freshness is independent from radio-message freshness. A delayed
 position can be valid historical evidence without refreshing message status;
-message status must never be derived from this contract. Any future current
-position projection needs its own explicit age threshold and source-health
-policy.
+message status must never be derived from this contract. Neither the position
+parser nor its freshness rule writes a communication fact or availability
+projection.
 
 The contract records data shape, not data rights. A provider adapter still
 requires a separate source decision, license/terms review, bounded quota policy,

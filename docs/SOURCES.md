@@ -2,13 +2,29 @@
 
 ## Source authorization status
 
-The Stage 3 message-source review is recorded in
-[`docs/adr/0001-first-message-source.md`](adr/0001-first-message-source.md).
-As of 2026-11-19 it is `BLOCKED_PENDING_RIGHTS`: no message provider or
-contributor-owned receiver is authorized for this application. Airframes API
-access and licensing are still under development in its public documentation,
-and this project has no feeder account, credential, or receiver. Do not build a
-live message transport from the synthetic examples in this guide.
+The selected source is the rendered Airframes Live Messages website. The provider API strategy returns API_UNAVAILABLE without network access. Issue #6 remains blocked pending evidence for the intended website collection, retention and use of a redacted sample. The application FAQ covers general hobby use. See the [source decision](adr/0001-first-message-source.md) for the website evidence and exact outstanding questions.
+
+### Private on-demand page transport
+
+Run `npm run messages -- dry-run ABC123` for one synthetic ICAO24 lookup. Use an unprivileged account with a sandbox-capable Chromium executable (`CHROMIUM_PATH`, default `/usr/bin/chromium-headless-shell`). Chromium renders a fabricated JavaScript shell at the selected page URL via an offline intercepted navigation. The fixture also contains an unrelated aircraft. The CLI prints status, counters and transport health. A preview counts as inspected and has zero durable acknowledgments.
+
+The existing `crawl ABC123` strategy is a private, one-shot preview. Its programmatic result holds matching cards in memory for the caller. The CLI prints the selected messages to standard output. Both preview commands use an inspector and expose only `start(signal?)`. Durable transport uses `start(onDelivery, signal?)` and requires a committed acceptance result for every delivery. A preview marker returned by a durable callback ends the batch with `ACCEPTANCE_FAILED`. The API runtime never starts a crawler. Selecting `api` reports `API_UNAVAILABLE` (exit 2) before opening a browser or requesting credentials. Unconfigured durable acquisition reports `RIGHTS_BLOCKED`. Owner verification under ADR 0001 is required for recurring collection, retention, a provider fixture and the live acceptance check.
+
+| Per-connector policy | Behavior |
+|---|---|
+| Page and scope | One anonymous rendered live list, one explicit ICAO24, same-origin aircraft and message links. Each DOM sample checks its origin and pathname before reading cards. A main-frame route change outside the live path discards the entire window, including earlier matches. Query-only filter changes stay in scope. No archive submission, numbered pages or automatic recurring polls. |
+| Observation | Up to 10 seconds from navigation, sampling the DOM at 500 ms intervals (500 ms window for the private fixture). Paths deduplicate cards within the window. |
+| Browser request | One in-flight page read. Chromium checks the destination before each HTTP hop, including redirects. Only the selected document can navigate. Its anonymous HTTPS GET resources and browser-generated CORS preflights may use Airframes hosts, excluding analytics. The page may POST to `https://api.airframes.io/stream/visitor-token` by Fetch or XHR for anonymous stream bootstrap. This request shares the HTTP budget. The page may open one first-party secure WebSocket with up to 256 messages across both directions. Each HTTP hop and socket opening spends one of 96 requests per attempt, with at most 16 in flight. Declared or observed responses and individual socket messages are limited to 8 MiB. HTTP chunks and both directions of socket traffic share a 24 MiB budget. The document policy excludes worker, frame and popup targets. The page renders the stream. The connector reads only its DOM. Stop, failure and window completion close the socket and browser. |
+| Pagination and queue | One page per attempt. At most 25 cards, 32 KiB serialized UTF-8 per delivery and 128 KiB per batch. A truncated window or mixed layout rejects the whole batch for durable delivery. The private CLI prints the validated subset with `TRUNCATED` for overflow or `PARTIAL_LAYOUT` for a mixed layout. Both exit with code 2 and zero durable acknowledgments. A retained batch that fails validation produces zero callbacks. |
+| Retry budget | At most three page attempts per start. Starts on one connector are coalesced. Requests are spaced at least 1 second apart. After a successful socket upgrade, a disconnect uses full jitter in a 2/4/8 second exponential window. HTTP 5xx responses and ordinary HTTP 429 responses with a usable cooldown use the same backoff. A 429 without a usable cooldown ends the lookup. A later Retry-After (seconds or HTTP date) takes precedence. A wait over 10 seconds returns RATE_LIMITED and the same connector retains the cooldown. Other HTTP errors on the document, bootstrap fetch, XHR or script end the run. Chromium exposes a rejected upgrade status but can withhold its headers. An upgrade 429 ends the lookup as RATE_LIMITED and the connector retains any visible Retry-After. An unclassified refusal ends the lookup as TEMPORARY_FAILURE without reconnecting. A bootstrap or upgrade denial (401/403) ends the first attempt even if the live list is empty. These are local limits, not a provider quota. |
+| Delivery and stop | One callback at a time. The handler can bind a source parser, verified scope and #8 transaction. Only its committed CREATED or DUPLICATE receipt increments accepted. An unavailable result or interrupted callback retries the identical envelope up to twice after 1 and 2 seconds. A conflict or invalid result ends the run. Stop cancels browser work and waits for an outstanding acceptance call. Unaccepted rows have no durable checkpoint. A subsequent start opens a fresh selected-aircraft window. |
+| Health | DISCONNECTED between windows, DEGRADED during retry, HEALTHY while delivering a validated window. Last receipt time is the local retrieval clock. Coverage stays UNKNOWN. No timestamps are inferred for the aircraft message. |
+
+Chromium owns the upstream socket and its TLS connection. The connector monitors the browser’s handshake failure event and reads matching messages from the rendered page.
+
+The browser adapter reads the decoded document in bounded chunks before handing it to the renderer with the additional content security policy. The document spends its decoded size once against both the 8 MiB response limit and the 24 MiB window limit, including when HTTP/2 omits a reason phrase.
+
+Run `npm run test:messages` for transport policy and budget checks. Run `npm run test:browser` for the offline rendered-browser suite. Its CLI fixture renders cards only after a first-party bootstrap response and a socket update. The loopback TLS suite exercises native 429, 401 and 403 upgrade refusals without Retry-After, plus a peer that drops the handshake. Each case requires exactly one bootstrap POST and one upgrade. The same fixture exercises selected-card rendering, reconnect after an accepted upgrade and SIGINT cancellation in the embedding process. The HTTP/2 regression uses OpenSSL to generate an ephemeral certificate and serves the synthetic document on loopback so Chromium processes its response headers. `npm run test:postgres:local` includes a synthetic delivery replay through the connector and #8 transaction.
 
 The adsb.lol public API is a separate candidate for **positions**, not messages.
 Its position source selection, ODbL obligations, quotas, and endpoint contract
@@ -16,11 +32,9 @@ must be recorded in a separate Stage 4 decision before implementation. Sending
 contributor data to its ACARS/VDL2/HFDL endpoints is not an API for reading
 messages back.
 
-Until a source is authorized, synthetic fixtures may exercise only the
-provider-neutral contract. They must not be labeled as provider examples or
-used to claim live ingestion.
+Synthetic fixtures exercise the transport and provider-neutral contract. They contain fabricated data and provide no evidence of live ingestion.
 
-Stage 3 starts with provider-neutral contracts. These types do not connect to a provider, establish data rights, or authorize publication. Provider transport and normalization belong in later issues after a source and its permitted uses have been verified.
+Stage 3 starts with provider-neutral contracts. These types do not connect to a provider, establish data rights, or authorize publication. Provider normalization and live operation require further source evidence.
 
 ## Schema v1
 
@@ -118,3 +132,83 @@ The parser error types are deterministic for the same input: malformed input, mi
 The canonical parser distinguishes invalid input, unsupported schema versions, missing time or other required evidence, unsupported observation levels, conflicting time bases, and impossible future observations. It validates timestamp syntax and shape; it cannot independently prove that a provider's clock, receiver identity, digest, decoder label, or source rights are truthful. Provider contract fixtures must be anonymized and licensed before they are added in later issues.
 
 No network connection, database schema, real provider fixture, publication decision, or live-data claim is part of S3-01.
+
+## Issue #10: transient normalization
+
+`normalizeSourceObservation(raw, context, capability)` is the public pure boundary
+for the **synthetic extracted-record v1** format. Its `Result` contains either an
+immutable `CanonicalSourceObservation` or a safe `{code, field, schemaVersion}`
+failure. This version identifies our adapter contract, not an Airframes API
+schema. Unknown versions return `UNKNOWN_SCHEMA`; extra fields fail explicitly.
+Invalid/missing receipt evidence, inconsistent clock order and unsupported time
+bases return `UNTRUSTED_TIME`. Errors contain no message text or raw values.
+
+The infrastructure `normalizeRenderedDelivery` adapter accepts a validated page
+delivery and maps only its displayed fields. It computes a SHA-256 digest with
+stable JSON key ordering, excluding the local ingestion clock. The existing
+on-demand preview and API strategy retain their behavior; neither starts durable
+normalization or storage. Consumers can call this adapter after `validateWindow`,
+as exercised by `test:browser`. The demo message endpoint is unchanged.
+
+The reader preserves optional semantic labels (registration, callsign, reception,
+observation and publication time, explicit time uncertainty, direction, bearer,
+and application protocol). These selectors are **synthetic fixture conventions**
+until a permitted sample verifies them. A filter supplies no aircraft hint: the
+card must supply one unambiguous ICAO24. Conflicting aircraft links, duplicate
+labels, conflicting records under one message link, and unknown card layouts
+report `PARTIAL_LAYOUT`; durable window validation rejects the whole window.
+An empty list is `NO_OBSERVATIONS_COVERAGE_UNKNOWN`, never proof of coverage.
+
+No time is replaced with retrieval/ingestion time. A displayed timestamp without
+explicit uncertainty fails canonical normalization. The preview can still show
+such a card. `sourceObservedAt`, `receiverReceivedAt`, `providerPublishedAt` and
+trusted caller `ingestedAt` remain distinct. The page adapter also preserves its
+transport `retrievedAt` and rejects retrieval after ingestion. Overlapping uncertainty intervals
+are retained; impossible future/order relationships fail. `receivedAt` in the
+S3-01 observation uses receiver receipt, or provider publication with its own
+basis when receipt is absent. `observedAt` is omitted unless explicitly supplied.
+
+A rendered card is always `PROVIDER_MESSAGE`, even when it names a feeder. Its
+feeder is a source label, not a station identity or evidence of a reception.
+The synthetic versioned decoder also validates separate `RECEPTION` and `FRAME`
+paths through S3-01: reception requires a supplied receiver ID and frame requires
+supplied canonical Base64 bytes. Mixed level fields fail. No raw capture,
+provider API, retention grant or actual reception is claimed.
+
+ICAO24, registration and callsign are normalized and validated. In this input
+schema participant objects contain aircraft hints only. Uplink aircraft hints
+belong to the addressee, downlink hints to the originator. Inappropriate roles or
+conflicting hints of the same kind fail. Different identifier kinds are retained
+as unconfirmed hints; a later identity resolver must establish their consistency.
+No flight or confirmed aircraft match is produced. Unknown bearer/application
+protocol labels are retained in provenance and classified as `UNKNOWN`; VDL2
+alone never implies ACARS. Capability and coverage declarations remain separate
+from observations and rights.
+
+### Revision handoff for #11
+
+The immutable wrapper version is `1`. Its `observation` is the existing S3-01
+union. `provenance` retains original record ID, scoped external delivery ID,
+source description, decoder name/version, distinct time evidence, feeder label
+and original protocol labels. `provenance.originalRegistrations` retains exact
+supplied registration strings keyed by `aircraft`, `originator` or `addressee`;
+its frozen entries preserve distinct spellings even when they normalize to the
+same registration. The normalized value remains in `aircraftHints.registration`.
+Absent registration evidence produces an empty map. `aircraftHints`, `aircraftRole`, optional bearer,
+application protocol and direction are revision facts, including for receptions.
+Nested values are copied/frozen; input mutation cannot alter them. JSON roundtrip
+tests compare all facts and independently re-normalize the serialized wire input.
+
+For #11, reference a message revision by the source ID, scoped delivery tuple,
+original source record ID, payload digest, extracted-record/decoder version and
+capability revision. A message revision must retain the entire wrapper and its
+independent authoritative revision; it must not use a decision revision as its
+source revision. Identical text under different delivery IDs is independent.
+A changed payload under one delivery ID is a conflict/revision decision for the
+consumer, never a silent overwrite here. Preserve the first ingestion provenance
+on replay. The current #8 metadata store does **not** persist this wrapper's text,
+registration, participant roles or expanded provenance; passing just `observation`
+to that store is not a lossless message-revision persistence implementation.
+No SQL migration or durable wiring is introduced in #10. Real retention remains
+blocked by ADR 0001. #11 must establish its persistence policy before storing any
+real-source content; this handoff grants no rights.

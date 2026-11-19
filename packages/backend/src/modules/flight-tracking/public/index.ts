@@ -18,4 +18,12 @@ export {
   POSITION_TIME_PRECISIONS, POSITION_OBSERVED_AT_BASES,
   type PositionTimePrecision, type PositionObservedAtBasis, type UtcTimestamp,
 } from '../domain/position-time.ts';
-export { type PositionAdapter } from '../ports/position-adapter.ts';
+export { acceptPositionObservation, type PositionAdapter, type PositionAdapterContext } from '../ports/position-adapter.ts';
+export {
+  validatePositionCapabilities,
+  type PositionSourceCapabilities, type PositionCapabilityError,
+} from '../domain/position-capabilities.ts';
+export {
+  classifyPositionFreshness, positionFreshnessPolicy,
+  type PositionFreshness, type PositionFreshnessPolicy, type InvalidPositionFreshnessPolicy,
+} from '../domain/position-freshness.ts';

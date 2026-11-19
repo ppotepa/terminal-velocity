@@ -22,11 +22,19 @@
     "db:migrate": "node scripts/postgres/migrate.mjs",
     "db:local-runtime": "node scripts/postgres/provision-local-runtime.mjs",
     "test:integration": "node scripts/postgres/run-integration.mjs",
-    "test:postgres:local": "node scripts/postgres/run-local.mjs"
+    "test:postgres:local": "node scripts/postgres/run-local.mjs",
+    "messages": "node scripts/messages/cli.mjs",
+    "test:messages": "node --test scripts/messages/page-budget.test.mjs packages/backend/tests/airframes-transport.test.mjs packages/backend/tests/source-normalization.test.mjs",
+    "test:browser": "node --test scripts/messages/airframes-live.test.mjs scripts/messages/on-demand.test.mjs",
+    "source:replay": "node scripts/source/replay.mjs",
+    "source:inspect": "node scripts/source/inspect-quarantine.mjs"
   },
   "devDependencies": {
     "@types/node": "24.0.0",
     "@types/pg": "8.23.1",
     "typescript": "5.8.3"
+  },
+  "dependencies": {
+    "playwright-core": "1.65.1"
   }
 }

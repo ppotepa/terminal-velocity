@@ -9,10 +9,16 @@ export async function fanOut(pool: SqlPool, consumerIds: readonly string[], batc
     const selected = await sql.query<{ event_id: string }>(`
       SELECT event_id FROM correlation.outbox
       WHERE fanout_completed_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM source_ingestion.message_revisions m WHERE m.message_id = stream_key)
       ORDER BY recorded_at, event_id
       LIMIT $1 FOR UPDATE SKIP LOCKED`, [batchSize]);
     const eventIds = selected.rows.map(row => row.event_id);
     if (eventIds.length === 0) return 0;
+    await sql.query(`INSERT INTO event_delivery.events(event_id,correlation_event_id)
+      SELECT id,id FROM unnest($1::text[]) AS ids(id) ON CONFLICT DO NOTHING`, [eventIds]);
+    const registered = await sql.query(`SELECT event_id FROM event_delivery.events
+      WHERE event_id=ANY($1::text[]) AND correlation_event_id=event_id`, [eventIds]);
+    if (registered.rows.length !== eventIds.length) throw new Error('Producer event identity conflict.');
     await sql.query(`
       INSERT INTO event_delivery.deliveries (consumer_id, event_id)
       SELECT consumers.consumer_id, events.event_id

@@ -36,6 +36,7 @@ The named Compose volume preserves data when the container stops. The API never 
 | `message_ingestion` | `tv_ingestion_owner` | Immutable canonical synthetic message facts |
 | `correlation` | `tv_correlation_owner` | Decision history, current heads, and producer outbox |
 | `event_delivery` | `tv_delivery_owner` | Delivery attempts, fenced leases, quarantine, and consumer inboxes |
+| `source_ingestion` | `tv_source_ingestion_owner` | Private delivery metadata, optional provider/reception facts and a source-owned outbox |
 | `availability` | `tv_availability_owner` | Versioned contributions and retraction tombstones |
 
 Owner roles and the `tv_runtime` permission role are `NOLOGIN`. The separately provisioned runtime login inherits the explicit table/column grants assigned to `tv_runtime`. It does not own the application schemas or receive permission to create or alter objects in them, and it cannot update immutable messages, decision history, or outbox payloads. In this one-process stage, the same runtime role has the narrow grants needed by both producer and consumer adapters. Separate production process identities and tenant authorization are later work.
@@ -92,3 +93,27 @@ npm run test:integration
 That bootstrap login must be able to create a disposable database and roles and run the full migration, including `SET ROLE` to the designated schema owners. Use an isolated test instance: the runner removes its random database and restricted runtime login afterward, while the migration-created fixed `tv_*` owner and permission roles remain in an externally supplied cluster. Test URLs with connection-overriding query parameters are rejected. CI uses a dedicated PostgreSQL service for the same suite.
 
 The suite exercises competing first writes, stale revisions, outbox failure rollback, transaction capability lifetime, fenced lease recovery, inbox deduplication, projector rollback, revision collisions, tombstones, observed-time freshness, schema privileges, and real API process restart. These are functional integration checks; they do not establish production capacity or simulate a host power failure.
+
+
+### Source delivery bridge (migration 004)
+
+Migration 004 replaces the correlation-only delivery FK with an immutable
+producer registry, preserving existing event IDs and queued deliveries. It also
+adds explicitly synthetic normalized input storage, provider message revisions,
+immutable delivery/decision links, import quarantine receipts and a private
+availability projection. The API does not apply this migration. Old dispatchers
+must stop before applying it because they do not register newly emitted events.
+See [the provider pipeline](PROVIDER_PIPELINE.md) for transaction/ACK boundaries,
+lineage SQL and rollback limitations. The integration suite includes an upgrade
+from a populated Stage2 database and consumption of its previously queued event.
+Its execution remains pending in the #11 local handoff; no hosted migration or
+backup/recovery operation has been performed.
+
+### Source replay (migration 006)
+
+The private source replay checkpoint table adds durable budgets, cursor progress,
+quarantine and independent source health. A session advisory lock serializes each
+source scope while existing receipt transactions use another pool connection.
+Reserve at least two connections. No API route or background live collector is
+added. See [SOURCE_OPERATIONS.md](SOURCE_OPERATIONS.md) for local commands, recovery,
+redaction and the external provider acceptance gate.

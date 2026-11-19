@@ -21,4 +21,24 @@ export {
   type ReceiverReceptionObservation, type FrameObservation, type AddressHints, type SourceParseError,
 } from '../domain/source-observation.ts';
 export { sourceObservationContractParser, type SourceParser } from '../ports/source-parser.ts';
-export { type SourceTransport, type SourceTransportError } from '../ports/source-transport.ts';
+export { type SourcePreview, type SourceTransport, type SourceTransportError, type SourceDeliveryEnvelope, type SourceDeliveryReader, type ConnectionOutcome, type ProviderConnectionHealth } from '../ports/source-transport.ts';
+export type {
+  DeliveryDisposition, SourceDeliveryKey, SourceDeliveryOrigin, SourceDeliveryStore, StoredSourceDelivery,
+} from '../ports/source-delivery-store.ts';
+export { acceptSourceDelivery, type AcceptanceResult, type VerifiedSourceScope } from '../application/accept-source-delivery.ts';
+export type { DeliveryReceipt, SourceAcceptanceTransaction } from '../ports/source-acceptance-transaction.ts';
+export { createSourceDeliveryHandler } from '../application/create-source-delivery-handler.ts';
+export { normalizeSourceObservation, type NormalizationContext } from '../application/normalize-source-observation.ts';
+export type { CanonicalSourceObservation, NormalizationError, AircraftHints } from '../domain/normalized-observation.ts';
+export { EXTRACTED_RECORD_VERSION } from '../domain/decode-source-record.ts';
+export { importProviderMessage } from '../application/import-provider-message.ts';
+export type { ProviderMessageCommit, ProviderImportResult, ImportQuarantine } from '../ports/provider-message-commit.ts';
+
+export { permitsRetention, type RetentionPermission } from '../domain/retention-permission.ts';
+export { replaySourceRange, type ReplayDependencies } from '../application/replay-source-range.ts';
+export { reviewSourceQuarantine } from '../application/quarantine-review.ts';
+export { planSourceRetry } from '../application/plan-source-retry.ts';
+export { sourceHealth } from '../application/source-health.ts';
+export { DEFAULT_REPLAY_POLICY } from '../domain/replay-policy.ts';
+export type { ReplayRequest, ReplayScope, ReplayCheckpoint, ReplayPolicy, ReplayError,
+  ReplayFailure, ReplayReader, ReplayDelivery, SourceReplayStore, SourceHealth } from '../ports/source-replay-checkpoint.ts';

@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import {
   parsePositionObservation,
   POSITION_OBSERVATION_SCHEMA_VERSION,
+  acceptPositionObservation,
+  classifyPositionFreshness,
+  positionFreshnessPolicy,
+  positionSourceId,
 } from '../src/modules/flight-tracking/public/index.ts';
+import { classifyAge } from '../src/modules/message-availability/domain/classify-age.ts';
 
 const base = (overrides = {}) => ({
   schemaVersion: 1,
@@ -163,4 +168,60 @@ test('untrusted accessors are rejected without invoking them and output values a
   assert.equal(parsed.value.identifierHints.icao24, 'A0B1C2');
   assert.equal(Object.isFrozen(parsed.value), true);
   assert.equal(Object.isFrozen(parsed.value.identifierHints), true);
+});
+
+test('adapter acceptance enforces canonical fields and configured source capabilities', () => {
+  const sourceId = positionSourceId('src_positions-test').value;
+  const capabilities = { sourceId, measurementKinds: ['ADS_B'], observedAtBases: ['SOURCE_TIMESTAMP'] };
+  const adapter = { parse(raw) { return parsePositionObservation(raw); } };
+  const context = { sourceId, ingestedAt: base().ingestedAt, capabilities };
+  assert.equal(acceptPositionObservation(adapter, base(), context).ok, true);
+  assert.deepEqual(acceptPositionObservation(adapter, base({ measurementKind: 'MLAT' }), context).error,
+    { code: 'UNSUPPORTED_POSITION_CAPABILITY', field: 'measurementKind' });
+  assert.deepEqual(acceptPositionObservation(adapter, base({ observedAtBasis: 'RECEIVER_TIMESTAMP' }), context).error,
+    { code: 'UNSUPPORTED_POSITION_CAPABILITY', field: 'observedAtBasis' });
+  assert.deepEqual(acceptPositionObservation(adapter, base(), { ...context, sourceId: positionSourceId('src_other').value }).error,
+    { code: 'UNSUPPORTED_POSITION_CAPABILITY', field: 'sourceId' });
+  const wrongSource = { parse() { return { ok: true, value: parsePositionObservation(base({ sourceId: 'src_other' })).value }; } };
+  assert.deepEqual(acceptPositionObservation(wrongSource, null, context).error,
+    { code: 'UNSUPPORTED_POSITION_CAPABILITY', field: 'sourceId' });
+  const wrongIngestion = { parse() { return parsePositionObservation(base({ ingestedAt: '2026-11-19T11:00:02Z' })); } };
+  assert.deepEqual(acceptPositionObservation(wrongIngestion, null, context).error,
+    { code: 'INVALID_POSITION_TIME', field: 'ingestedAt' });
+  assert.equal(acceptPositionObservation(adapter, base({ latitude: null }), context).error.code, 'INVALID_COORDINATE');
+  assert.deepEqual(acceptPositionObservation(adapter, base(), { ...context, ingestedAt: 'invalid' }).error,
+    { code: 'INVALID_POSITION_TIME', field: 'ingestedAt' });
+});
+
+test('canonical JSON roundtrip retains explicit null and does not invent omitted measurements', () => {
+  const original = parsePositionObservation(base({ measurementKind: 'MLAT',
+    altitude: { kind: 'GEOMETRIC_FT', valueFt: 0 }, groundSpeedKnots: null }));
+  assert.equal(original.ok, true);
+  const replayed = parsePositionObservation(JSON.parse(JSON.stringify(original.value)));
+  assert.equal(replayed.ok, true);
+  assert.deepEqual(replayed.value, original.value);
+  assert.equal('trackDegrees' in replayed.value, false);
+  assert.equal(replayed.value.groundSpeedKnots, null);
+});
+
+test('position freshness uses observed time and uncertainty without refreshing message freshness', () => {
+  const policy = positionFreshnessPolicy({ currentWithinMs: 60_000 }).value;
+  const messagePolicy = { recentWithinMs: 60_000, staleWithinMs: 120_000 };
+  const now = '2026-11-19T11:00:30Z';
+  const radioBefore = classifyAge(null, Date.parse(now), messagePolicy);
+  const recent = parsePositionObservation(base({ timestampUncertaintyMs: 1000 })).value;
+  assert.equal(classifyPositionFreshness(recent, now, policy), 'CURRENT');
+  assert.equal(classifyAge(null, Date.parse(now), messagePolicy), radioBefore);
+  assert.equal(radioBefore, 'NONE');
+  const backfill = parsePositionObservation(base({
+    observedAt: '2026-11-19T10:00:00Z', ingestedAt: '2026-11-19T11:00:29Z',
+  })).value;
+  assert.equal(classifyPositionFreshness(backfill, now, policy), 'STALE');
+  assert.equal(classifyPositionFreshness(parsePositionObservation(base({ timestampUncertaintyMs: null })).value,
+    now, policy), 'UNKNOWN');
+  assert.equal(classifyPositionFreshness(recent, '2026-11-19T11:00:59.500Z', policy), 'UNKNOWN');
+  assert.equal(classifyPositionFreshness(recent, '2026-11-19T10:59:59Z', policy), 'UNKNOWN');
+  assert.equal(classifyPositionFreshness(null, now, policy), 'UNKNOWN');
+  assert.deepEqual(positionFreshnessPolicy({ currentWithinMs: 0 }).error,
+    { code: 'INVALID_POSITION_FRESHNESS_POLICY' });
 });

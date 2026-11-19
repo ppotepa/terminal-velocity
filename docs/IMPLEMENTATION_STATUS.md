@@ -1,6 +1,6 @@
 # Terminal Velocity — implementation status, Stage 2
 
-Date: November 19, 2026. Code version: `0.1.0`. The application offers a durable PostgreSQL mode for one complete synthetic message flow, alongside the original memory demonstration. Stage 3 source-observation contracts are implemented on a feature branch; no provider connector or real source is present.
+Date: November 19, 2026. Code version: `0.1.0`. The application offers a durable PostgreSQL mode for one complete synthetic message flow, alongside the original memory demonstration. Stage 3 includes source-observation contracts, on-demand website lookup, and private delivery metadata storage exercised with synthetic inputs.
 
 ## Implemented
 
@@ -60,7 +60,7 @@ Memory remains the default. It stages a single `DemoState` swap under a mutex, i
 
 Aircraft positions and identities remain synthetic fixtures. Coverage is `UNKNOWN`; real feed health is `DISCONNECTED`. Messages are decoded text examples, not captured RF frames. No real Airframes/ADS-B connector, moving map frontend, flight sessions, reassembly, entitlement enforcement, or public deployment has been added.
 
-The architecture v2 catalog still describes 89 intended responsibilities rather than 89 completed services. Stage 3 currently has only the provider-neutral S3-01 contracts; there is no selected or authorized real source, transport, provider fixture, or source persistence. Its source contracts do not grant publication rights. The historical DDL and target event envelope remain design documents; the implemented schema is under `db/migrations`, and the current event is `correlation.aircraft-decision-revised.v1`.
+The architecture v2 catalog still describes 89 intended responsibilities rather than 89 completed services. Stage 3 has a separate on-demand lookup and durable metadata store. Real-source retention and a permitted provider fixture remain gated by issue #6. Its source contracts do not grant publication rights. The historical DDL and target event envelope remain design documents; the implemented schema is under `db/migrations`, and the current event is `correlation.aircraft-decision-revised.v1`.
 
 See [POSTGRES.md](POSTGRES.md) for setup and operational behavior, [API.md](API.md) for the HTTP contract, and [ROADMAP.md](ROADMAP.md) for Stage 3: one real connector with established access and permitted usage.
 
@@ -83,20 +83,126 @@ The local sequence covers every step in the repository CI workflow. The database
 
 ## Stage 3 source decision — S3-02
 
-The first-party source review is recorded in [`adr/0001-first-message-source.md`](adr/0001-first-message-source.md). The outcome is **BLOCKED_PENDING_RIGHTS / NO-GO**: no message provider or project-owned receiver has verified access, account-level permissions, a permitted fixture, and retention terms. Airframes' API/access documentation and licensing are marked under development; this project has no feeder station, key, or early-access approval. The adsb.lol public API is a positions source under ODbL, while its documented ACARS/VDL2/HFDL endpoints accept contributor submissions under CC0 and do not provide an inbound message API. No connector or live-data claim is made. S3-03 through S3-13 remain gated on the unblock conditions in the ADR.
+The selected source is the rendered Airframes Live Messages website. The on-demand CLI reads matching rendered cards for one ICAO24. The API strategy reports unavailable. The crawler is separate from durable ingest and the future map UI. Issue #6 remains blocked pending evidence for the intended website collection, retention and use of a redacted sample. The application FAQ covers general hobby use. See the [source decision](adr/0001-first-message-source.md) for the website evidence and exact outstanding questions.
 
-## Stage 4 position contract work — S4-01 in review (PR #56)
+## Stage 3 delivery storage — S3-03
 
-The `feature/s4-01-position-contracts` branch adds a versioned, provider-neutral position observation parser, typed coordinate/source identifiers, an adapter port, and contract tests. It preserves ADS-B versus MLAT, observed versus ingested time, timestamp uncertainty, tagged barometric/geometric feet, and omitted/null/zero optional measurements. It does not include a provider parser, live feed, storage, aircraft identity resolution, freshness projection, or map. No live-data or authorization claim is made.
+Migration 002 adds restricted source deliveries, provider-message facts, receiver receptions and an independent source outbox. The typed SQL store records and reads metadata from synthetic observations, with separate clocks for observation, receipt, retrieval and ingestion. Raw payload and decoded text are excluded. The lookup CLI does not write to this store. See the [migration contract](../db/migrations/README.md#migration-002-and-the-s3-04-storage-contract).
 
-Local verification used Node.js **24.22.3** and Debian PostgreSQL **17.12**:
+## Stage 3 atomic acceptance — S3-04
 
-| Command | Result |
-|---|---|
-| `npm ci --ignore-scripts --no-audit --no-fund` | PASS; 20 locked packages installed |
-| `npm run check` | PASS; strict types, 184 source files / 614 dependency edges, 28/28 architecture tests, 87/87 backend tests, 30/30 API tests (145 total) |
-| `npm run test:postgres:local` | PASS; 37/37 isolated PostgreSQL integration tests; durability settings enabled |
-| `npm run demo` | PASS; durable-domain example completed |
-| `npm run smoke` | PASS; API startup, health, replay, and clean SIGTERM shutdown |
+The source acceptance use case validates a synthetic observation against an independently configured source scope and capability revision, then commits delivery metadata and one source outbox event together. Matching retries return the original delivery ID and provenance. A changed canonical fact under that key produces a conflict. The lookup CLI, public API and Stage 2 consumer operate separately. See the [acceptance contract](../db/migrations/README.md#migration-003-and-source-acceptance).
 
-The PostgreSQL run exercised the existing durable message flow; S4-01 adds no database changes. The ephemeral database was started on loopback by the local integration harness and removed after the run. GitHub Actions results remain separate; this local run does not claim a remote CI pass. No public listener or deployment was started.
+## Stage 3 bounded source transport — issue #9
+
+The private messages CLI exercises one scoped Airframes rendered-page window with an offline synthetic browser fixture. The backend connector bounds page retries, pending deliveries and bytes, reports health independently of coverage, and drains pending acceptance on stop. The source handler accepts a parser and the existing #8 transaction. Both CLI previews use an inspector. Durable runs require a committed receipt per delivery. Each DOM sample checks page scope, and Chromium owns the socket handshake. A refused upgrade ends that lookup even when Chromium withholds the status or cooldown. A disconnect after acceptance can start another bounded attempt. The browser suite exercises these paths and cancellation against a synthetic loopback TLS peer. The private one-shot lookup allows bounded first-party bootstrap and socket traffic for the rendered page. It returns transient matching cards and reports partial layouts and truncated windows with the validated cards that fit the preview budget. Recurring collection and real-content retention are rights-blocked, and API selection returns unavailable. The public API and database schema have no changes in this issue. See [source operations](SOURCES.md#private-on-demand-page-transport).
+
+## Issue #10 — synthetic normalization engineering
+
+A strict versioned extracted-record parser and pure normalizer now retain immutable
+source provenance, independent clock evidence, validated identifier hints, aircraft
+participant roles, declared data level and separate bearer/application protocol.
+The rendered-card adapter maps displayed optional fields and treats feeder labels
+as provenance, never as invented receptions. Schema drift, invalid clocks,
+conflicting hints and incompatible layouts fail explicitly. Synthetic golden
+regressions cover text-only layout drift and mixed recognized/incompatible records;
+the scroller reader checks content outside recognized cards even when cards exist.
+Cards with multiple distinct message paths or multiple visible bodies are rejected
+as `PARTIAL_LAYOUT`; duplicate links to one path remain valid. Immutable provenance
+also retains original registration spellings per participant alongside the
+normalized aircraft hint, including through JSON serialization.
+Fractional rendered UTC timestamps with one to three digits retain `MILLISECOND`
+precision after ISO normalization, with declared uncertainty unchanged. Synthetic
+fixtures and a browser-to-normalizer regression are included in existing root
+verification entry points. No SQL, demo API, source rights or retention policy
+changed. The provider API remains inactive.
+
+The baseline upgrade integration test now waits for PostgreSQL client disconnects
+before removing its disposable database. Deterministic lifecycle regressions run
+in `npm run check`; the coordinator must verify the database teardown correction
+in the unprivileged exact-SHA integration runner.
+
+This is not a verified real Airframes format: optional markup and all records are
+fabricated fixtures. Permitted real-sample acceptance is blocked under ADR 0001.
+See [the issue #10 handoff](handoffs/issue-10.md) for exact local checks, environment
+failures and coordinator-owned verification. No remote CI or merge is claimed.
+
+
+## Issue #11 engineering update (November 19, 2026)
+
+The worktree adds the [private provider pipeline](PROVIDER_PIPELINE.md): migration
+004 bridges source/correlation producers into a durable registry; source imports
+atomically record inbox, immutable provider message revision, all source delivery
+links, correlation and outbox; a separate consumer projects private availability.
+Migration 005 replaces the synthetic-only retained-input restriction with explicit
+permission scoped to source/provider/account/epoch. The normal permitted-provider
+composition reuses #10 normalization and existing correlation policies; its
+synthetic helper is retained. Permission evidence stays immutable with lineage.
+Tests use synthetic content, including a non-synthetic provider namespace. Demo REST records, counts and availability remain separate.
+The actual rendered Airframes lookup and metadata-only live acceptance remain in
+place. No provider rights, retention permission, public disclosure or deployment
+is inferred from synthetic fixtures.
+
+Verification is **partial**: 165 database-independent tests pass, including 12
+import tests and 3 retention permission tests, with Node 24.22.3. Type checking and boundaries pass. Real
+PostgreSQL verification is blocked because this shell is root; API/smoke and
+browser execution encounter sandbox restrictions. These results do not replace
+remote/exact-SHA CI. See [the issue #11 handoff](handoffs/issue-11.md) for command
+results, unverified acceptance items and migration/replay notes. The issue is not
+DONE and no later engineering issue was started.
+
+### Issue #11 rendered acceptance review revision
+
+The permitted pipeline now exposes `acceptRendered(PageDelivery, context, scope)`
+through its normal composition. It uses the rendered normalizer and the shared
+permission-checked acceptance transaction, deriving page provenance internally.
+PostgreSQL regressions exercise the connector callback, private correlation/status,
+lineage, restart, later-clock replay and rejection without retained effects.
+Fresh execution results and environment limitations are recorded in
+[the issue #11 handoff](handoffs/issue-11.md). Airframes previews remain transient;
+the provider API remains inactive and actual retention rights remain an external gate.
+
+## Issue #12 — bounded replay engineering
+
+The canonical checkout adds scoped replay checkpoints (migration 006), deterministic
+retry planning, independent fetch/parse health, redacted durable quarantine and
+local synthetic administrative commands. Each source scope serializes fetches;
+reserved attempts and cooldown survive restart, and cursor advancement follows
+existing durable acceptance. The explicit synthetic operator fixture now uses the
+permission-checked provider pipeline through retained inputs, message import,
+correlation and private availability. Provider cooldown survives quarantine and
+manual review even after automatic retries are exhausted. Overlap reuses source idempotency and
+preserves actual observed time. A partial page enters quarantine when a full-page
+retry would exceed the remaining record budget, preventing a capped reader from
+reporting completion before every record is accepted. The on-demand rendered Airframes lookup is unchanged,
+real content is not retained by replay, and the API adapter remains inactive.
+
+See [SOURCE_OPERATIONS.md](SOURCE_OPERATIONS.md) for limits, recovery, CLI commands,
+health semantics and the private #13 handoff. See [issue #12 evidence](handoffs/issue-12.md)
+for local results and pending coordinator CI. #11 engineering was merged in PR #62
+at `752aa27377abeb53f2042504116422f0ac5d86dc`; the older #11 execution notes above
+are historical. Real-provider acceptance remains an external gate; this change
+does not mark Stage 3 complete.
+
+## Issue #13 — source validation gate
+
+The [source integration runbook](SOURCE_INTEGRATION_RUNBOOK.md) defines the private
+lineage and redacted evidence required for one authorized actual message. A new
+PostgreSQL regression checks the synthetic delivery-to-private-read chain after
+worker restart, duplicate replay, decode and time failures, unmatched aircraft,
+and disconnection. This is engineering verification only. No authorized provider
+sample, crawl and retention rights decision, measured source lag or actual
+end-to-end latency is available; no real data has been retained. The source-derived
+read port is internal and the unauthenticated demo HTTP API remains synthetic.
+Stage 3 external acceptance and any source-derived HTTP read remain blocked.
+
+## Stage 4 position contracts — issue #14 candidate
+
+The saved `feature/s4-01-position-contracts` branch is being reconciled with the
+Stage 3 main. Its provider-neutral position boundary records source identity,
+measurement kind, coordinates, observed and ingested times and uncertainty.
+It validates the supplied source capability and rejects inconsistent adapter
+results. Position freshness is independent of radio-message availability.
+See [POSITIONS.md](POSITIONS.md) for the contract and limits. The branch still
+requires exact-commit CI, independent review and merge before #14 is accepted.
+No live position source, storage or map is claimed here.
