@@ -1,17 +1,13 @@
+import { sourcePageLocation } from '../../domain/source-page-location.ts';
 import type { SqlExecutor } from '../../../../contracts/database/index.ts';
 import type { SourceDeliveryStore, StoredSourceDelivery } from '../../ports/source-delivery-store.ts';
-
-function pageLocation(input: string): string {
-  const url = new URL(input);
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password)
-    throw new Error('Invalid source page location');
-  return url.origin + url.pathname;
-}
 
 /** One statement inserts the delivery and its optional subtype on the injected executor. */
 export function postgresSourceDeliveryStore(sql: SqlExecutor): SourceDeliveryStore {
   return {
     async appendDelivery(observation, origin, disposition) {
+      const pageUrl = sourcePageLocation(origin.pageUrl);
+      if (!pageUrl) throw new Error('Invalid source page location');
       const { sourceDeliveryId: key, receivedAt, observedAt } = observation;
       const message = observation.dataLevel === 'PROVIDER_MESSAGE' ? observation : null;
       const reception = observation.dataLevel === 'RECEPTION' ? observation : null;
@@ -36,7 +32,7 @@ export function postgresSourceDeliveryStore(sql: SqlExecutor): SourceDeliverySto
         observation.payloadDigest, observation.dataLevel, observation.schemaVersion, observation.capabilitiesRevision,
         observation.decoderVersion ?? null, receivedAt.at, receivedAt.basis, receivedAt.precision, receivedAt.uncertaintyMs,
         observedAt?.at ?? null, observedAt?.basis ?? null, observedAt?.precision ?? null, observedAt?.uncertaintyMs ?? null,
-        origin.retrievedAt, origin.ingestedAt, { pageUrl: pageLocation(origin.pageUrl), parserVersion: origin.parserVersion },
+        origin.retrievedAt, origin.ingestedAt, { pageUrl, parserVersion: origin.parserVersion },
         disposition.state, disposition.state === 'QUARANTINED' ? disposition.reason : null,
         message?.direction ?? null, message?.bearer ?? null, reception?.receiverId ?? null,
         reception?.frequencyHz ?? null, reception?.signalStrengthDbm ?? null,

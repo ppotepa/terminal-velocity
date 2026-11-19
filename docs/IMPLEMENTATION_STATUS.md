@@ -88,3 +88,7 @@ The selected source is the rendered Airframes Live Messages website. The on-dema
 ## Stage 3 delivery storage — S3-03
 
 Migration 002 adds restricted source deliveries, provider-message facts, receiver receptions and an independent source outbox. The typed SQL store records and reads metadata from synthetic observations, with separate clocks for observation, receipt, retrieval and ingestion. Raw payload and decoded text are excluded. The lookup CLI does not write to this store. See the [migration contract](../db/migrations/README.md#migration-002-and-the-s3-04-storage-contract).
+
+## Stage 3 atomic acceptance — S3-04
+
+The source acceptance use case validates a synthetic observation against an independently configured source scope and capability revision, then commits delivery metadata and one source outbox event together. Matching retries return the original delivery ID and provenance. A changed canonical fact under that key produces a conflict. The lookup CLI, public API and Stage 2 consumer operate separately. See the [acceptance contract](../db/migrations/README.md#migration-003-and-source-acceptance).

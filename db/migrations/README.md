@@ -68,3 +68,15 @@ The delivery row records a digest, level, schema/decoder/capability versions, re
 `postgresSourceDeliveryStore(executor)` inserts the delivery and optional provider direction/bearer or receiver ID/frequency/signal facts in one SQL statement. A lookup by scoped key returns those facts. Composite foreign keys enforce each detail table's data level. S3-04 can supply a transaction-bound executor and append a source outbox event in that transaction. The outbox has a separate event ID, a delivery-scoped stream revision, a reference-only payload and a fanout marker. Stage 2 consumer deliveries still reference the correlation outbox. S3-07 owns the consumer bridge.
 
 Rollback of the application can leave the additive schema in place. Preserve migration history and use a follow-up migration for any schema changes.
+
+## Migration 003 and source acceptance
+
+`acceptSourceDelivery` takes an operator-verified source scope and capability declaration separately from a v1 observation envelope and retrieval provenance. The PostgreSQL adapter locks the complete scoped key before reading under READ COMMITTED. A new delivery, its detail facts and the revision-1 source outbox event commit on one checked-out connection. Callers receive the durable delivery ID and first retrieval provenance only after commit. There is no HTTP endpoint or automatic import into correlation.
+
+Migration 003 adds `canonical_v1_sha256` to the source outbox. The v1 fingerprint is SHA-256 over a UTF-8 domain prefix (`source-acceptance-v1` followed by a NUL) and JSON encoding of `[parserVersion, validatedObservation]`. Object keys sort in ascending code-unit order at each level, arrays preserve order, and the observation uses the #5 contract's normalized times and identifiers. The provider digest remains an independently supplied fact. Page location, retrieval time and ingestion time describe the first sighting. A retry from another page or time can match that sighting. Original bytes, frame contents and decoded message text are excluded from persistent storage.
+
+For `DUPLICATE`, return the original receipt. For `CONFLICTED`, preserve the existing row and event. A pre-003 or storage-only delivery without a matching fingerprint cannot prove equivalence and yields a conflict. Invalid source scope, capability revision, level, envelope or provenance fails before SQL. An unavailable database or uncertain commit outcome yields `UNAVAILABLE`; retry with the same source key and canonical facts.
+
+The event type is `source.delivery-accepted.v1`, its stream key is the delivery UUID, its revision is 1 and its JSON payload is `{"deliveryId":"<uuid>"}`. For S3-07 the proposed consumer identity is `source-message-import.v1`, with inbox deduplication on (consumer identity, event ID). A receipt proves acceptance only. S3-07 owns that inbox and the import transaction.
+
+An application rollback can leave the additive nullable column in place. Preserve recorded fingerprints and the existing migration ledger.

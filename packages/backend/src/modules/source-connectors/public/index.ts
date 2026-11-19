@@ -25,3 +25,5 @@ export { type SourceTransport, type SourceTransportError } from '../ports/source
 export type {
   DeliveryDisposition, SourceDeliveryKey, SourceDeliveryOrigin, SourceDeliveryStore, StoredSourceDelivery,
 } from '../ports/source-delivery-store.ts';
+export { acceptSourceDelivery, type AcceptanceResult, type VerifiedSourceScope } from '../application/accept-source-delivery.ts';
+export type { DeliveryReceipt, SourceAcceptanceTransaction } from '../ports/source-acceptance-transaction.ts';
