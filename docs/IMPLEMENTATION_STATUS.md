@@ -183,3 +183,15 @@ for local results and pending coordinator CI. #11 engineering was merged in PR #
 at `752aa27377abeb53f2042504116422f0ac5d86dc`; the older #11 execution notes above
 are historical. Real-provider acceptance remains an external gate; this change
 does not mark Stage 3 complete.
+
+## Issue #13 — source validation gate
+
+The [source integration runbook](SOURCE_INTEGRATION_RUNBOOK.md) defines the private
+lineage and redacted evidence required for one authorized actual message. A new
+PostgreSQL regression checks the synthetic delivery-to-private-read chain after
+worker restart, duplicate replay, decode and time failures, unmatched aircraft,
+and disconnection. This is engineering verification only. No authorized provider
+sample, crawl and retention rights decision, measured source lag or actual
+end-to-end latency is available; no real data has been retained. The source-derived
+read port is internal and the unauthenticated demo HTTP API remains synthetic.
+Stage 3 external acceptance and any source-derived HTTP read remain blocked.
