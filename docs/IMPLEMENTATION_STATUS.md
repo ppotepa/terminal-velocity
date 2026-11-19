@@ -72,9 +72,11 @@ Local verification used Node.js 24.22.3:
 
 | Command | Result |
 |---|---|
-| `npm ci` | PASS; 20 packages installed, zero reported vulnerabilities |
-| `node --test packages/backend/tests/source-observation.test.mjs` | PASS; 13/13 tests |
-| `npm run check` | PASS; strict type checks, 177 source files / 593 dependency edges, 28/28 architecture tests, 76/76 backend tests, 30/30 API tests (134 total) |
+| `npm ci --ignore-scripts --no-audit --no-fund` | PASS; 20 locked packages installed |
+| `npm run check` | PASS; strict type checks, 177 source files / 593 dependency edges, 28/28 architecture tests, 76/76 backend tests, 30/30 API tests (134 total, including 13 source-observation tests) |
+| `npm run test:postgres:local` | PASS; 37/37 integration tests on isolated PostgreSQL 17.12, durability settings enabled |
+| `npm run demo` | PASS; correlation, outbox, freshness, and correction example completed |
+| `npm run smoke` | PASS; API startup, health, message replay, and clean SIGTERM shutdown |
 | GitHub Actions for PR #54 | BLOCKED; `verify` runs failed before any steps and produced no job logs; the exact cause is not exposed |
 
-The full check does not include PostgreSQL integration tests. No database or transaction code changed in S3-01. The repository has a known Actions billing blocker; the remote failures are consistent with it, but the available run output does not confirm the cause. No remote CI pass is claimed.
+The local sequence covers every step in the repository CI workflow. The database integration run used Debian PostgreSQL 17.12 because that is the version available from this host's Debian 13 repository; the workflow currently specifies PostgreSQL 18.7. No database or transaction code changed in S3-01. The repository has a known Actions billing blocker; remote failures are consistent with it, but the available run output does not confirm the cause. No remote CI pass is claimed.
