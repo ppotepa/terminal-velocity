@@ -153,3 +153,16 @@ test('on-demand preview hands transient cards to its caller without calling dura
   assert.deepEqual(cards, [row]);
   assert.equal(transport.health().accepted, 0);
 });
+
+test('partial previews validate every retained row before invoking the transient callback', async () => {
+  for (const [rows, expected] of [[[row], 'COMPLETE'], [[row, { ...row, icao: 'DEF456' }], 'INVALID_ENVELOPE']]) {
+    const cards = [];
+    const response = page(rows);
+    response.body.status = 'PARTIAL_LAYOUT';
+    const transport = createProviderConnector('crawl', icao, { kind: 'ON_DEMAND_PREVIEW',
+      read: async () => response, inspect: envelope => cards.push(envelope.raw) });
+    assert.equal(await transport.start(assert.fail), expected);
+    assert.deepEqual(cards, expected === 'COMPLETE' ? [row] : []);
+    assert.equal(transport.health().accepted, 0);
+  }
+});

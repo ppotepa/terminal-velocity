@@ -7,7 +7,8 @@ const clock = {
   wait: (ms: number, signal: AbortSignal) => delay(ms, undefined, { signal }),
 };
 
-export function airframesConnection(icao: string, read: ReadWindow, time = clock): SourceTransport<PageDelivery> {
+export function airframesConnection(icao: string, read: ReadWindow, time = clock,
+  inspect?: (delivery: PageDelivery) => void): SourceTransport<PageDelivery> {
   if (!/^[A-F0-9]{6}$/.test(icao)) throw new Error('A selected ICAO24 is required.');
   let controller: AbortController | undefined;
   let active: Promise<ConnectionOutcome> | undefined;
@@ -35,7 +36,7 @@ export function airframesConnection(icao: string, read: ReadWindow, time = clock
         continue;
       }
       if (response.status !== 200) return 'PERMANENT_FAILURE';
-      const batch = validateWindow('body' in response ? response.body : undefined, icao, time.now());
+      const batch = validateWindow('body' in response ? response.body : undefined, icao, time.now(), inspect !== undefined);
       if (typeof batch === 'string') return batch;
       health = { ...health, state: 'HEALTHY', outcome: null };
       for (const delivery of batch) {
@@ -65,7 +66,12 @@ export function airframesConnection(icao: string, read: ReadWindow, time = clock
       controller = new AbortController();
       const signal = outer ? AbortSignal.any([outer, controller.signal]) : controller.signal;
       health = { ...health, state: 'DISCONNECTED', outcome: null, accepted: 0 };
-      active = run(deliver, signal).catch((): ConnectionOutcome => signal.aborted ? 'STOPPED' : 'TEMPORARY_FAILURE')
+      // A partial window can reach only the transient inspector.
+      const handler = inspect ? async (delivery: PageDelivery) => {
+        inspect(delivery);
+        return 'PREVIEWED' as const;
+      } : deliver;
+      active = run(handler, signal).catch((): ConnectionOutcome => signal.aborted ? 'STOPPED' : 'TEMPORARY_FAILURE')
         .then(outcome => {
           health = { ...health, state: 'DISCONNECTED', outcome };
           return outcome;

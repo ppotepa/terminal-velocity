@@ -8,13 +8,8 @@ type PageTarget = { readonly kind: 'SYNTHETIC_PAGE'; readonly read: ReadWindow }
 export function createProviderConnector(strategy: 'api' | 'crawl', icao: string,
   target?: PageTarget): SourceTransport<PageDelivery> {
   if (strategy === 'crawl' && target) {
-    const transport = airframesConnection(icao, target.read);
-    if (target.kind === 'SYNTHETIC_PAGE') return transport;
-    // A website preview has no path to the durable delivery callback.
-    return { ...transport, start: (_, signal) => transport.start(async delivery => {
-      target.inspect(delivery);
-      return 'PREVIEWED';
-    }, signal) };
+    const inspect = target.kind === 'ON_DEMAND_PREVIEW' ? target.inspect.bind(target) : undefined;
+    return airframesConnection(icao, target.read, undefined, inspect);
   }
   const outcome = strategy === 'api' ? 'API_UNAVAILABLE' : 'RIGHTS_BLOCKED';
   return {

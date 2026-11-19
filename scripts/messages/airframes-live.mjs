@@ -41,15 +41,16 @@ export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes
   return { messages: [...messages.values()], cards, unsupported, overflow };
 }
 
-export async function observePage(page, icao, windowMs = 10000) {
+export async function observePage(page, icao, windowMs = 10000, expiresAt = Infinity) {
   if (!/^[A-F0-9]{6}$/.test(icao) || !Number.isSafeInteger(windowMs) || windowMs < 0 || windowMs > 10000)
     throw new Error('Invalid observation window or aircraft scope');
-  const response = await page.goto(liveUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  const remaining = limit => Math.max(1, Math.min(limit, expiresAt - Date.now()));
+  const response = await page.goto(liveUrl, { waitUntil: 'domcontentloaded', timeout: remaining(20000) });
   if (page.url() !== liveUrl) throw new Error('Unexpected source origin');
   if (!response || response.status() !== 200) return { status: 'HTTP_FAILURE',
     httpStatus: response?.status() ?? 503, retryAfter: await response?.headerValue('retry-after') };
   const scroller = page.locator('.messages-scroller');
-  await scroller.waitFor({ state: 'attached', timeout: 10000 });
+  await scroller.waitFor({ state: 'attached', timeout: remaining(10000) });
   // The site can unmount the live list when its search form is submitted.
   // Match inside the rendered live list without navigating into archive search.
   const messages = new Map();
@@ -57,9 +58,9 @@ export async function observePage(page, icao, windowMs = 10000) {
   let unsupported = false;
   let overflow = false;
   let bytes = 0;
-  const deadline = Date.now() + windowMs;
+  const deadline = Math.min(Date.now() + windowMs, expiresAt);
   do {
-    const sample = await scroller.evaluate(readCards, { icao, selector: cardSelector, maxCards, maxEnvelopeBytes, maxWindowBytes }, { timeout: 3000 });
+    const sample = await scroller.evaluate(readCards, { icao, selector: cardSelector, maxCards, maxEnvelopeBytes, maxWindowBytes }, { timeout: remaining(3000) });
     sawCards ||= sample.cards > 0;
     unsupported ||= sample.unsupported;
     overflow ||= sample.overflow;
@@ -74,7 +75,7 @@ export async function observePage(page, icao, windowMs = 10000) {
     }
     if (overflow || messages.size === maxCards || Date.now() >= deadline) break;
     await page.waitForTimeout(Math.min(500, deadline - Date.now()));
-  } while (true);
+  } while (Date.now() < deadline);
   const status = overflow ? 'QUEUE_FULL' : unsupported ? 'PARTIAL_LAYOUT' : messages.size ? 'OBSERVED'
     : sawCards ? 'NO_CONFIRMED_MATCH' : 'NO_OBSERVATIONS_COVERAGE_UNKNOWN';
   return { status, source: liveUrl, icao, messages: [...messages.values()] };
@@ -85,26 +86,27 @@ async function readBrowserWindow(icao, signal, synthetic) {
   const { chromium } = await import('playwright-core');
   const browser = await chromium.launch({
     chromiumSandbox: true,
+    handleSIGINT: false,
+    handleSIGTERM: false,
     executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium-headless-shell',
     timeout: 15000,
   });
-  let failure;
-  const abort = () => { void browser.close().catch(() => {}); };
+  let failure, dispose;
+  let closing;
+  const close = () => closing ??= (async () => {
+    try { await dispose?.(); } finally { await browser.close(); }
+  })();
+  const abort = () => { void close().catch(() => {}); };
   signal.addEventListener('abort', abort, { once: true });
   try {
     signal.throwIfAborted();
     const context = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: false, offline: synthetic });
-    let served = false;
-    if (synthetic) await context.route('**/*', route => {
-      if (served || route.request().url() !== liveUrl || !route.request().isNavigationRequest()) return route.abort();
-      served = true;
-      return route.fulfill({ contentType: 'text/html', body: syntheticShell });
-    });
-    // Do not open a separate provider stream or an API subscription.
-    await context.routeWebSocket('**/*', socket => socket.close());
     const page = await context.newPage();
-    await boundPage(context, page, liveUrl, response => { failure ??= response; abort(); });
-    const body = await observePage(page, icao, synthetic ? 500 : 10000);
+    dispose = await boundPage(context, page, liveUrl, response => {
+      failure ??= response;
+      abort();
+    }, synthetic ? syntheticShell : undefined);
+    const body = await observePage(page, icao, synthetic ? 500 : 10000, Date.now() + 10000);
     if (failure) return failure;
     return body.status === 'HTTP_FAILURE' ? { status: body.httpStatus, retryAfter: body.retryAfter }
       : { status: 200, body };
@@ -113,7 +115,7 @@ async function readBrowserWindow(icao, signal, synthetic) {
     throw error;
   } finally {
     signal.removeEventListener('abort', abort);
-    await browser.close();
+    await close();
   }
 }
 
