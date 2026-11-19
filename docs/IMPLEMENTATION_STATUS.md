@@ -80,3 +80,7 @@ Local verification used Node.js 24.22.3:
 | GitHub Actions for PR #54 | BLOCKED; `verify` runs failed before any steps and produced no job logs; the exact cause is not exposed |
 
 The local sequence covers every step in the repository CI workflow. The database integration run used Debian PostgreSQL 17.12 because that is the version available from this host's Debian 13 repository; the workflow currently specifies PostgreSQL 18.7. No database or transaction code changed in S3-01. The repository has a known Actions billing blocker; remote failures are consistent with it, but the available run output does not confirm the cause. No remote CI pass is claimed.
+
+## Stage 3 source decision — S3-02
+
+The selected source is the rendered Airframes Live Messages website. The on-demand CLI reads matching rendered cards for one ICAO24. The API strategy reports unavailable. The crawler is separate from durable ingest and the future map UI. Issue #6 remains blocked pending evidence for the intended website collection, retention and use of a redacted sample. The application FAQ covers general hobby use. See the [source decision](adr/0001-first-message-source.md) for the website evidence and exact outstanding questions.

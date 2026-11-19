@@ -1,5 +1,25 @@
 # Source observation contracts
 
+## Source authorization status
+
+The selected source is the rendered Airframes Live Messages website. The provider API strategy returns API_UNAVAILABLE without network access. Issue #6 remains blocked pending evidence for the intended website collection, retention and use of a redacted sample. The application FAQ covers general hobby use. See the [source decision](adr/0001-first-message-source.md) for the website evidence and exact outstanding questions.
+
+### Private on-demand message lookup
+
+From the repository root, run `npm ci` and then `npm run messages -- crawl ABC123` with the selected aircraft's six-digit ICAO24 address. Run the browser under an unprivileged account with Chromium installed. The executable defaults to Debian's chromium-headless-shell; set CHROMIUM_PATH to select another compatible Chromium executable. Each invocation opens one anonymous browser session on the live page, matches the selected ICAO against aircraft links on rendered cards. It samples for ten seconds and emits at most 25 distinct provider-message links. The process writes the lookup to standard output. The adapter has no database or scheduled polling.
+
+A result contains the source page, ICAO24 and matched messages with the displayed text, detail path and optional station. Receiver coverage and message direction may be unknown. An empty window reports the limits of observation. A page load or filter failure exits with status 1. The API strategy (`npm run messages -- api`) and a partially recognized card layout exit with status 2. Run `npm run test:messages` for browser tests using synthetic HTML served entirely inside the test.
+
+The adsb.lol public API is a separate candidate for **positions**, not messages.
+Its position source selection, ODbL obligations, quotas, and endpoint contract
+must be recorded in a separate Stage 4 decision before implementation. Sending
+contributor data to its ACARS/VDL2/HFDL endpoints is not an API for reading
+messages back.
+
+Until a source is authorized, synthetic fixtures may exercise only the
+provider-neutral contract. They must not be labeled as provider examples or
+used to claim live ingestion.
+
 Stage 3 starts with provider-neutral contracts. These types do not connect to a provider, establish data rights, or authorize publication. Provider transport and normalization belong in later issues after a source and its permitted uses have been verified.
 
 ## Schema v1

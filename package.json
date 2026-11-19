@@ -22,11 +22,16 @@
     "db:migrate": "node scripts/postgres/migrate.mjs",
     "db:local-runtime": "node scripts/postgres/provision-local-runtime.mjs",
     "test:integration": "node scripts/postgres/run-integration.mjs",
-    "test:postgres:local": "node scripts/postgres/run-local.mjs"
+    "test:postgres:local": "node scripts/postgres/run-local.mjs",
+    "messages": "node scripts/messages/cli.mjs",
+    "test:messages": "node --test scripts/messages/*.test.mjs"
   },
   "devDependencies": {
     "@types/node": "24.0.0",
     "@types/pg": "8.23.1",
     "typescript": "5.8.3"
+  },
+  "dependencies": {
+    "playwright-core": "1.65.1"
   }
 }
