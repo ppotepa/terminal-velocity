@@ -124,9 +124,7 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
   // error but can withhold response headers, including a provider cooldown.
   let socketId, upgraded = false;
   session.on('Network.webSocketCreated', ({ requestId, url }) => {
-    // CDP can report creation before Playwright delivers the route callback.
-    // The route permits only one first-party socket, so retain its ID now.
-    if (!closed && !socketId && firstParty(new URL(url), 'wss:')) socketId = requestId;
+    if (socket && url === socket.url()) socketId = requestId;
   });
   session.on('Network.webSocketHandshakeResponseReceived', ({ requestId, response }) => {
     if (closed || requestId !== socketId) return;
@@ -167,12 +165,7 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
       if (countBytes(size, size)) destination.send(message);
     }
     server.onMessage(message => forward(route, message));
-    route.onMessage(message => {
-      // A client frame proves that Chromium completed the upgrade, even if
-      // the CDP handshake event is delivered after the route callback.
-      upgraded = true;
-      forward(server, message);
-    });
+    route.onMessage(message => forward(server, message));
     // Before acceptance, use the ordered Network events for the refusal status.
     const disconnected = () => { if (!closed && upgraded) cancel({ status: 503 }); };
     route.onClose(disconnected);

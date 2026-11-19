@@ -219,6 +219,7 @@ suite, type checking, architecture checks (225 source files, 809 dependency
 edges), and backend workspace tests successfully. `git diff --check` passed.
 The full `npm run check` reached the API workspace but failed because this
 shell denies loopback binds (`listen EPERM` on 127.0.0.1); it is not a passing
-full-suite result. The coordinator's subsequent isolated local CI passed at
-`b069917`. This documentation edit has not been included in an exact-SHA CI
-run. No PR merge or hosted CI success is claimed.
+full-suite result. The coordinator's isolated local CI passed at
+`91b3ff353aac9e04a217cf793ca2df91c6641408`. The coordinator records CI for
+each reviewed commit in issue #14 and PR #56 after that run completes. No hosted
+CI or deployment success is claimed here.
