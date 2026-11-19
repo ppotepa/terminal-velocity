@@ -3,14 +3,16 @@ import { err, ok, type Result } from '../../../kernel/result.ts';
 export const POSITION_MEASUREMENT_KINDS = ['ADS_B', 'MLAT', 'OTHER'] as const;
 export type PositionMeasurementKind = typeof POSITION_MEASUREMENT_KINDS[number];
 
-export interface PositionAltitude {
-  readonly kind: 'BAROMETRIC_FT' | 'GEOMETRIC_FT';
-  readonly valueFt: number;
-}
+export type PositionAltitude =
+  | { readonly kind: 'BAROMETRIC_FT'; readonly valueFt: number }
+  | { readonly kind: 'GEOMETRIC_FT'; readonly valueFt: number }
+  | { readonly kind: 'SURFACE'; readonly valueFt: null };
+export const POSITION_TRACK_KINDS = ['GROUND_TRACK', 'TRUE_HEADING'] as const;
+export type PositionTrackKind = typeof POSITION_TRACK_KINDS[number];
 
 export type InvalidPositionMeasurement = {
   readonly code: 'INVALID_POSITION_MEASUREMENT';
-  readonly field: 'measurementKind' | 'measurementDetail' | 'altitude' | 'groundSpeedKnots' | 'trackDegrees';
+  readonly field: 'measurementKind' | 'measurementDetail' | 'altitude' | 'groundSpeedKnots' | 'trackDegrees' | 'trackKind';
 };
 
 export function positionMeasurementKind(input: unknown): Result<PositionMeasurementKind, InvalidPositionMeasurement> {
@@ -42,11 +44,14 @@ export function positionAltitude(input: unknown): Result<PositionAltitude | null
         return err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'altitude' });
       record[key] = descriptor.value;
     }
-    if (Object.keys(record).some(key => key !== 'kind' && key !== 'valueFt')
-      || (record['kind'] !== 'BAROMETRIC_FT' && record['kind'] !== 'GEOMETRIC_FT')
-      || typeof record['valueFt'] !== 'number' || !Number.isFinite(record['valueFt']))
+    if (Object.keys(record).some(key => key !== 'kind' && key !== 'valueFt'))
       return err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'altitude' });
-    return ok(Object.freeze({ kind: record['kind'], valueFt: record['valueFt'] }) as PositionAltitude);
+    if (record['kind'] === 'SURFACE' && record['valueFt'] === null)
+      return ok(Object.freeze({ kind: 'SURFACE', valueFt: null }));
+    if ((record['kind'] === 'BAROMETRIC_FT' || record['kind'] === 'GEOMETRIC_FT')
+      && typeof record['valueFt'] === 'number' && Number.isFinite(record['valueFt']))
+      return ok(Object.freeze({ kind: record['kind'], valueFt: record['valueFt'] }) as PositionAltitude);
+    return err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'altitude' });
   } catch {
     return err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'altitude' });
   }
@@ -65,4 +70,10 @@ export function trackDegrees(input: unknown): Result<number | null, InvalidPosit
     : typeof input === 'number' && Number.isFinite(input) && input >= 0 && input < 360
       ? ok(input)
       : err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'trackDegrees' });
+}
+
+export function positionTrackKind(input: unknown): Result<PositionTrackKind, InvalidPositionMeasurement> {
+  return typeof input === 'string' && POSITION_TRACK_KINDS.some(value => value === input)
+    ? ok(input as PositionTrackKind)
+    : err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'trackKind' });
 }

@@ -4,12 +4,12 @@ import {
   positionSourceId, sourceObservationId, type PositionSourceId, type SourceObservationId,
 } from './position-identifiers.ts';
 import {
-  groundSpeedKnots, measurementDetail, positionAltitude, positionMeasurementKind, trackDegrees,
-  type PositionAltitude, type PositionMeasurementKind,
+  groundSpeedKnots, measurementDetail, positionAltitude, positionMeasurementKind, positionTrackKind, trackDegrees,
+  type PositionAltitude, type PositionMeasurementKind, type PositionTrackKind,
 } from './position-measurement.ts';
 import {
-  positionTimePrecision, timestampUncertainty, utcTimestamp,
-  type PositionTimePrecision, type UtcTimestamp,
+  positionObservedAtBasis, positionTimePrecision, sourceAgeSeconds, timestampUncertainty, utcTimestamp,
+  type PositionObservedAtBasis, type PositionTimePrecision, type UtcTimestamp,
 } from './position-time.ts';
 
 export const POSITION_OBSERVATION_SCHEMA_VERSION = 1 as const;
@@ -28,6 +28,10 @@ export interface PositionObservation {
   readonly sourceId: PositionSourceId;
   readonly sourceObservationId: SourceObservationId;
   readonly observedAt: UtcTimestamp;
+  readonly observedAtBasis: PositionObservedAtBasis;
+  /** Present together only when observedAt was derived from a source-declared age. */
+  readonly sourceTimeReferenceAt?: UtcTimestamp;
+  readonly sourceAgeSeconds?: number;
   readonly ingestedAt: UtcTimestamp;
   readonly timestampPrecision: PositionTimePrecision;
   /** Null means the source's clock uncertainty is unknown; zero is an explicit claim of no uncertainty. */
@@ -39,6 +43,8 @@ export interface PositionObservation {
   /** Absent means the provider omitted the field; null means it explicitly reported it unavailable. */
   readonly groundSpeedKnots?: number | null;
   readonly trackDegrees?: number | null;
+  /** Required with a numeric track so on-ground true heading is not mislabeled as airborne track. */
+  readonly trackKind?: PositionTrackKind;
   /** Feet are explicit and barometric/geometric values remain separate. */
   readonly altitude?: PositionAltitude | null;
   readonly measurementDetail?: string;
@@ -47,10 +53,10 @@ export interface PositionObservation {
 export type PositionParseError =
   | { readonly code: 'INVALID_INPUT'; readonly field: string }
   | { readonly code: 'UNSUPPORTED_VERSION'; readonly version: number }
-  | { readonly code: 'INVALID_POSITION_TIME'; readonly field: 'observedAt' | 'ingestedAt' | 'precision' | 'uncertaintyMs' }
+  | { readonly code: 'INVALID_POSITION_TIME'; readonly field: 'observedAt' | 'ingestedAt' | 'precision' | 'uncertaintyMs' | 'observedAtBasis' | 'sourceAgeSeconds' }
   | { readonly code: 'OBSERVATION_AFTER_INGESTION' }
   | { readonly code: 'INVALID_COORDINATE'; readonly field: 'latitude' | 'longitude' }
-  | { readonly code: 'INVALID_POSITION_MEASUREMENT'; readonly field: 'measurementKind' | 'measurementDetail' | 'altitude' | 'groundSpeedKnots' | 'trackDegrees' }
+  | { readonly code: 'INVALID_POSITION_MEASUREMENT'; readonly field: 'measurementKind' | 'measurementDetail' | 'altitude' | 'groundSpeedKnots' | 'trackDegrees' | 'trackKind' }
   | { readonly code: 'INVALID_POSITION_IDENTIFIER'; readonly field: 'sourceId' | 'sourceObservationId' }
   | { readonly code: 'INVALID_IDENTIFIER_HINTS' };
 
@@ -106,9 +112,10 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
   const record = plainRecord(input);
   if (!record) return err({ code: 'INVALID_INPUT', field: 'object' });
   const allowed = [
-    'schemaVersion', 'sourceId', 'sourceObservationId', 'observedAt', 'ingestedAt', 'timestampPrecision',
+    'schemaVersion', 'sourceId', 'sourceObservationId', 'observedAt', 'observedAtBasis',
+    'sourceTimeReferenceAt', 'sourceAgeSeconds', 'ingestedAt', 'timestampPrecision',
     'timestampUncertaintyMs', 'measurementKind', 'latitude', 'longitude', 'identifierHints',
-    'groundSpeedKnots', 'trackDegrees', 'altitude', 'measurementDetail',
+    'groundSpeedKnots', 'trackDegrees', 'trackKind', 'altitude', 'measurementDetail',
   ];
   if (!hasOnlyKeys(record, allowed)) return err({ code: 'INVALID_INPUT', field: 'unknown' });
 
@@ -126,6 +133,27 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
 
   const observedAt = utcTimestamp(record['observedAt'], 'observedAt');
   if (!observedAt.ok) return observedAt;
+  const observedAtBasis = positionObservedAtBasis(record['observedAtBasis']);
+  if (!observedAtBasis.ok) return observedAtBasis;
+  let sourceTimeReferenceAt: UtcTimestamp | undefined;
+  let sourceAgeSecondsValue: number | undefined;
+  if (Object.hasOwn(record, 'sourceTimeReferenceAt')) {
+    const reference = utcTimestamp(record['sourceTimeReferenceAt'], 'observedAt');
+    if (!reference.ok) return reference;
+    sourceTimeReferenceAt = reference.value;
+  }
+  if (Object.hasOwn(record, 'sourceAgeSeconds')) {
+    const age = sourceAgeSeconds(record['sourceAgeSeconds']);
+    if (!age.ok) return age;
+    sourceAgeSecondsValue = age.value;
+  }
+  if (observedAtBasis.value === 'SOURCE_AGE_FROM_REFERENCE') {
+    if (sourceTimeReferenceAt === undefined || sourceAgeSecondsValue === undefined
+      || Date.parse(observedAt.value) !== Math.round(Date.parse(sourceTimeReferenceAt) - sourceAgeSecondsValue * 1000))
+      return err({ code: 'INVALID_POSITION_TIME', field: 'observedAtBasis' });
+  } else if (sourceTimeReferenceAt !== undefined || sourceAgeSecondsValue !== undefined) {
+    return err({ code: 'INVALID_POSITION_TIME', field: 'observedAtBasis' });
+  }
   const ingestedAt = utcTimestamp(record['ingestedAt'], 'ingestedAt');
   if (!ingestedAt.ok) return ingestedAt;
   const precision = positionTimePrecision(record['timestampPrecision']);
@@ -149,6 +177,9 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
     sourceId: PositionSourceId;
     sourceObservationId: SourceObservationId;
     observedAt: UtcTimestamp;
+    observedAtBasis: PositionObservedAtBasis;
+    sourceTimeReferenceAt?: UtcTimestamp;
+    sourceAgeSeconds?: number;
     ingestedAt: UtcTimestamp;
     timestampPrecision: PositionTimePrecision;
     timestampUncertaintyMs: number | null;
@@ -158,6 +189,7 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
     identifierHints?: PositionIdentifierHints;
     groundSpeedKnots?: number | null;
     trackDegrees?: number | null;
+    trackKind?: PositionTrackKind;
     altitude?: PositionAltitude | null;
     measurementDetail?: string;
   } = {
@@ -165,6 +197,7 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
     sourceId: sourceId.value,
     sourceObservationId: observationId.value,
     observedAt: observedAt.value,
+    observedAtBasis: observedAtBasis.value,
     ingestedAt: ingestedAt.value,
     timestampPrecision: precision.value,
     timestampUncertaintyMs: uncertainty.value,
@@ -172,6 +205,9 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
     latitude: latitude.value,
     longitude: longitude.value,
   };
+
+  if (sourceTimeReferenceAt !== undefined) output.sourceTimeReferenceAt = sourceTimeReferenceAt;
+  if (sourceAgeSecondsValue !== undefined) output.sourceAgeSeconds = sourceAgeSecondsValue;
 
   if (Object.hasOwn(record, 'identifierHints')) {
     const hints = parseIdentifierHints(record['identifierHints']);
@@ -188,6 +224,15 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
     if (!track.ok) return track;
     output.trackDegrees = track.value;
   }
+  if (Object.hasOwn(record, 'trackKind')) {
+    const kind = positionTrackKind(record['trackKind']);
+    if (!kind.ok) return kind;
+    output.trackKind = kind.value;
+  }
+  if (typeof output.trackDegrees === 'number' && output.trackKind === undefined)
+    return err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'trackKind' });
+  if ((output.trackDegrees === undefined || output.trackDegrees === null) && output.trackKind !== undefined)
+    return err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'trackKind' });
   if (Object.hasOwn(record, 'altitude')) {
     const altitude = positionAltitude(record['altitude']);
     if (!altitude.ok) return altitude;

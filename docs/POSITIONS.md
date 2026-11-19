@@ -21,6 +21,8 @@ Each observation requires:
 | `sourceId` | Application-assigned `src_…` source configuration ID. |
 | `sourceObservationId` | Opaque source observation ID, scoped by `sourceId`; never derive it from coordinates or rounded time. |
 | `observedAt` | Provider/receiver event time, strict UTC, normalized to milliseconds. |
+| `observedAtBasis` | `SOURCE_TIMESTAMP`, `SOURCE_AGE_FROM_REFERENCE`, or `RECEIVER_TIMESTAMP`; makes derived source time explicit. |
+| `sourceTimeReferenceAt` / `sourceAgeSeconds` | Required together only for `SOURCE_AGE_FROM_REFERENCE`. Preserve the provider reference time and age used to derive `observedAt = reference - age`; the parser validates that relation. |
 | `ingestedAt` | Application ingestion time, separately supplied as strict UTC. It does not replace or refresh `observedAt`. |
 | `timestampPrecision` | `MILLISECOND`, `SECOND`, `MINUTE`, `HOUR`, or `UNKNOWN`, as supported by source evidence. |
 | `timestampUncertaintyMs` | Integer from 0 through one year in milliseconds, or `null` when clock uncertainty is unknown. Zero is an explicit zero-uncertainty claim. |
@@ -36,11 +38,13 @@ Optional measurements preserve provenance and units:
 - `groundSpeedKnots` is ground speed in knots, never airspeed; a provider that
   supplies another unit must convert it in its adapter and document the
   conversion. `0` is valid.
-- `trackDegrees` is clockwise degrees from north in [0, 360). It is not a
-  magnetic heading. `0` is valid; `360` is rejected rather than silently
-  rewritten to `0`.
+- `trackDegrees` is clockwise degrees from north in [0, 360). It needs a
+  `trackKind` of `GROUND_TRACK` or `TRUE_HEADING`; the source can describe true
+  heading while on the ground. `0` is valid; `360` is rejected rather than
+  silently rewritten to `0`.
 - `altitude` is either `{ kind: "BAROMETRIC_FT", valueFt }` or
-  `{ kind: "GEOMETRIC_FT", valueFt }`. The two altitude types are never
+  `{ kind: "GEOMETRIC_FT", valueFt }`, or `{ kind: "SURFACE", valueFt: null }`
+  when the source explicitly reports “ground”. The altitude types are never
   collapsed.
 - For each optional measurement, an omitted field means the source omitted the
   field, `null` means the source explicitly reported it unavailable, and a
@@ -54,6 +58,12 @@ uncertainty. When uncertainty is unknown, future observations are rejected.
 Delayed/backfilled observations are accepted while preserving their older
 `observedAt`; ingestion does not make historical data fresh.
 
+For a source that reports an age rather than a direct position timestamp, an
+adapter records both the source's reference timestamp and its age, sets
+`observedAtBasis` to `SOURCE_AGE_FROM_REFERENCE`, and derives the event time
+from those values. The basis does not assert a precision or error bound the
+provider has not documented.
+
 ## Synthetic contract example
 
 This example is for tests and documentation only; it is not a captured aircraft
@@ -65,6 +75,7 @@ position or a provider fixture.
   "sourceId": "src_synthetic-test",
   "sourceObservationId": "synthetic-position-1",
   "observedAt": "2026-11-19T11:00:00.000Z",
+  "observedAtBasis": "SOURCE_TIMESTAMP",
   "ingestedAt": "2026-11-19T11:00:01.000Z",
   "timestampPrecision": "SECOND",
   "timestampUncertaintyMs": 500,

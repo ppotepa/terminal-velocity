@@ -10,6 +10,7 @@ const base = (overrides = {}) => ({
   sourceId: 'src_positions-test',
   sourceObservationId: 'delivery:position-1',
   observedAt: '2026-11-19T11:00:00Z',
+  observedAtBasis: 'SOURCE_TIMESTAMP',
   ingestedAt: '2026-11-19T11:00:01.250Z',
   timestampPrecision: 'SECOND',
   timestampUncertaintyMs: 1000,
@@ -52,7 +53,7 @@ test('ADS-B and MLAT remain distinct and OTHER measurements require an explicit 
 });
 
 test('optional measurements preserve zero, explicit null, and omitted as separate values', () => {
-  const zero = parsePositionObservation(base({ groundSpeedKnots: 0, trackDegrees: 0,
+  const zero = parsePositionObservation(base({ groundSpeedKnots: 0, trackDegrees: 0, trackKind: 'GROUND_TRACK',
     altitude: { kind: 'BAROMETRIC_FT', valueFt: 0 } }));
   assert.equal(zero.ok, true);
   assert.equal(zero.value.groundSpeedKnots, 0);
@@ -76,6 +77,9 @@ test('altitudes retain explicit feet and barometric/geometric distinctions', () 
     assert.equal(parsed.ok, true);
     assert.deepEqual(parsed.value.altitude, { kind, valueFt: 12500 });
   }
+  assert.deepEqual(parsePositionObservation(base({ altitude: { kind: 'SURFACE', valueFt: null } })).value.altitude,
+    { kind: 'SURFACE', valueFt: null });
+  assert.equal(parsePositionObservation(base({ altitude: { kind: 'SURFACE', valueFt: 0 } })).ok, false);
   assert.equal(parsePositionObservation(base({ altitude: { kind: 'METERS', value: 4000 } })).ok, false);
   assert.equal(parsePositionObservation(base({ altitude: { kind: 'BAROMETRIC_FT', valueFt: Number.NaN } })).ok, false);
 });
@@ -102,6 +106,26 @@ test('delayed observations retain event time independently from later ingestion 
   assert.equal(parsed.ok, true);
   assert.equal(parsed.value.observedAt, '2026-11-19T10:00:00.000Z');
   assert.equal(parsed.value.ingestedAt, '2026-11-19T11:00:01.000Z');
+});
+
+test('source age evidence preserves the reference instant and age used to derive event time', () => {
+  const derived = parsePositionObservation(base({
+    observedAt: '2026-11-19T11:00:00.750Z',
+    observedAtBasis: 'SOURCE_AGE_FROM_REFERENCE',
+    sourceTimeReferenceAt: '2026-11-19T11:00:01.250Z',
+    sourceAgeSeconds: 0.5,
+    ingestedAt: '2026-11-19T11:00:02Z',
+  }));
+  assert.equal(derived.ok, true);
+  assert.equal(derived.value.sourceAgeSeconds, 0.5);
+  assert.equal(derived.value.observedAtBasis, 'SOURCE_AGE_FROM_REFERENCE');
+  assert.equal(parsePositionObservation(base({
+    observedAtBasis: 'SOURCE_AGE_FROM_REFERENCE',
+    sourceTimeReferenceAt: '2026-11-19T11:00:01.250Z',
+    sourceAgeSeconds: 0.5,
+  })).error.code, 'INVALID_POSITION_TIME');
+  assert.equal(parsePositionObservation(base({ trackDegrees: 45 })).error.code, 'INVALID_POSITION_MEASUREMENT');
+  assert.equal(parsePositionObservation(base({ trackDegrees: 45, trackKind: 'TRUE_HEADING' })).ok, true);
 });
 
 test('identifier hints validate ICAO24 without claiming identity resolution', () => {

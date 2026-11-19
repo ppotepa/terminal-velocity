@@ -11,11 +11,11 @@ export {
   type LatitudeDegrees, type LongitudeDegrees, type InvalidCoordinate,
 } from '../domain/geo-coordinate.ts';
 export {
-  POSITION_MEASUREMENT_KINDS,
-  type PositionMeasurementKind, type PositionAltitude, type InvalidPositionMeasurement,
+  POSITION_MEASUREMENT_KINDS, POSITION_TRACK_KINDS,
+  type PositionMeasurementKind, type PositionAltitude, type PositionTrackKind, type InvalidPositionMeasurement,
 } from '../domain/position-measurement.ts';
 export {
-  POSITION_TIME_PRECISIONS,
-  type PositionTimePrecision, type UtcTimestamp,
+  POSITION_TIME_PRECISIONS, POSITION_OBSERVED_AT_BASES,
+  type PositionTimePrecision, type PositionObservedAtBasis, type UtcTimestamp,
 } from '../domain/position-time.ts';
 export { type PositionAdapter } from '../ports/position-adapter.ts';
