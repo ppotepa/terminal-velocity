@@ -35,3 +35,10 @@ export { importProviderMessage } from '../application/import-provider-message.ts
 export type { ProviderMessageCommit, ProviderImportResult, ImportQuarantine } from '../ports/provider-message-commit.ts';
 
 export { permitsRetention, type RetentionPermission } from '../domain/retention-permission.ts';
+export { replaySourceRange, type ReplayDependencies } from '../application/replay-source-range.ts';
+export { reviewSourceQuarantine } from '../application/quarantine-review.ts';
+export { planSourceRetry } from '../application/plan-source-retry.ts';
+export { sourceHealth } from '../application/source-health.ts';
+export { DEFAULT_REPLAY_POLICY } from '../domain/replay-policy.ts';
+export type { ReplayRequest, ReplayScope, ReplayCheckpoint, ReplayPolicy, ReplayError,
+  ReplayFailure, ReplayReader, ReplayDelivery, SourceReplayStore, SourceHealth } from '../ports/source-replay-checkpoint.ts';

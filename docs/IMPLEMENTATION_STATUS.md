@@ -161,3 +161,25 @@ lineage, restart, later-clock replay and rejection without retained effects.
 Fresh execution results and environment limitations are recorded in
 [the issue #11 handoff](handoffs/issue-11.md). Airframes previews remain transient;
 the provider API remains inactive and actual retention rights remain an external gate.
+
+## Issue #12 — bounded replay engineering
+
+The canonical checkout adds scoped replay checkpoints (migration 006), deterministic
+retry planning, independent fetch/parse health, redacted durable quarantine and
+local synthetic administrative commands. Each source scope serializes fetches;
+reserved attempts and cooldown survive restart, and cursor advancement follows
+existing durable acceptance. The explicit synthetic operator fixture now uses the
+permission-checked provider pipeline through retained inputs, message import,
+correlation and private availability. Provider cooldown survives quarantine and
+manual review even after automatic retries are exhausted. Overlap reuses source idempotency and
+preserves actual observed time. A partial page enters quarantine when a full-page
+retry would exceed the remaining record budget, preventing a capped reader from
+reporting completion before every record is accepted. The on-demand rendered Airframes lookup is unchanged,
+real content is not retained by replay, and the API adapter remains inactive.
+
+See [SOURCE_OPERATIONS.md](SOURCE_OPERATIONS.md) for limits, recovery, CLI commands,
+health semantics and the private #13 handoff. See [issue #12 evidence](handoffs/issue-12.md)
+for local results and pending coordinator CI. #11 engineering was merged in PR #62
+at `752aa27377abeb53f2042504116422f0ac5d86dc`; the older #11 execution notes above
+are historical. Real-provider acceptance remains an external gate; this change
+does not mark Stage 3 complete.

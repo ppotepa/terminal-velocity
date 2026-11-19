@@ -80,3 +80,15 @@ For `DUPLICATE`, return the original receipt. For `CONFLICTED`, preserve the exi
 The event type is `source.delivery-accepted.v1`, its stream key is the delivery UUID, its revision is 1 and its JSON payload is `{"deliveryId":"<uuid>"}`. For S3-07 the proposed consumer identity is `source-message-import.v1`, with inbox deduplication on (consumer identity, event ID). A receipt proves acceptance only. S3-07 owns that inbox and the import transaction.
 
 An application rollback can leave the additive nullable column in place. Preserve recorded fingerprints and the existing migration ledger.
+
+## Migration 006 — source replay checkpoints
+
+`source_ingestion.replay_checkpoints` stores one current replay range, opaque
+cursor, attempt/budget counters, redacted quarantine and health per exact source
+scope. Runtime can select, insert and update; it cannot delete. The existing
+source owner owns the table. There are no raw payload columns and no changes to
+message visibility. Cursor data remains private. Receipt/outbox transactions are
+unchanged; checkpoint advancement follows receipt commit so a lost acknowledgment
+repeats idempotent acceptance. See [source operations](../../docs/SOURCE_OPERATIONS.md)
+for concurrency, bounded review and non-destructive rollback. Migration execution
+is coordinator-verified in the isolated PostgreSQL suite, never by API startup.
