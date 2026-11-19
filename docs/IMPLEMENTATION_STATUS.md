@@ -84,3 +84,19 @@ The local sequence covers every step in the repository CI workflow. The database
 ## Stage 3 source decision — S3-02
 
 The first-party source review is recorded in [`adr/0001-first-message-source.md`](adr/0001-first-message-source.md). The outcome is **BLOCKED_PENDING_RIGHTS / NO-GO**: no message provider or project-owned receiver has verified access, account-level permissions, a permitted fixture, and retention terms. Airframes' API/access documentation and licensing are marked under development; this project has no feeder station, key, or early-access approval. The adsb.lol public API is a positions source under ODbL, while its documented ACARS/VDL2/HFDL endpoints accept contributor submissions under CC0 and do not provide an inbound message API. No connector or live-data claim is made. S3-03 through S3-13 remain gated on the unblock conditions in the ADR.
+
+## Stage 4 position contract work — S4-01 in review (PR #56)
+
+The `feature/s4-01-position-contracts` branch adds a versioned, provider-neutral position observation parser, typed coordinate/source identifiers, an adapter port, and contract tests. It preserves ADS-B versus MLAT, observed versus ingested time, timestamp uncertainty, tagged barometric/geometric feet, and omitted/null/zero optional measurements. It does not include a provider parser, live feed, storage, aircraft identity resolution, freshness projection, or map. No live-data or authorization claim is made.
+
+Local verification used Node.js **24.22.3** and Debian PostgreSQL **17.12**:
+
+| Command | Result |
+|---|---|
+| `npm ci --ignore-scripts --no-audit --no-fund` | PASS; 20 locked packages installed |
+| `npm run check` | PASS; strict types, 184 source files / 614 dependency edges, 28/28 architecture tests, 87/87 backend tests, 30/30 API tests (145 total) |
+| `npm run test:postgres:local` | PASS; 37/37 isolated PostgreSQL integration tests; durability settings enabled |
+| `npm run demo` | PASS; durable-domain example completed |
+| `npm run smoke` | PASS; API startup, health, replay, and clean SIGTERM shutdown |
+
+The PostgreSQL run exercised the existing durable message flow; S4-01 adds no database changes. The ephemeral database was started on loopback by the local integration harness and removed after the run. GitHub Actions results remain separate; this local run does not claim a remote CI pass. No public listener or deployment was started.

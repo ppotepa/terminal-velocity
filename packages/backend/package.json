@@ -7,7 +7,8 @@
     "./demo": "./src/demo/public/index.ts",
     "./correlation": "./src/modules/aircraft-correlation/public/index.ts",
     "./availability": "./src/modules/message-availability/public/index.ts",
-    "./source-connectors": "./src/modules/source-connectors/public/index.ts"
+    "./source-connectors": "./src/modules/source-connectors/public/index.ts",
+    "./flight-tracking": "./src/modules/flight-tracking/public/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
