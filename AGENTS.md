@@ -40,3 +40,10 @@ New dependencies must serve a concrete purpose. Keep the lockfile. Do not add se
 ## Changes and documentation
 
 Work on a feature branch. A PR description must cover the problem, behavior change, verification, and actual limitations. Update `docs/IMPLEMENTATION_STATUS.md` when the implemented scope changes. Documents in `docs/architecture/` describe the target architecture; they do not establish that every component has been implemented.
+
+## Working directory and progress tracking
+
+- Author and review project changes in `/root/work/git/terminal-velocity` on the one active issue branch. Keep this checkout on the current work so the owner can inspect it directly. Do not move authoring to another worktree. Isolated CI snapshots are separate and are not authoring workspaces.
+- Preserve saved branches and pending user changes when changing issues. Reconcile the current issue with merged predecessors before continuing.
+- Keep GitHub issue-list labels synchronized with the issue body: `status:queued`, `status:ready`, `status:in-progress`, `status:in-review`, `status:blocked`, or `status:done`. Use exactly one status label per issue.
+- Add `implementation:verified` only after reviewed and merged commits pass local CI. Use `gate:external` with `status:blocked` when code is verified but real-source or owner acceptance is outstanding; do not close such an issue as fully complete.

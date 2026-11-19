@@ -108,3 +108,12 @@ lineage SQL and rollback limitations. The integration suite includes an upgrade
 from a populated Stage2 database and consumption of its previously queued event.
 Its execution remains pending in the #11 local handoff; no hosted migration or
 backup/recovery operation has been performed.
+
+### Source replay (migration 006)
+
+The private source replay checkpoint table adds durable budgets, cursor progress,
+quarantine and independent source health. A session advisory lock serializes each
+source scope while existing receipt transactions use another pool connection.
+Reserve at least two connections. No API route or background live collector is
+added. See [SOURCE_OPERATIONS.md](SOURCE_OPERATIONS.md) for local commands, recovery,
+redaction and the external provider acceptance gate.
