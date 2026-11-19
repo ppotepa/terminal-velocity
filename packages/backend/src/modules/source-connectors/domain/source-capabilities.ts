@@ -1,14 +1,14 @@
 import { revision, type Revision } from '../../../contracts/identity/index.ts';
 import { err, ok, type Result } from '../../../kernel/result.ts';
-import { hasOnlyKeys, hasOwn, isToken, plainRecord } from './input-validation.ts';
+import { hasOnlyKeys, hasOwn, isToken, plainList, plainRecord, uniqueTokenList } from './input-validation.ts';
 import { receiverId, type ReceiverId } from './receiver-id.ts';
 
-export const OBSERVATION_DATA_LEVELS = ['PROVIDER_MESSAGE', 'RECEPTION', 'FRAME'] as const;
+export const OBSERVATION_DATA_LEVELS = Object.freeze(['PROVIDER_MESSAGE', 'RECEPTION', 'FRAME'] as const);
 export type ObservationDataLevel = typeof OBSERVATION_DATA_LEVELS[number];
 
-export const MESSAGE_DIRECTIONS = ['UPLINK', 'DOWNLINK', 'BIDIRECTIONAL', 'UNKNOWN'] as const;
+export const MESSAGE_DIRECTIONS = Object.freeze(['UPLINK', 'DOWNLINK', 'BIDIRECTIONAL', 'UNKNOWN'] as const);
 export type MessageDirection = typeof MESSAGE_DIRECTIONS[number];
-export const RECEIVER_COVERAGE_COMPLETENESS = ['COMPLETE', 'INCOMPLETE', 'UNKNOWN'] as const;
+export const RECEIVER_COVERAGE_COMPLETENESS = Object.freeze(['COMPLETE', 'INCOMPLETE', 'UNKNOWN'] as const);
 export type ReceiverCoverageCompleteness = typeof RECEIVER_COVERAGE_COMPLETENESS[number];
 
 export type CoverageDescriptor =
@@ -40,19 +40,6 @@ export type InvalidSourceCapabilities = {
   readonly field: string;
 };
 
-function uniqueTokens(input: unknown, field: string, maximum: number): Result<readonly string[], InvalidSourceCapabilities> {
-  if (!Array.isArray(input) || input.length > maximum)
-    return err({ code: 'INVALID_SOURCE_CAPABILITIES', field });
-  const values: string[] = [];
-  const seen = new Set<string>();
-  for (const value of input) {
-    if (!isToken(value) || seen.has(value)) return err({ code: 'INVALID_SOURCE_CAPABILITIES', field });
-    seen.add(value);
-    values.push(value);
-  }
-  return ok(Object.freeze(values));
-}
-
 function parseCoverage(input: unknown): Result<CoverageDescriptor, InvalidSourceCapabilities> {
   const record = plainRecord(input);
   if (!record || typeof record['kind'] !== 'string')
@@ -69,12 +56,12 @@ function parseCoverage(input: unknown): Result<CoverageDescriptor, InvalidSource
     return ok(Object.freeze({ kind: 'SAMPLED', description: record['description'] }));
   }
   if (record['kind'] === 'STATION_SCOPED') {
-    if (!hasOnlyKeys(record, ['kind', 'receiverIds']) || !Array.isArray(record['receiverIds'])
-      || record['receiverIds'].length === 0 || record['receiverIds'].length > 1024)
+    const receivers = plainList(record['receiverIds'], 1024);
+    if (!hasOnlyKeys(record, ['kind', 'receiverIds']) || !receivers || receivers.length === 0)
       return err({ code: 'INVALID_SOURCE_CAPABILITIES', field: 'coverage.receiverIds' });
     const ids: ReceiverId[] = [];
     const seen = new Set<string>();
-    for (const value of record['receiverIds']) {
+    for (const value of receivers) {
       if (typeof value !== 'string') return err({ code: 'INVALID_SOURCE_CAPABILITIES', field: 'coverage.receiverIds' });
       const parsed = receiverId(value);
       if (!parsed.ok || seen.has(parsed.value))
@@ -127,11 +114,12 @@ export function sourceCapabilities(input: unknown): Result<SourceCapabilities, I
     return err({ code: 'INVALID_SOURCE_CAPABILITIES', field: 'object' });
   const parsedRevision = revision(typeof record['revision'] === 'number' ? record['revision'] : NaN);
   if (!parsedRevision.ok) return err({ code: 'INVALID_SOURCE_CAPABILITIES', field: 'revision' });
-  if (!Array.isArray(record['supportedDataLevels']) || record['supportedDataLevels'].length === 0)
+  const supported = plainList(record['supportedDataLevels'], OBSERVATION_DATA_LEVELS.length);
+  if (!supported || supported.length === 0)
     return err({ code: 'INVALID_SOURCE_CAPABILITIES', field: 'supportedDataLevels' });
   const levels: ObservationDataLevel[] = [];
   const seenLevels = new Set<string>();
-  for (const value of record['supportedDataLevels']) {
+  for (const value of supported) {
     if (typeof value !== 'string' || !OBSERVATION_DATA_LEVELS.some(level => level === value) || seenLevels.has(value))
       return err({ code: 'INVALID_SOURCE_CAPABILITIES', field: 'supportedDataLevels' });
     seenLevels.add(value);
@@ -152,8 +140,8 @@ export function sourceCapabilities(input: unknown): Result<SourceCapabilities, I
   const bearer = record['bearer'];
   if (bearer !== null && !isToken(bearer))
     return err({ code: 'INVALID_SOURCE_CAPABILITIES', field: 'bearer' });
-  const protocolStack = uniqueTokens(record['protocolStack'], 'protocolStack', 32);
-  if (!protocolStack.ok) return protocolStack;
+  const protocolStack = uniqueTokenList(record['protocolStack'], 32);
+  if (!protocolStack) return err({ code: 'INVALID_SOURCE_CAPABILITIES', field: 'protocolStack' });
   return ok(Object.freeze({
     revision: parsedRevision.value,
     supportedDataLevels: Object.freeze(levels),
@@ -162,6 +150,6 @@ export function sourceCapabilities(input: unknown): Result<SourceCapabilities, I
     sampling: sampling.value,
     messageDirection: record['messageDirection'] as MessageDirection,
     bearer,
-    protocolStack: protocolStack.value,
+    protocolStack,
   }));
 }

@@ -12,21 +12,25 @@ class StaleLeaseAbort extends Error {}
 
 export async function consumeEvent(pool: SqlPool, lease: DeliveryLease,
   project: EventProjector<SqlExecutor>): Promise<ConsumeOutcome> {
+  return consumeRegisteredEvent(pool, lease, async (sql, id) => {
+    const selected = await sql.query<OutboxEventRow>(`SELECT * FROM correlation.outbox WHERE event_id=$1`, [id]);
+    if (!selected.rows[0]) throw new Error('Missing correlation producer event.');
+    return readOutboxEvent(selected.rows[0]);
+  }, project);
+}
+
+/** Each owner validates its immutable envelope; inbox, effects and ACK share this transaction. */
+export async function consumeRegisteredEvent<Event>(pool: SqlPool, lease: DeliveryLease,
+  read: (sql: SqlExecutor, id: string) => Promise<{ event: Event; digest: string }>,
+  project: (sql: SqlExecutor, event: Event) => Promise<void>): Promise<ConsumeOutcome> {
   const claim = snapshotLease(lease);
   try {
     return await runSqlTransaction(pool, async sql => {
-      const selected = await sql.query<OutboxEventRow>(`
-        SELECT outbox.event_id, outbox.event_type, outbox.schema_version,
-          outbox.stream_key, outbox.stream_revision, outbox.occurred_at_ms, outbox.payload
-        FROM event_delivery.deliveries AS delivery
-        JOIN correlation.outbox AS outbox ON outbox.event_id = delivery.event_id
-        WHERE delivery.consumer_id = $1 AND delivery.event_id = $2
-          AND delivery.state = 'LEASED' AND delivery.lease_token = $3::uuid
-          AND delivery.lease_until > clock_timestamp()
-        FOR UPDATE OF delivery`, [claim.consumerId, claim.eventId, claim.token]);
-      const row = selected.rows[0];
-      if (!row) return 'STALE_LEASE';
-      const { event, digest } = readOutboxEvent(row);
+      const selected = await sql.query(`SELECT event_id FROM event_delivery.deliveries
+        WHERE consumer_id=$1 AND event_id=$2 AND state='LEASED' AND lease_token=$3::uuid
+          AND lease_until > clock_timestamp() FOR UPDATE`, [claim.consumerId, claim.eventId, claim.token]);
+      if (!selected.rows[0]) return 'STALE_LEASE';
+      const { event, digest } = await read(sql, claim.eventId);
       const inserted = await sql.query(`
         INSERT INTO event_delivery.consumer_inbox (consumer_id, event_id, payload_digest)
         VALUES ($1, $2, $3)

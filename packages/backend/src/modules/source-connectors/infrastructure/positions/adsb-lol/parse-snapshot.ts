@@ -29,6 +29,7 @@ export interface AdsbLolPositionBatch {
   };
   readonly aircraftReturned: number;
   readonly noPositionCount: number;
+  readonly unresolvedIdentityCount: number;
   readonly observations: readonly PositionObservation[];
 }
 
@@ -104,6 +105,7 @@ export function parseAdsbLolPositionSnapshot(
   const observations: PositionObservation[] = [];
   const observationIds = new Set<string>();
   let noPositionCount = 0;
+  let unresolvedIdentityCount = 0;
   for (let index = 0; index < aircraft.length; index += 1) {
     const raw = aircraft[index];
     const item = plainRecord(raw);
@@ -119,6 +121,10 @@ export function parseAdsbLolPositionSnapshot(
       snapshotNowMs: now as number,
       ingestedAt: context.fetchedAt,
     });
+    if (!parsed.ok && parsed.error.code === 'UNRESOLVED_AIRCRAFT_IDENTITY') {
+      unresolvedIdentityCount += 1;
+      continue;
+    }
     if (!parsed.ok) return err({ code: 'INVALID_AIRCRAFT', index, error: parsed.error });
     if (observationIds.has(parsed.value.sourceObservationId))
       return err({ code: 'DUPLICATE_OBSERVATION_ID', index });
@@ -146,6 +152,7 @@ export function parseAdsbLolPositionSnapshot(
     }),
     aircraftReturned: aircraft.length,
     noPositionCount,
+    unresolvedIdentityCount,
     observations: Object.freeze(observations),
   }));
 }

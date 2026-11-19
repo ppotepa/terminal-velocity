@@ -57,7 +57,8 @@ test('synthetic provider fixture maps ADS-B, MLAT, source age, optional fields a
   const parsed = snapshot();
   assert.equal(parsed.ok, true);
   assert.equal(parsed.value.provider, 'adsb.lol');
-  assert.equal(parsed.value.aircraftReturned, 4);
+  assert.equal(parsed.value.aircraftReturned, 5);
+  assert.equal(parsed.value.unresolvedIdentityCount, 1);
   assert.equal(parsed.value.noPositionCount, 1);
   assert.equal(parsed.value.observations.length, 3);
   assert.deepEqual(parsed.value.coverage.kind, 'SAMPLED');
@@ -83,19 +84,21 @@ test('synthetic provider fixture maps ADS-B, MLAT, source age, optional fields a
   assert.equal(adsb.groundSpeedKnots, 0);
   assert.equal(adsb.trackDegrees, 0);
   assert.equal(adsb.trackKind, 'TRUE_HEADING');
-  assert.deepEqual(adsb.altitude, { kind: 'SURFACE', valueFt: null });
+  assert.deepEqual(adsb.altitudes, [{ kind: 'SURFACE', valueFt: null }]);
   assert.deepEqual(adsb.quality, { nic: 8, nacP: 9, containmentRadiusMeters: 75 });
   assert.equal(mlat.measurementKind, 'MLAT');
-  assert.equal(mlat.identifierHints.sourceLocalId, 'adsb-lol:~synthetic-mlat-1');
+  assert.equal(mlat.identifierHints.icao24, 'A0B1C4');
+  assert.equal(mlat.observedAt, '2026-11-19T11:00:00.000Z');
+  assert.equal(mlat.ingestedAt, FETCHED_AT);
   assert.equal(mlat.groundSpeedKnots, null);
-  assert.equal(mlat.altitude, null);
+  assert.equal(mlat.altitudes, null);
   assert.equal('trackDegrees' in mlat, false);
   assert.equal('trackKind' in mlat, false);
   assert.equal(other.measurementKind, 'OTHER');
   assert.equal(other.measurementDetail, 'adsb.lol:future_source_type');
   assert.equal(other.latitude, 13.405);
   assert.equal(other.longitude, 52.52);
-  assert.equal('altitude' in other, false);
+  assert.equal('altitudes' in other, false);
   assert.equal('trackDegrees' in other, false);
 });
 
@@ -112,7 +115,7 @@ test('query constructor enforces the local geographic cap and creates only the p
 });
 
 test('snapshot parser rejects malformed envelope, source errors, coordinate pairs and time evidence', () => {
-  assert.equal(snapshot({ ...FIXTURE, total: 5 }).error.field, 'total');
+  assert.equal(snapshot({ ...FIXTURE, total: 6 }).error.field, 'total');
   assert.equal(snapshot({ ...FIXTURE, msg: 'provider unavailable' }).error.code, 'SOURCE_REPORTED_FAILURE');
   assert.equal(snapshot({ ...FIXTURE, now: '1795089600000' }).error.field, 'now');
   assert.equal(snapshot({ ...FIXTURE, ptime: -1 }).error.field, 'ptime');
@@ -128,6 +131,14 @@ test('snapshot parser rejects malformed envelope, source errors, coordinate pair
   const invalidTrack = structuredClone(FIXTURE);
   invalidTrack.ac[0].track = 360;
   assert.equal(snapshot(invalidTrack).error.code, 'INVALID_AIRCRAFT');
+  const invalidHex = structuredClone(FIXTURE);
+  invalidHex.ac[0].hex = 'not-icao';
+  assert.equal(snapshot(invalidHex).error.error.field, 'hex');
+  const unresolvedOnly = structuredClone(FIXTURE);
+  unresolvedOnly.ac = [structuredClone(FIXTURE.ac[4])];
+  unresolvedOnly.total = 1;
+  assert.equal(snapshot(unresolvedOnly).value.observations.length, 0);
+  assert.equal(snapshot(unresolvedOnly).value.unresolvedIdentityCount, 1);
   const duplicate = structuredClone(FIXTURE);
   duplicate.ac[1].hex = duplicate.ac[0].hex;
   assert.equal(snapshot(duplicate).error.code, 'DUPLICATE_OBSERVATION_ID');

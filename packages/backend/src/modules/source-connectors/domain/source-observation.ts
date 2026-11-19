@@ -1,6 +1,6 @@
 import { revision, type Revision } from '../../../contracts/identity/index.ts';
 import { err, ok, type Result } from '../../../kernel/result.ts';
-import { hasOnlyKeys, hasOwn, isToken, plainRecord } from './input-validation.ts';
+import { hasOnlyKeys, hasOwn, isToken, plainRecord, uniqueTokenList } from './input-validation.ts';
 import { receiverId, type ReceiverId } from './receiver-id.ts';
 import { sourceDeliveryIdentity, type SourceDeliveryIdentity } from './source-delivery-identity.ts';
 import { sourceId, type SourceId } from './source-id.ts';
@@ -81,18 +81,6 @@ function parseTime(value: unknown, field: string): Result<ObservationTimeEvidenc
   const parsed = observationTimeEvidence(value);
   if (!parsed.ok) return invalid(field);
   return ok(parsed.value);
-}
-
-function parseStringList(input: unknown, field: string, maximum: number): Result<readonly string[], SourceParseError> {
-  if (!Array.isArray(input) || input.length > maximum) return invalid(field);
-  const values: string[] = [];
-  const seen = new Set<string>();
-  for (const item of input) {
-    if (!isToken(item) || seen.has(item)) return invalid(field);
-    seen.add(item);
-    values.push(item);
-  }
-  return ok(Object.freeze(values));
 }
 
 function parseAddressHints(input: unknown): Result<AddressHints, SourceParseError> {
@@ -214,9 +202,9 @@ export function parseSourceObservation(input: unknown): Result<SourceObservation
     }
     let protocolStack: readonly string[] | undefined;
     if (hasOwn(record, 'protocolStack')) {
-      const parsed = parseStringList(record['protocolStack'], 'protocolStack', 32);
-      if (!parsed.ok) return parsed;
-      protocolStack = parsed.value;
+      const parsed = uniqueTokenList(record['protocolStack'], 32);
+      if (!parsed) return invalid('protocolStack');
+      protocolStack = parsed;
     }
     let direction: MessageDirection | undefined;
     if (hasOwn(record, 'direction')) {
@@ -277,9 +265,9 @@ export function parseSourceObservation(input: unknown): Result<SourceObservation
     }
     let protocolStack: readonly string[] | undefined;
     if (hasOwn(record, 'protocolStack')) {
-      const parsed = parseStringList(record['protocolStack'], 'protocolStack', 32);
-      if (!parsed.ok) return parsed;
-      protocolStack = parsed.value;
+      const parsed = uniqueTokenList(record['protocolStack'], 32);
+      if (!parsed) return invalid('protocolStack');
+      protocolStack = parsed;
     }
     let direction: MessageDirection | undefined;
     if (hasOwn(record, 'direction')) {

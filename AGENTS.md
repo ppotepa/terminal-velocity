@@ -23,6 +23,12 @@ Use English for all project-authored documentation, code comments, test names, e
 - Data visibility must also cover counts and statuses. Do not derive a public indicator from a private message.
 - Preserve idempotency, tombstones, and reversible contributions. Revisions from different aggregates are not interchangeable.
 
+## Issue execution and status management
+
+Follow [the sequential issue execution workflow](docs/ISSUE_WORKFLOW.md) and the current [roadmap EPIC #4](https://github.com/ppotepa/terminal-velocity/issues/4). Its ordered child checklist is the canonical next-task sequence. **Only one child implementation issue may be active at a time**; do not start later issues before the immediate predecessor is completed and merged.
+
+Before coding, update the selected issue body to `IN PROGRESS` and record its branch, owner/date, dependencies, intended steps, and blocker state. During development, tick verified acceptance criteria and record actual test/PR evidence in that same issue body. Mark `IN REVIEW` with the PR, then `DONE` only after merge and verification. Close it, check it off in the EPIC, update its counts/status history, and set the next issue `READY`. Keep blocked prerequisites explicitly `BLOCKED` with an unblock condition; never silently skip them. Do not report local tests as passing remote CI.
+
 ## Verification
 
 Run `npm ci` and `npm run check` from the repository root. A material change to the startup flow also requires checking API process startup and shutdown. Add behavioral and regression tests for changed invariants, rather than tests that repeat the implementation.
@@ -34,3 +40,10 @@ New dependencies must serve a concrete purpose. Keep the lockfile. Do not add se
 ## Changes and documentation
 
 Work on a feature branch. A PR description must cover the problem, behavior change, verification, and actual limitations. Update `docs/IMPLEMENTATION_STATUS.md` when the implemented scope changes. Documents in `docs/architecture/` describe the target architecture; they do not establish that every component has been implemented.
+
+## Working directory and progress tracking
+
+- Author and review project changes in `/root/work/git/terminal-velocity` on the one active issue branch. Keep this checkout on the current work so the owner can inspect it directly. Do not move authoring to another worktree. Isolated CI snapshots are separate and are not authoring workspaces.
+- Preserve saved branches and pending user changes when changing issues. Reconcile the current issue with merged predecessors before continuing.
+- Keep GitHub issue-list labels synchronized with the issue body: `status:queued`, `status:ready`, `status:in-progress`, `status:in-review`, `status:blocked`, or `status:done`. Use exactly one status label per issue.
+- Add `implementation:verified` only after reviewed and merged commits pass local CI. Use `gate:external` with `status:blocked` when code is verified but real-source or owner acceptance is outstanding; do not close such an issue as fully complete.

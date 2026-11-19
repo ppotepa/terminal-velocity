@@ -54,6 +54,8 @@ export const adsbLolPositionAdapter: PositionAdapter<unknown, AdsbLolAircraftCon
     const longitude = record['lon'];
     if (typeof hex !== 'string' || hex.length === 0 || hex.length > 64)
       return err({ code: 'INVALID_INPUT', field: 'hex' });
+    if (!/^[0-9a-fA-F]{6}$/u.test(hex) && !hex.startsWith('~'))
+      return err({ code: 'INVALID_INPUT', field: 'hex' });
     if (typeof type !== 'string' || type.length === 0 || type.length > 128 || type !== type.trim())
       return err({ code: 'INVALID_INPUT', field: 'type' });
     if (latitude === null || latitude === undefined || longitude === null || longitude === undefined)
@@ -97,13 +99,14 @@ export const adsbLolPositionAdapter: PositionAdapter<unknown, AdsbLolAircraftCon
     if (geometric !== undefined && geometric !== null
       && (typeof geometric !== 'number' || !Number.isFinite(geometric)))
       return err({ code: 'INVALID_INPUT', field: 'alt_geom' });
-    const altitude = barometric === 'ground'
-      ? { kind: 'SURFACE', valueFt: null }
-      : typeof barometric === 'number'
-        ? { kind: 'BAROMETRIC_FT', valueFt: barometric }
-        : typeof geometric === 'number'
-          ? { kind: 'GEOMETRIC_FT', valueFt: geometric }
-          : Object.hasOwn(record, 'alt_baro') || Object.hasOwn(record, 'alt_geom') ? null : undefined;
+    const altitudes = barometric === 'ground'
+      ? [{ kind: 'SURFACE', valueFt: null }]
+      : [
+          ...(typeof barometric === 'number' ? [{ kind: 'BAROMETRIC_FT', valueFt: barometric }] : []),
+          ...(typeof geometric === 'number' ? [{ kind: 'GEOMETRIC_FT', valueFt: geometric }] : []),
+        ];
+    const altitudeValue = altitudes.length > 0 ? altitudes
+      : Object.hasOwn(record, 'alt_baro') || Object.hasOwn(record, 'alt_geom') ? null : undefined;
 
     const quality: Record<string, unknown> = {};
     if (Object.hasOwn(record, 'nic')) quality['nic'] = record['nic'];
@@ -131,7 +134,7 @@ export const adsbLolPositionAdapter: PositionAdapter<unknown, AdsbLolAircraftCon
       ...(speed.value === undefined ? {} : { groundSpeedKnots: speed.value }),
       ...(track.value === undefined ? {} : { trackDegrees: track.value,
         ...(track.value === null ? {} : { trackKind: barometric === 'ground' ? 'TRUE_HEADING' : 'GROUND_TRACK' }) }),
-      ...(altitude === undefined ? {} : { altitude }),
+      ...(altitudeValue === undefined ? {} : { altitudes: altitudeValue }),
       ...(Object.keys(quality).length === 0 ? {} : { quality }),
       ...(measurementKind === 'OTHER' ? { measurementDetail: `adsb.lol:${type}` } : {}),
     };

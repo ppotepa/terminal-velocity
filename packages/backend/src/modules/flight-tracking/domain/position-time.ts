@@ -11,14 +11,14 @@ export type PositionObservedAtBasis = typeof POSITION_OBSERVED_AT_BASES[number];
 
 export type InvalidPositionTime = {
   readonly code: 'INVALID_POSITION_TIME';
-  readonly field: 'observedAt' | 'ingestedAt' | 'precision' | 'uncertaintyMs' | 'observedAtBasis' | 'sourceAgeSeconds';
+  readonly field: 'observedAt' | 'sourceTimeReferenceAt' | 'ingestedAt' | 'precision' | 'uncertaintyMs' | 'observedAtBasis' | 'sourceAgeSeconds';
 };
 
 const UTC_TIMESTAMP = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,3}))?Z$/u;
 const MAX_TIMESTAMP_UNCERTAINTY_MS = 31_536_000_000;
 
 /** Parses a real UTC calendar instant and normalizes it to millisecond precision. */
-export function utcTimestamp(input: unknown, field: 'observedAt' | 'ingestedAt'):
+export function utcTimestamp(input: unknown, field: 'observedAt' | 'sourceTimeReferenceAt' | 'ingestedAt'):
 Result<UtcTimestamp, InvalidPositionTime> {
   if (typeof input !== 'string') return err({ code: 'INVALID_POSITION_TIME', field });
   const match = UTC_TIMESTAMP.exec(input);

@@ -41,10 +41,10 @@ calls `start` and stops on an explicit abort or non-retryable provider error.
 |---|---|
 | top-level `now` | Provider snapshot-generation reference time in Unix milliseconds. |
 | `seen_pos` | Seconds since the most recent position update. Derive `observedAt = now - seen_pos` and set `observedAtBasis: SOURCE_AGE_FROM_REFERENCE`, `sourceTimeReferenceAt: now`, `sourceAgeSeconds: seen_pos`, precision `UNKNOWN`, uncertainty `null`. The provider does not document a timestamp error bound. |
-| `hex` | ICAO24 only when exactly six hex digits; `~`/non-ICAO addresses remain source-local identifier hints. It is not temporal identity confirmation. |
+| `hex` | ICAO24 only when exactly six hex digits; `~`/non-ICAO addresses are source-local hints. Without an independent trusted identity decision, positioned rows with only these hints are counted as unresolved and omitted from canonical observations. An ICAO24 is a hint, not temporal identity confirmation. |
 | `type` | `mlat` maps to `MLAT`; `adsb_*` maps to `ADS_B`; other declared source types map to `OTHER` with the source type preserved in `measurementDetail`. |
-| `lat`, `lon` | Decimal degrees. A row with both absent/null has no position and is skipped; a half-present or invalid coordinate rejects the snapshot. Missing aircraft are never treated as negative observations. |
-| `alt_baro`, `alt_geom` | Barometric and geometric values in feet remain separately tagged. `alt_baro: "ground"` maps to the explicit `SURFACE` altitude kind. |
+| `lat`, `lon` | Decimal degrees. A row with both absent/null has no position and is skipped; a half-present or invalid coordinate rejects the snapshot. A positioned row without a resolvable identity is counted separately and omitted. Missing aircraft are never treated as negative observations. |
+| `alt_baro`, `alt_geom` | Barometric and geometric values in feet remain separately tagged. `alt_baro: "ground"` maps to the explicit `SURFACE` altitude kind. Both numeric altitudes are retained as separate tagged entries when present. |
 | `gs`, `track` | Ground speed in knots and true track degrees. `track` is true heading while on the ground; preserve `trackKind` accordingly. Null and zero remain distinct. |
 | `nic`, `nac_p`, `rc` | Preserve provider-reported NIC/NACp and containment radius in meters as quality metadata; no accuracy guarantee is inferred. |
 | `now` + `hex` | The API has no per-position delivery ID. Create a deterministic local observation key from this exact snapshot reference and the aircraft address; do not hash coordinates or round time. This identifies a snapshot row, not an upstream immutable event. |

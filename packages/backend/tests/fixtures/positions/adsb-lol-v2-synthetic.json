@@ -4,7 +4,7 @@
   "ctime": 1795089570000,
   "msg": "No error",
   "ptime": 42,
-  "total": 4,
+  "total": 5,
   "future_provider_field": "ignored for forward compatibility",
   "ac": [
     {
@@ -22,7 +22,7 @@
       "rc": 75
     },
     {
-      "hex": "~synthetic-mlat-1",
+      "hex": "a0b1c4",
       "type": "mlat",
       "lat": 52.521,
       "lon": 13.406,
@@ -38,11 +38,18 @@
       "lon": null
     },
     {
-      "hex": "~synthetic-other-2",
+      "hex": "a0b1c5",
       "type": "future_source_type",
       "lat": 13.405,
       "lon": 52.52,
       "seen_pos": 5
+    },
+    {
+      "hex": "~synthetic-local-1",
+      "type": "mlat",
+      "lat": 52.522,
+      "lon": 13.407,
+      "seen_pos": 2
     }
   ]
 }

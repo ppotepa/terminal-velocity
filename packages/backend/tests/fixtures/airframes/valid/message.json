@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "synthetic-rendered-record-v1",
+  "originalSourceId": "synthetic-message-1",
+  "deliveryId": "synthetic-delivery-1",
+  "sourceDescription": "Fabricated rendered record",
+  "decoder": {
+    "name": "synthetic-extractor",
+    "version": "1"
+  },
+  "dataLevel": "PROVIDER_MESSAGE",
+  "text": "Synthetic example only",
+  "receiverReceivedAt": {
+    "at": "2026-11-19T10:00:01Z",
+    "basis": "RECEIVED",
+    "precision": "SECOND",
+    "uncertaintyMs": 500
+  },
+  "sourceObservedAt": {
+    "at": "2026-11-19T10:00:00Z",
+    "basis": "OBSERVED",
+    "precision": "SECOND",
+    "uncertaintyMs": 500
+  },
+  "providerPublishedAt": {
+    "at": "2026-11-19T10:00:02Z",
+    "basis": "PROVIDER",
+    "precision": "SECOND",
+    "uncertaintyMs": 500
+  },
+  "bearer": "VDL2",
+  "applicationProtocol": "ACARS",
+  "direction": "DOWNLINK",
+  "aircraft": {
+    "icao24": "abc123",
+    "registration": "n-test",
+    "callsign": "test123"
+  },
+  "originator": {
+    "icao24": "ABC123"
+  },
+  "feeder": "Synthetic feeder"
+}
