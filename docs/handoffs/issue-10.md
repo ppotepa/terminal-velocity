@@ -1,6 +1,45 @@
 # Issue #10 — normalization handoff
 
+### Latest review correction — duplicate field order (2026-11-19)
+
+Baseline: `793f897`. Duplicate rendered records now compare facts independently
+of property order, both within a DOM sample and across the observation window.
+Reordering Registration and Callsign labels no longer creates `PARTIAL_LAYOUT`;
+changed values still do. Four synthetic browser regressions cover both outcomes
+in both locations, assert that multiple samples were actually read, and verify
+that the normalization window accepts identical duplicates and rejects conflicts.
+They run through the existing root `test:browser` entry point.
+
+Local verification with `PATH="$PWD/tmp/node24/bin:$PATH"` (Node 24.22.3):
+
+| Command | Actual result |
+|---|---|
+| `npm ci --offline --no-audit --no-fund` | PASS, 21 packages; sandbox fchown warnings |
+| `npm run check` | FAIL: typecheck, boundaries, architecture file and 11 backend files pass; API files: 2 pass, 4 fail |
+| `npm run test:messages` | PASS, 3 files, zero failures/skips |
+| `node --test --test-isolation=none scripts/messages/page-budget.test.mjs packages/backend/tests/airframes-transport.test.mjs packages/backend/tests/source-normalization.test.mjs` | PASS, 39 tests, zero failures/skips |
+| `npm run test:browser` | FAIL, 0/2 files pass |
+| `node scripts/messages/airframes-live.test.mjs` | 1 test passes, 8 fail at Chromium startup (`shutdown: Operation not permitted`), zero skipped; browser regressions remain unverified locally |
+| `git diff --check` | PASS |
+
+Coordinator-supplied CI evidence for the prior head is not verification of this
+correction. Run exact-SHA CI, particularly the four added browser cases, before
+acceptance. No SQL or startup wiring changed; PostgreSQL was not rerun for this
+correction. The actual rendered `crawl ICAO24` path and transient-only retention
+remain unchanged. No live acquisition or GitHub writes were performed.
+
+External acceptance remains **BLOCKED**: the owner must supply permission evidence
+and an authorized, versioned source sample, then validate the fabricated optional
+selectors and timestamp assumptions against it. Synthetic tests do not establish
+real-provider compatibility. PR, merge and final acceptance remain coordinator-owned.
+
 ## Status / execution log
+- 2026-11-19 19:35 UTC — IN PROGRESS for duplicate-field-order review correction;
+  owner implementation agent, branch feature/epic4-issue-10, baseline 793f897.
+  Dependency #9 remains merged per coordinator and local history. Scope: rendered
+  reader comparisons and browser regressions within/across samples; external
+  permission and versioned-sample acceptance remains BLOCKED. GitHub updates and
+  exact-SHA CI remain coordinator-owned.
 - 2026-11-19 19:24 UTC — IN PROGRESS for coordinator CI feedback on 9668ba1;
   owner implementation agent, branch feature/epic4-issue-10, prerequisite #9
   unchanged. Scope: baseline migration test teardown, deterministic lifecycle

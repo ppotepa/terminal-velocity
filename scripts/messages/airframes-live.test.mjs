@@ -46,6 +46,44 @@ test('private dry-run renders the synthetic shell and reports counts without acc
   await assert.rejects(acquire('dry-run', '*'), /scope/);
 });
 
+for (const acrossSamples of [false, true]) {
+  for (const changedValue of [false, true]) {
+    test(`reordered displayed duplicates ${acrossSamples ? 'across samples' : 'within a sample'} ${changedValue ? 'reject changed facts' : 'preserve identical facts'}`, async () => {
+      const { validateWindow } = await import('../../packages/backend/src/modules/source-connectors/infrastructure/airframes/page-window.ts');
+      const browser = await chromium.launch({ chromiumSandbox: true, executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium-headless-shell' });
+      try {
+        const page = await browser.newPage();
+        const fields = '<dt>Registration</dt><dd>N-TEST</dd><dt>Callsign</dt><dd>TEST123</dd>';
+        const reordered = `<dt>Callsign</dt><dd>${changedValue ? 'TEST456' : 'TEST123'}</dd><dt>Registration</dt><dd>N-TEST</dd>`;
+        const card = evidence => `<div class="vue-recycle-scroller__item-view"><div class="mb-4 border">
+          <a href="/airframes/synthetic">ABC123</a><a href="/messages/synthetic-duplicate">Details</a>
+          <div class="bg-inner">Synthetic duplicate</div><dl>${evidence}</dl></div></div>`;
+        await page.route(liveUrl, route => route.fulfill({ contentType: 'text/html', body: `
+          <div class="messages-scroller">${card(fields)}${acrossSamples ? '' : card(reordered)}</div>
+          <script>
+            window.sampleCount = 0;
+            const scroller = document.querySelector('.messages-scroller');
+            const query = scroller.querySelectorAll.bind(scroller);
+            scroller.querySelectorAll = selector => {
+              window.sampleCount++;
+              ${acrossSamples ? `queueMicrotask(() => { document.querySelector('dl').innerHTML = ${JSON.stringify(reordered)}; });` : ''}
+              return query(selector);
+            };
+          </script>` }));
+        const result = await observePage(page, 'ABC123', acrossSamples ? 1500 : 0);
+        const sampleCount = await page.evaluate(() => window.sampleCount);
+        assert.ok(acrossSamples ? sampleCount >= 2 : sampleCount === 1);
+        assert.equal(result.status, changedValue ? 'PARTIAL_LAYOUT' : 'OBSERVED');
+        assert.equal(result.messages.length, 1);
+        assert.deepEqual(result.messages[0].evidence, { registration: 'N-TEST', callsign: 'TEST123' });
+        const validated = validateWindow(result, 'ABC123', 1);
+        if (changedValue) assert.equal(validated, 'INVALID_ENVELOPE');
+        else assert.equal(validated.length, 1);
+      } finally { await browser.close(); }
+    });
+  }
+}
+
 test('leaving the live path between samples discards the window before reading off-scope cards', async () => {
   const browser = await chromium.launch({ chromiumSandbox: true, executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium-headless-shell' });
   try {

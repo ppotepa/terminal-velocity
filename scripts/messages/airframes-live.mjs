@@ -2,12 +2,22 @@ import { createProviderConnector } from '../../packages/backend/src/modules/sour
 import { pageUrl, maxCards, maxEnvelopeBytes, maxWindowBytes } from '../../packages/backend/src/modules/source-connectors/infrastructure/airframes/page-window.ts';
 import { boundPage } from './page-budget.mjs';
 import { syntheticShell } from './synthetic-shell.mjs';
+import { isDeepStrictEqual } from 'node:util';
 
 export const liveUrl = pageUrl;
 const cardSelector = '.vue-recycle-scroller__item-view .mb-4.border';
 
 /** Runs inside the rendered page. Return plain data only for the selected aircraft. */
 export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes, maxWindowBytes, envelopeOverhead, liveUrl }) {
+  // Keep this comparison inside the function serialized into the browser.
+  // Display label order is not part of a record's facts.
+  function sameFacts(left, right) {
+    if (left === right) return true;
+    if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+    const keys = Object.keys(left);
+    return keys.length === Object.keys(right).length
+      && keys.every(key => Object.hasOwn(right, key) && sameFacts(left[key], right[key]));
+  }
   const scope = new URL(liveUrl);
   if (location.origin !== scope.origin || location.pathname !== scope.pathname) return null;
   const messages = new Map();
@@ -82,7 +92,7 @@ export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes
     const size = new TextEncoder().encode(JSON.stringify(message)).length + envelopeOverhead;
     if (size > maxEnvelopeBytes) { unsupported = true; continue; }
     if (messages.has(message.messagePath)) {
-      if (JSON.stringify(messages.get(message.messagePath)) !== JSON.stringify(message)) unsupported = true;
+      if (!sameFacts(messages.get(message.messagePath), message)) unsupported = true;
       continue;
     }
     if (messages.size === maxCards || bytes + size > maxWindowBytes) { overflow = true; break; }
@@ -145,7 +155,7 @@ export async function observePage(page, icao, windowMs = 10000, expiresAt = Infi
       overflow ||= sample.overflow;
       for (const message of sample.messages) {
         const previous = messages.get(message.messagePath);
-        if (previous && JSON.stringify(previous) !== JSON.stringify(message)) { unsupported = true; continue; }
+        if (previous && !isDeepStrictEqual(previous, message)) { unsupported = true; continue; }
         bytes += Buffer.byteLength(JSON.stringify(message));
         bytes += previous ? -Buffer.byteLength(JSON.stringify(previous)) : envelopeOverhead;
         if (bytes > maxWindowBytes || (!previous && messages.size === maxCards)) {
