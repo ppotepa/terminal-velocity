@@ -22,3 +22,14 @@ export {
   positionQuality, type PositionQuality, type InvalidPositionQuality,
 } from '../domain/position-quality.ts';
 export { type PositionAdapter, type PositionParseContext } from '../ports/position-adapter.ts';
+export {
+  POSITION_HISTORY_MAX_PAGE_SIZE, POSITION_HISTORY_MAX_RANGE_MS,
+  positionHistoryByIcao24Query, positionHistoryWithinBoundsQuery,
+  type InvalidPositionHistoryQuery, type PositionGeoBounds, type PositionHistoryByIcao24Query,
+  type PositionHistoryCursor, type PositionHistoryQuery, type PositionHistoryWindow,
+  type PositionHistoryWithinBoundsQuery,
+} from '../domain/position-history-query.ts';
+export {
+  type PositionHistoryWriter, type PositionObservationAppendError, type PositionObservationAppendResult,
+} from '../ports/position-history-writer.ts';
+export { type PositionHistoryPage, type PositionHistoryReader } from '../ports/position-history-reader.ts';
