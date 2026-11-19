@@ -46,7 +46,13 @@ working-tree results, not exact-SHA CI or hosted checks.
 
 The coordinator must execute the final revision in its existing private,
 unprivileged CI, including PostgreSQL and browser suites. The new PostgreSQL
-case has not run here. No hosted CI or merged PR is claimed.
+case has not run here. No hosted CI or merged PR is claimed. Coordinator
+isolated CI for `23684099e27934139de2cec1c5e21a5e41406521` passed install
+and check, then failed PostgreSQL with 86/87 tests passing. The failing
+negative-case fixture changed only the ICAO24 while retaining the fleet's known
+registration, making it a conflicting-identifiers case rather than an unknown
+aircraft case. The working-tree correction supplies only the unknown ICAO24;
+PostgreSQL CI must rerun on the corrected revision before it is claimed passing.
 
 ## Acceptance and unblock condition
 

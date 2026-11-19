@@ -68,7 +68,7 @@ test('decode failure, missing observation time, unresolved aircraft and disconne
   delete missingTime.sourceObservedAt;
   assert.equal((await p.accept(missingTime, context(missingTime), scope, origin)).ok, true);
   const unknown = fixture();
-  unknown.aircraft.icao24 = 'FFFFFF';
+  unknown.aircraft = { icao24: 'FFFFFF' };
   const unknownReceipt = await p.accept(unknown, context(unknown), scope, origin);
   assert.equal(unknownReceipt.value.outcome, 'CREATED');
   await p.drain();
