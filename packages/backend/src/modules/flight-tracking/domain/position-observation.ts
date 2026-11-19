@@ -76,7 +76,7 @@ export interface PositionObservation {
 export type PositionParseError =
   | { readonly code: 'INVALID_INPUT'; readonly field: string }
   | { readonly code: 'UNSUPPORTED_VERSION'; readonly version: number }
-  | { readonly code: 'INVALID_POSITION_TIME'; readonly field: 'observedAt' | 'ingestedAt' | 'precision' | 'uncertaintyMs' | 'observedAtBasis' | 'sourceAgeSeconds' }
+  | { readonly code: 'INVALID_POSITION_TIME'; readonly field: 'observedAt' | 'ingestedAt' | 'precision' | 'uncertaintyMs' | 'observedAtBasis' | 'sourceAgeSeconds' | 'sourceTimeReferenceAt' }
   | { readonly code: 'OBSERVATION_AFTER_INGESTION' }
   | { readonly code: 'INVALID_COORDINATE'; readonly field: 'latitude' | 'longitude' }
   | { readonly code: 'INVALID_POSITION_MEASUREMENT'; readonly field: 'measurementKind' | 'measurementDetail' | 'altitude' | 'groundSpeedKnots' | 'trackDegrees' | 'trackKind' }
@@ -166,7 +166,7 @@ export function parsePositionObservation(
   let sourceTimeReferenceAt: UtcTimestamp | undefined;
   let sourceAgeSecondsValue: number | undefined;
   if (Object.hasOwn(record, 'sourceTimeReferenceAt')) {
-    const reference = utcTimestamp(record['sourceTimeReferenceAt'], 'observedAt');
+    const reference = utcTimestamp(record['sourceTimeReferenceAt'], 'sourceTimeReferenceAt');
     if (!reference.ok) return reference;
     sourceTimeReferenceAt = reference.value;
   }
@@ -190,6 +190,9 @@ export function parsePositionObservation(
   if (!uncertainty.ok) return uncertainty;
   const observedMillis = Date.parse(observedAt.value);
   const ingestedMillis = Date.parse(ingestedAt.value);
+  if (sourceTimeReferenceAt !== undefined
+    && Date.parse(sourceTimeReferenceAt) > ingestedMillis + (uncertainty.value ?? 0))
+    return err({ code: 'INVALID_POSITION_TIME', field: 'sourceTimeReferenceAt' });
   if (observedMillis > ingestedMillis + (uncertainty.value ?? 0))
     return err({ code: 'OBSERVATION_AFTER_INGESTION' });
 

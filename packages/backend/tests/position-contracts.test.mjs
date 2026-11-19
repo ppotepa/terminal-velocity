@@ -198,6 +198,23 @@ test('source age evidence preserves the reference instant and age used to derive
   assert.equal(parsePositionObservation(base({ trackDegrees: 45, trackKind: 'TRUE_HEADING' })).ok, true);
 });
 
+test('source age cannot conceal a reference time later than ingestion and declared uncertainty', () => {
+  const evidence = {
+    observedAt: '2026-11-19T10:00:00Z',
+    observedAtBasis: 'SOURCE_AGE_FROM_REFERENCE',
+    sourceTimeReferenceAt: '2026-11-19T12:00:00Z',
+    sourceAgeSeconds: 7200,
+    ingestedAt: '2026-11-19T11:00:00Z',
+  };
+  assert.deepEqual(parsePositionObservation(base({ ...evidence, timestampUncertaintyMs: 1000 })).error,
+    { code: 'INVALID_POSITION_TIME', field: 'sourceTimeReferenceAt' });
+  assert.deepEqual(parsePositionObservation(base({ ...evidence, timestampUncertaintyMs: null })).error,
+    { code: 'INVALID_POSITION_TIME', field: 'sourceTimeReferenceAt' });
+  assert.deepEqual(parsePositionObservation(base({ ...evidence, sourceTimeReferenceAt: 'not-a-time' })).error,
+    { code: 'INVALID_POSITION_TIME', field: 'sourceTimeReferenceAt' });
+  assert.equal(parsePositionObservation(base({ ...evidence, timestampUncertaintyMs: 3_600_000 })).ok, true);
+});
+
 test('identifier hints validate ICAO24 without claiming identity resolution', () => {
   const parsed = parsePositionObservation(base({ identifierHints: {
     icao24: 'a0b1c2', callsign: 'ABC123', sourceLocalId: 'track-1',

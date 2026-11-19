@@ -231,5 +231,11 @@ For the altitude and identity-evidence review changes, Node 24.22.3 ran
 contract suite, `npm run typecheck`, `npm run check:boundaries` (225 source
 files, 809 dependency edges), and `git diff --check` successfully. The backend
 workspace tests passed during `npm run check`; API tests failed solely at
-loopback binding with `listen EPERM` in this shell. These changes await
-coordinator isolated CI on their final commit.
+loopback binding with `listen EPERM` in this shell. The coordinator supplied a
+passing isolated local CI log at committed SHA
+`711ee6336ab27428fe44fb5119dc014bea9cf5db` for those changes. The later
+source-reference-time correction requires a new exact-SHA run by the coordinator.
+Locally, Node 24.22.3 passed offline `npm ci`, the focused position-contract
+suite, type checking, architecture checks, and all backend tests for that
+correction. `npm run check` could not complete its API tests because this shell
+denies loopback binds (`listen EPERM` on 127.0.0.1).
