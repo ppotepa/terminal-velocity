@@ -1,5 +1,3 @@
-import { openSocket } from './socket-peer.mjs';
-
 // These budgets cover the page's own traffic for one anonymous browser window.
 const maxRequests = 96, maxInFlight = 16, maxSocketMessages = 256;
 const bootstrapTypes = new Set(['Document', 'Fetch', 'XHR', 'Script', 'Preflight']);
@@ -11,7 +9,7 @@ function firstParty(url, protocol) {
     && !/(^|[./_-])(analytics|telemetry|stats|tracking|plausible|matomo|umami)([./_-]|$)/i.test(url.hostname + url.pathname);
 }
 
-export async function boundPage(context, page, liveUrl, cancel, syntheticShell, connect = openSocket) {
+export async function boundPage(context, page, liveUrl, cancel, syntheticShell) {
   let requests = 0, totalBytes = 0, navigationStarted = false, closed = false;
   const active = new Map();
   let streamedDocumentId;
@@ -122,6 +120,13 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell, 
   });
   for (const event of ['Network.loadingFinished', 'Network.loadingFailed'])
     session.on(event, ({ requestId }) => active.delete(requestId));
+  // Chromium owns the upgrade. It exposes rejected status codes in the frame
+  // error but can withhold response headers, including a provider cooldown.
+  session.on('Network.webSocketFrameError', ({ errorMessage }) => {
+    if (closed || !socket) return;
+    const match = /Unexpected response code: (\d{3})/.exec(errorMessage);
+    if (match) cancel({ status: Number(match[1]), stopAfterResponse: true });
+  });
   await session.send('Network.enable');
   await session.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
 
@@ -133,14 +138,7 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell, 
       return route.close();
     }
     socket = route;
-    try {
-      server = connect(route, new URL(liveUrl).origin, maxResponseBytes, failure => {
-        if (!closed) cancel(failure);
-      });
-    } catch {
-      cancel({ status: 503 });
-      return route.close();
-    }
+    server = route.connectToServer();
     function forward(destination, message) {
       const size = Buffer.byteLength(message);
       if (closed) return;
@@ -153,8 +151,6 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell, 
     const disconnected = () => { if (!closed) cancel({ status: 503 }); };
     route.onClose(disconnected);
     server.onClose(disconnected);
-    // Playwright opens the page side after the routing callback settles.
-    return server.ready;
   });
   return async () => {
     closed = true;

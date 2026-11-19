@@ -14,7 +14,7 @@ export interface RenderedCard {
 
 export type PageDelivery = SourceDeliveryEnvelope<RenderedCard>;
 
-export type PageResponse = { status: number; retryAfter?: string; body?: unknown };
+export type PageResponse = { status: number; retryAfter?: string; stopAfterResponse?: boolean; body?: unknown };
 export type ReadWindow = (icao: string, signal: AbortSignal) => Promise<PageResponse>;
 
 export function validateWindow(body: unknown, icao: string, retrievedAt: number, allowPartialPreview = false) {

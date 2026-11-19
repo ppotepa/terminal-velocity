@@ -6,7 +6,6 @@ import { createSecureServer } from 'node:http2';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright-core';
-import { syntheticUpgrade } from './synthetic-upgrade.mjs';
 import { liveUrl } from './airframes-live.mjs';
 
 const bootstrap = 'https://api.airframes.io/stream/visitor-token';
@@ -40,7 +39,7 @@ fetch('${analytics}').catch(() => {});
 
 // HTTP/2 supplies :status without a reason phrase. Keep TLS material in memory
 // and resolve only the selected hostname to this per-test loopback server.
-async function http2Document(t) {
+async function http2Document(t, upgradeStatus) {
   const { stdout: pem } = await promisify(execFile)('openssl', ['req', '-x509', '-newkey', 'ec',
     '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-subj', '/CN=app.airframes.io',
     '-days', '1', '-keyout', '-', '-out', '-']);
@@ -48,8 +47,12 @@ async function http2Document(t) {
   const key = pem.slice(0, pem.indexOf('-----BEGIN CERTIFICATE-----'));
   const spki = new X509Certificate(cert).publicKey.export({ type: 'spki', format: 'der' });
   const pin = createHash('sha256').update(spki).digest('base64');
-  const server = createSecureServer({ cert, key });
-  const paths = [];
+  const server = createSecureServer({ cert, key, allowHTTP1: true });
+  const paths = [], upgrades = [];
+  server.on('upgrade', (req, socket) => {
+    upgrades.push(req.url);
+    socket.end(`HTTP/1.1 ${upgradeStatus} Denied\r\nRetry-After: 60\r\nContent-Length: 0\r\n\r\n`);
+  });
   server.on('stream', (stream, headers) => {
     paths.push(headers[':path']);
     stream.respond({ ':status': 200, 'content-type': 'text/html' });
@@ -63,29 +66,15 @@ async function http2Document(t) {
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
-  return { paths, args: ['--no-proxy-server', '--ignore-certificate-errors-spki-list=' + pin,
-    `--host-resolver-rules=MAP app.airframes.io 127.0.0.1:${server.address().port}, MAP * ~NOTFOUND`] };
+  return { paths, upgrades, upgradeStatus, args: ['--no-proxy-server', '--ignore-certificate-errors-spki-list=' + pin,
+    `--host-resolver-rules=MAP app.airframes.io 127.0.0.1:${server.address().port}, MAP ws.airframes.io 127.0.0.1:${server.address().port}, MAP * ~NOTFOUND`] };
 }
 
 // Replace only the upstream peer and HTTP responses. Chromium still performs
 // navigation, redirects, cross-origin fetch, socket events and DOM rendering.
-async function crawl(t, { denied, redirect, partial, disconnect, stop, burst, documentServer, upgradeStatus } = {}) {
-  const requested = [], blocked = [], closed = [], output = [];
+async function crawl(t, { denied, redirect, partial, disconnect, stop, burst, documentServer } = {}) {
+  const requested = [], blocked = [], sockets = [], closed = [], output = [];
   const documentResponses = [], pageLogs = [], browsers = [];
-  const sockets = syntheticUpgrade(t, {
-    status: upgradeStatus,
-    onClose: () => closed.push(stream),
-    onMessage(peer, message) {
-      if (message !== 'ready') return;
-      if (stop) { process.emit('SIGINT'); return; }
-      if (disconnect && sockets.length === 1) { peer.send('disconnect'); return; }
-      if (burst) {
-        peer.send(Array.from({ length: 26 }, (_, i) => card('ABC123', String(i))).join(''));
-        return;
-      }
-      peer.send(card('ABC123', 'selected') + card('DEF456', 'other') + (partial ? card('ABC123', 'live') : ''));
-    },
-  });
   const launch = chromium.launch.bind(chromium);
   t.mock.method(chromium, 'launch', async options => {
     const browser = await launch({ ...options, args: documentServer?.args });
@@ -93,6 +82,7 @@ async function crawl(t, { denied, redirect, partial, disconnect, stop, burst, do
     const newContext = browser.newContext.bind(browser);
     browser.newContext = async config => {
       const context = await newContext({ ...config, offline: !documentServer });
+      if (documentServer?.upgradeStatus) await context.grantPermissions(['local-network-access'], { origin: new URL(liveUrl).origin });
       const newSession = context.newCDPSession.bind(context);
       context.newCDPSession = async page => {
         const session = await newSession(page);
@@ -126,6 +116,30 @@ async function crawl(t, { denied, redirect, partial, disconnect, stop, burst, do
         };
         return session;
       };
+      const routeWebSocket = context.routeWebSocket.bind(context);
+      context.routeWebSocket = (pattern, handler) => routeWebSocket(pattern, route => {
+        if (documentServer?.upgradeStatus) return handler(route);
+        route.connectToServer = () => {
+          sockets.push(route.url());
+          let receive;
+          return {
+            onMessage(handler) { receive = handler; },
+            onClose() {},
+            close: async () => { closed.push(route.url()); },
+            send(message) {
+              if (message !== 'ready') return;
+              if (stop) { process.emit('SIGINT'); return; }
+              if (disconnect && sockets.length === 1) { receive('disconnect'); return; }
+              if (burst) {
+                receive(Array.from({ length: 26 }, (_, i) => card('ABC123', String(i))).join(''));
+                return;
+              }
+              receive(card('ABC123', 'selected') + card('DEF456', 'other') + (partial ? card('ABC123', 'live') : ''));
+            },
+          };
+        };
+        return handler(route);
+      });
       return context;
     };
     return browser;
@@ -144,7 +158,7 @@ async function crawl(t, { denied, redirect, partial, disconnect, stop, burst, do
   }
   assert.equal(output.length, 1);
   assert.ok(!requested.includes(analytics));
-  assert.deepEqual(closed, upgradeStatus ? [] : sockets);
+  assert.deepEqual(closed, sockets);
   assert.ok(browsers.every(browser => !browser.isConnected()));
   return { result: JSON.parse(output[0]), requested, blocked, sockets, code, documentResponses, pageLogs };
 }
@@ -228,13 +242,14 @@ test('cancelling the CLI closes the active socket without another page attempt',
   assert.deepEqual(sockets, [stream]);
 });
 
-for (const [upgradeStatus, expected] of [[429, 'RATE_LIMITED'], [403, 'PERMANENT_FAILURE']]) {
-  test(`HTTP ${upgradeStatus} during socket upgrade ends the window before another bootstrap`, async t => {
-    const { result, requested, sockets } = await crawl(t, { upgradeStatus });
+for (const [status, expected] of [[429, 'RATE_LIMITED'], [403, 'PERMANENT_FAILURE']]) {
+  test(`Chromium rejects a native WebSocket upgrade with HTTP ${status} without another lookup`, async t => {
+    const documentServer = await http2Document(t, status);
+    const { result, requested } = await crawl(t, { documentServer });
     assert.equal(result.status, expected);
+    assert.deepEqual(documentServer.upgrades, [new URL(stream).pathname + new URL(stream).search]);
     assert.deepEqual(requested.filter(url => url === bootstrap), [bootstrap]);
-    assert.deepEqual(sockets, [stream]);
-    assert.deepEqual(result.messages, []);
     assert.equal(result.accepted, 0);
+    assert.deepEqual(result.messages, []);
   });
 }
