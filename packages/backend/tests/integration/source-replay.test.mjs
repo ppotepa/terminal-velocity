@@ -202,7 +202,7 @@ test('partial two-record page exhausts small budget safely then recovers after e
     return { async read(input) {
       const result = await reader.read(input), first = result.value.records[0];
       return { ok: true, value: { records: [first, { ...first,
-        originalSourceId: first.originalSourceId + '-two', deliveryId: first.deliveryId + '-two' }],
+        originalSourceId: first.originalSourceId + '-two', deliveryId: first.deliveryId + '-two' }].slice(0, input.maxRecords),
         bytes: 2000, nextCursor: null } };
     } };
   };
@@ -211,12 +211,15 @@ test('partial two-record page exhausts small budget safely then recovers after e
   f.deps.delivery.accept = async raw => ++receipts === 2
     ? { ok: false, error: { code: 'TRANSIENT_FAILURE' } } : accept(raw);
   const partial = await replaySourceRange(r, f.deps);
+  assert.equal(partial.state, 'QUARANTINED');
+  assert.equal(partial.lastError, 'TRANSIENT_FAILURE');
+  assert.equal(partial.quarantined, 1);
   assert.equal(partial.processed, 1); assert.equal(partial.cursor, null);
   assert.equal((await effects(r)).length, 1);
   const other = createTestPools();
   try {
     const g = setup(r, other.runtime); g.time(30000); g.deps.reader = pageReader(g.deps);
-    // The full retried page exceeds the remaining allowance: no record is skipped.
+    // A capped retry would return only the first record and a null cursor.
     const exhausted = await replaySourceRange(r, g.deps);
     assert.equal(exhausted.state, 'QUARANTINED'); assert.equal(exhausted.cursor, null);
     assert.equal(exhausted.processed, 1); assert.equal((await effects(r)).length, 1);

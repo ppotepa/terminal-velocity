@@ -35,7 +35,8 @@ export async function replaySourceRange<Raw>(request: ReplayRequest, deps: Repla
       health: previous ? { ...previous.health } : initialSourceHealth(now, deps.coverageKind), reviews: 0 };
     if (c.state !== 'READY' || now < c.nextAttemptAt) return c;
     c.health.asOf = now;
-    const fail = async (failure: ReplayFailure, phase: 'fetchOutcome' | 'parseOutcome' | 'receiptOutcome') => {
+    const fail = async (failure: ReplayFailure, phase: 'fetchOutcome' | 'parseOutcome' | 'receiptOutcome',
+      requiresReview = false) => {
       const allowed = ['RETRY_AFTER', 'TRANSIENT_FAILURE', 'MALFORMED_PAYLOAD', 'UNAUTHORIZED',
         'QUOTA_EXHAUSTED', 'RIGHTS_REVOKED', 'CURSOR_EXPIRED', 'BUDGET_EXHAUSTED', 'INCOMPLETE_TIME', 'CLOCK_SKEW'];
       if (!allowed.includes(failure.code)) failure = { code: 'MALFORMED_PAYLOAD' };
@@ -53,7 +54,8 @@ export async function replaySourceRange<Raw>(request: ReplayRequest, deps: Repla
         c.nextAttemptAt = Math.max(c.nextAttemptAt, deadline);
       }
       const retry = planSourceRetry(failure, c.attempts, policy);
-      if (retry.kind === 'RETRY') c.nextAttemptAt = Math.max(c.nextAttemptAt, receivedAt + retry.delayMs);
+      if (retry.kind === 'RETRY' && !requiresReview)
+        c.nextAttemptAt = Math.max(c.nextAttemptAt, receivedAt + retry.delayMs);
       else quarantineSourceDelivery(c, failure.code);
       await session.save(c);
       return c;
@@ -117,16 +119,20 @@ export async function replaySourceRange<Raw>(request: ReplayRequest, deps: Repla
       c.health.ingestLag = Math.max(0, deps.now() - c.health.lastProviderEventAt);
     }
 
+    const pageStartProcessed = c.processed;
+    // A capped retry could report a null cursor before the unaccepted tail is seen.
+    const receiptFailure = (failure: ReplayFailure) => fail(failure, 'receiptOutcome',
+      c.processed > pageStartProcessed && c.processed + page.records.length > request.limit);
     for (const record of page.records) {
       try { permitted = await deps.authorized(request); }
-      catch { return fail({ code: 'TRANSIENT_FAILURE' }, 'receiptOutcome'); }
-      if (!permitted) return fail({ code: 'RIGHTS_REVOKED' }, 'receiptOutcome');
+      catch { return receiptFailure({ code: 'TRANSIENT_FAILURE' }); }
+      if (!permitted) return receiptFailure({ code: 'RIGHTS_REVOKED' });
       let receipt;
       try { receipt = await deps.delivery.accept(record); }
-      catch { return fail({ code: 'TRANSIENT_FAILURE' }, 'receiptOutcome'); }
-      if (!receipt.ok) return fail(receipt.error, 'receiptOutcome');
+      catch { return receiptFailure({ code: 'TRANSIENT_FAILURE' }); }
+      if (!receipt.ok) return receiptFailure(receipt.error);
       if (receipt.value !== 'CREATED' && receipt.value !== 'DUPLICATE')
-        return fail({ code: 'MALFORMED_PAYLOAD' }, 'receiptOutcome');
+        return receiptFailure({ code: 'MALFORMED_PAYLOAD' });
       if (receipt.value === 'CREATED') c.applied += 1; else c.duplicate += 1;
       c.processed += 1;
     }

@@ -112,8 +112,10 @@ payloads. Recover by refetching corrected source data within the same bounded ra
   authorization and never enables a live adapter. No automatic retry is made.
 - Lost acknowledgment/crash: keep the same epoch and range. The reserved budget
   survives, while any durable receipt is deduplicated on recovery. Partial pages
-  can consume the remaining delivery budget through repeated receipts and therefore
-  require review rather than skipping records.
+  that cannot fit a full-page retry within the remaining delivery budget enter
+  quarantine immediately. A capped reader could otherwise return a shortened
+  page with a null cursor and hide an unaccepted record. Review grants a fresh
+  bounded budget; retry the same page after confirming the failure is resolved.
 
 After resolving the cause, use the original complete replay arguments plus
 `--resolve RETRY_SAME_PAGE`, or `--resolve RESTART_BOUNDED_RANGE` for cursor expiry.

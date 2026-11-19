@@ -194,3 +194,29 @@ The on-demand Airframes reader and browser entry points were not edited. No real
 content, historical provider API, external acceptance or deployment is claimed.
 Approved rights, an actual provider cursor contract and private live acceptance
 remain external gates for #13; this handoff does not advance the issue queue.
+
+## Partial-page completion correction — November 19, 2026
+
+Coordinator review found that a second read capped to the remaining record budget
+could return a shortened page with a null cursor after one receipt in a two-record
+page failed. The replay runner now quarantines the original checkpoint when its
+partially acknowledged page cannot fit a full-page retry inside that budget.
+The original receipt error remains visible; manual review grants a fresh bounded
+budget and retries the same page, relying on durable identity deduplication.
+The unit and PostgreSQL regression readers now honor `maxRecords`. The unit case
+checks quarantine, restart with no fetch, review, duplicate first receipt and
+acceptance of the second. The SQL case checks the same state against the real
+receipt transaction and downstream projection. No migration change is required.
+The coordinator must verify the SQL case in its isolated local CI before approval.
+
+For this correction, `PATH="$PWD/tmp/node24/package/bin:$PATH"` selected Node
+24.22.3. `npm ci --offline --no-audit --no-fund --cache "$PWD/tmp/npm-cache"`
+passed with 21 packages and sandbox `fchown EINVAL` warnings. `npm run check`
+passed typecheck, source boundaries (216 files, 774 dependencies), architecture
+and backend test files, then failed in four API files that require loopback
+listeners in this sandbox (two API files passed). Direct
+`node --test --test-isolation=none packages/backend/tests/*.test.mjs` passed
+143/143, including 15/15 in `source-replay.test.mjs`; `npm run test:messages`
+passed 3/3 files. `npm run test:postgres:local` stopped before tests because
+`initdb` refuses root. SQL regression syntax and `git diff --check` passed.
+These are local results for the working tree, not exact-SHA coordinator CI.

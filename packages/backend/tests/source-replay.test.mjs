@@ -92,6 +92,37 @@ test('partial outage and lost receipt acknowledgment replay safely without skipp
   assert.equal(JSON.stringify(c).includes('secret payload'), false);
 });
 
+test('partial page cannot complete from a record-limited retry', async () => {
+  const f = fixture(), bounded = { ...request, limit: 2 };
+  const records = [{ id: 'one', at: 1500 }, { id: 'two', at: 1600 }];
+  const requestedLimits = [];
+  f.deps.reader.read = async ({ maxRecords }) => {
+    requestedLimits.push(maxRecords);
+    return ok({ records: records.slice(0, maxRecords), bytes: 50, nextCursor: null });
+  };
+  const accept = f.deps.delivery.accept;
+  let failSecond = true;
+  f.deps.delivery.accept = raw => raw.id === 'two' && failSecond
+    ? bad('TRANSIENT_FAILURE') : accept(raw);
+  const partial = await f.run(bounded);
+  assert.equal(partial.state, 'QUARANTINED');
+  assert.equal(partial.lastError, 'TRANSIENT_FAILURE');
+  assert.equal(partial.quarantined, 1);
+  assert.equal(partial.processed, 1);
+  assert.equal(partial.cursor, null);
+  f.time(20000);
+  assert.equal((await f.run(bounded)).state, 'QUARANTINED');
+  assert.deepEqual(requestedLimits, [2]);
+  await reviewSourceQuarantine(f.deps.store, bounded, 'window', 'RETRY_SAME_PAGE', async () => true);
+  failSecond = false;
+  const recovered = await f.run(bounded);
+  assert.deepEqual(requestedLimits, [2, 2]);
+  assert.equal(recovered.state, 'COMPLETE');
+  assert.equal(recovered.applied, 2);
+  assert.equal(recovered.duplicate, 1);
+  assert.equal(f.receipts.size, 2);
+});
+
 test('request, byte, record and retry budgets are enforced with no overlapping fetches', async () => {
   for (const page of [{ records: [], bytes: 9999999, nextCursor: null },
     { records: Array(11).fill({ at: 1500 }), bytes: 10, nextCursor: null },

@@ -172,7 +172,9 @@ existing durable acceptance. The explicit synthetic operator fixture now uses th
 permission-checked provider pipeline through retained inputs, message import,
 correlation and private availability. Provider cooldown survives quarantine and
 manual review even after automatic retries are exhausted. Overlap reuses source idempotency and
-preserves actual observed time. The on-demand rendered Airframes lookup is unchanged,
+preserves actual observed time. A partial page enters quarantine when a full-page
+retry would exceed the remaining record budget, preventing a capped reader from
+reporting completion before every record is accepted. The on-demand rendered Airframes lookup is unchanged,
 real content is not retained by replay, and the API adapter remains inactive.
 
 See [SOURCE_OPERATIONS.md](SOURCE_OPERATIONS.md) for limits, recovery, CLI commands,
