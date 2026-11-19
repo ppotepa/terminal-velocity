@@ -87,3 +87,28 @@ test('actual PostgreSQL API keeps messages, idempotency and availability after a
     (SELECT count(*)::int FROM event_delivery.consumer_inbox) AS receipts`);
   assert.deepEqual(counts.rows[0], { messages: 1, decisions: 1, events: 1, receipts: 1 });
 });
+
+
+test('unauthenticated demo endpoints reveal neither private provider records nor their status', { timeout: 20000 }, async t => {
+  const { createSyntheticProviderPipeline } = await import('../../../../packages/backend/src/modules/source-connectors/composition/create-synthetic-provider-pipeline.ts');
+  const { createFixtureCandidateDirectory } = await import('../../../../packages/backend/src/demo/infrastructure/fixture-candidate-directory.ts');
+  const { createFixtureFleet } = await import('../../../../packages/backend/src/demo/infrastructure/fixture-fleet.ts');
+  const { accept, NOW } = await import('../../../../packages/backend/tests/integration/helpers/provider-fixture.mjs');
+  const pipeline = createSyntheticProviderPipeline(pools.runtime, createFixtureCandidateDirectory(createFixtureFleet()), () => NOW);
+  assert.ok((await accept(pipeline)).ok);
+  await pipeline.drain();
+  const privateId = (await pools.admin.query('SELECT message_id FROM source_ingestion.message_revisions')).rows[0].message_id;
+  const api = await launch(t);
+  assert.equal((await request(api.base, '/api/v1/messages/' + privateId)).status, 404);
+  const list = await request(api.base, '/api/v1/aircraft/ac_demo-001/messages');
+  assert.equal(list.status, 200);
+  assert.equal(JSON.stringify(list.body).includes(privateId), false);
+  const aircraft = await request(api.base, '/api/v1/aircraft/ac_demo-001');
+  assert.equal(aircraft.body.data.availability.freshness, 'NONE');
+  assert.equal(aircraft.body.data.availability.lastMessageAt, null);
+  const demo = { messageId: uniqueId('msg'), observedAt: new Date(Date.now() - 1000).toISOString(),
+    bearer: 'VDL2', text: 'Synthetic public fixture', icao24: 'D00001' };
+  assert.equal((await request(api.base, '/api/v1/demo/messages', demo)).status, 201);
+  assert.equal((await request(api.base, '/api/v1/demo/messages', demo)).status, 200);
+  await api.stop();
+});

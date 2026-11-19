@@ -1,0 +1,425 @@
+import test, { after, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { fork } from 'node:child_process';
+import { once } from 'node:events';
+import { createTestPools, resetTestData } from './helpers/database.mjs';
+import { fixture, accept, context, scope, origin, NOW } from './helpers/provider-fixture.mjs';
+import { createSyntheticProviderPipeline } from '../../src/modules/source-connectors/composition/create-synthetic-provider-pipeline.ts';
+import { createFixtureCandidateDirectory } from '../../src/demo/infrastructure/fixture-candidate-directory.ts';
+import { createFixtureFleet } from '../../src/demo/infrastructure/fixture-fleet.ts';
+import { createPostgresDemoTracker } from '../../src/demo/composition/create-postgres-demo-tracker.ts';
+import { SOURCE_IMPORT_CONSUMER, PRIVATE_AVAILABILITY_CONSUMER } from '../../src/modules/source-connectors/infrastructure/postgres/source-event-router.ts';
+import { consumeRegisteredEvent } from '../../src/modules/event-delivery/infrastructure/consume-event.ts';
+import { readSourceEvent } from '../../src/modules/source-connectors/infrastructure/postgres/read-source-event.ts';
+import { acceptSourceDelivery, normalizeSourceObservation } from '../../src/modules/source-connectors/public/index.ts';
+import { postgresSourceAcceptanceTransaction } from '../../src/modules/source-connectors/infrastructure/postgres/postgres-source-acceptance-transaction.ts';
+const pools = createTestPools();
+beforeEach(() => resetTestData(pools.admin));
+after(() => pools.close());
+const directory = createFixtureCandidateDirectory(createFixtureFleet());
+const pipeline = (dir = directory, sql = pools.runtime) => createSyntheticProviderPipeline(sql, dir, () => NOW);
+const count = async table => Number((await pools.admin.query(`SELECT count(*) AS n FROM ${table}`)).rows[0].n);
+const messages = () => pools.admin.query('SELECT * FROM source_ingestion.message_revisions');
+async function lease(p, consumer = SOURCE_IMPORT_CONSUMER) { await p.route(); return p.queue.leaseNext(consumer, 30_000); }
+async function ready(eventId) {
+  await pools.admin.query(`UPDATE event_delivery.deliveries SET state='READY',completed_at=NULL,
+    lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp() WHERE event_id=$1`, [eventId]);
+}
+
+test('synthetic rendered record reaches a private decision and status with lineage; demo reads stay isolated', async () => {
+  const p = pipeline(), raw = fixture(), receipt = await accept(p, raw);
+  assert.equal(receipt.value.outcome, 'CREATED');
+  const consumed = await p.consumeSource(await lease(p));
+  assert.equal(consumed.result.outcome, 'IMPORTED');
+  const imported = consumed.result;
+  assert.equal(imported.sourceDeliveryId, receipt.value.deliveryId);
+  assert.equal(imported.messageRevision, 1);
+  assert.equal(imported.decision.revision, 1);
+  assert.equal(await count('source_ingestion.private_contributions'), 0);
+  await p.consumePrivate(await lease(p, PRIVATE_AVAILABILITY_CONSUMER));
+  const status = await p.readPrivateStatus('ac_demo-001');
+  assert.equal(status.freshness, 'RECENT');
+  assert.equal(status.contributions.length, 1);
+  assert.equal(status.contributions[0].source_delivery_id, receipt.value.deliveryId);
+  assert.deepEqual(status.contributions[0].provenance, { pageUrl: origin.pageUrl, parserVersion: origin.parserVersion });
+  const stored = (await messages()).rows[0];
+  assert.equal(stored.canonical.observation.decodedText, raw.text);
+  assert.equal(stored.canonical.provenance.originalSourceId, raw.originalSourceId);
+  assert.equal(stored.canonical.provenance.decoder.version, raw.decoder.version);
+  assert.equal(stored.canonical.observation.dataLevel, 'PROVIDER_MESSAGE');
+  assert.equal('receiverId' in stored.canonical.observation, false);
+  assert.equal(await count('message_ingestion.messages'), 0);
+  assert.equal(await count('availability.contributions'), 0);
+  assert.equal(await p.queue.fanOut(['demo-availability-v1'], 100), 0);
+  const demo = await createPostgresDemoTracker({ connectionString: process.env.TEST_RUNTIME_DATABASE_URL, now: () => NOW, startWorker: false });
+  try {
+    assert.equal((await demo.tracker.getMessage(imported.messageId)).ok, false);
+    assert.equal(JSON.stringify(await demo.tracker.getMessages('ac_demo-001')).includes(imported.messageId), false);
+    assert.equal(JSON.stringify(await demo.tracker.getAircraft('ac_demo-001')).includes('RECENT'), false);
+  } finally { await demo.close(); }
+});
+
+test('two workers consume the same lease once, and committed replay cannot duplicate message effects', async () => {
+  const p = pipeline(), raw = fixture();
+  assert.equal((await accept(p, raw)).value.outcome, 'CREATED');
+  assert.equal((await accept(p, raw, { ...origin, pageUrl: 'https://synthetic.example/overlap' })).value.outcome, 'DUPLICATE');
+  const claim = await lease(p);
+  const outcomes = await Promise.all([p.consumeSource(claim), pipeline().consumeSource(claim)]);
+  assert.deepEqual(outcomes.map(x => x.outcome).sort(), ['APPLIED','STALE_LEASE']);
+  await ready(claim.eventId);
+  assert.equal((await p.consumeSource(await lease(p))).outcome, 'DUPLICATE');
+  await p.drain();
+  for (const table of ['source_ingestion.message_revisions','correlation.aircraft_link_revisions','correlation.outbox',
+    'source_ingestion.private_contributions']) assert.equal(await count(table), 1, table);
+  assert.equal(await count('event_delivery.consumer_inbox'), 2);
+});
+
+test('identical text at distinct observation times and source epochs stays distinct', async () => {
+  const p = pipeline(), first = fixture(), next = fixture();
+  next.sourceObservedAt.at = '2026-11-19T09:00:00Z';
+  assert.equal(first.text, next.text);
+  assert.ok((await accept(p, first)).ok); assert.ok((await accept(p, next)).ok);
+  const otherScope = { ...scope, sourceEpoch: 'v2' };
+  assert.ok((await p.acceptFixture(first, { ...context(first), sourceEpoch: 'v2' }, otherScope, origin)).ok);
+  await p.drain();
+  const rows = (await messages()).rows;
+  assert.equal(new Set(rows.map(x => x.message_id)).size, 3);
+  assert.equal((await p.readPrivateStatus('ac_demo-001')).contributions.length, 3);
+  assert.equal(await count('correlation.outbox'), 3);
+});
+
+test('unknown, ambiguous and conflicting identifiers preserve decision evidence without private confirmation', async () => {
+  for (const expected of ['UNMATCHED','AMBIGUOUS','CONFLICTED']) {
+    await resetTestData(pools.admin);
+    const raw = fixture();
+    let dir = directory;
+    if (expected === 'UNMATCHED') raw.aircraft = { icao24: 'FFFFFF' };
+    if (expected === 'CONFLICTED') raw.aircraft.registration = 'DEMO-002';
+    if (expected === 'AMBIGUOUS') {
+      const fleet = createFixtureFleet();
+      dir = createFixtureCandidateDirectory([...fleet, { ...fleet[0], aircraftId: 'ac_duplicate' }]);
+    }
+    const p = pipeline(dir);
+    assert.ok((await accept(p, raw)).ok);
+    const result = (await p.consumeSource(await lease(p))).result;
+    assert.equal(result.outcome, expected);
+    assert.equal(result.decision.decision.status, expected);
+    assert.equal(result.decision.directoryRevision, 'synthetic-fleet/1');
+    assert.equal(result.decision.revision, 1);
+    await p.drain();
+    assert.equal((await p.readPrivateStatus('ac_demo-001')).freshness, 'NONE');
+  }
+});
+
+test('invalid ICAO is rejected; incomplete candidates roll back inbox, facts, decision and outbox then recover', async () => {
+  const raw = fixture(), p = pipeline();
+  assert.equal((await accept(p, { ...raw, aircraft: { icao24: 'invalid' } })).ok, false);
+  assert.equal(await count('source_ingestion.deliveries'), 0);
+  await accept(p, raw);
+  const broken = pipeline({ find: async () => ({ completeness: 'INCOMPLETE', reason: 'UNAVAILABLE', revision: 'incomplete' }) });
+  const claim = await lease(broken);
+  await assert.rejects(broken.consumeSource(claim), /CANDIDATE_SET_INCOMPLETE/);
+  for (const table of ['event_delivery.consumer_inbox','source_ingestion.message_revisions','correlation.outbox'])
+    assert.equal(await count(table), 0);
+  await p.queue.retry(claim, { code: 'DIRECTORY_UNAVAILABLE', delayMs: 0 });
+  assert.equal((await p.consumeSource(await lease(p))).result.outcome, 'IMPORTED');
+});
+
+test('a forced SQL failure after effects rolls back inbox and message writes', async () => {
+  const p = pipeline(); await accept(p);
+  const claim = await lease(p);
+  await assert.rejects(consumeRegisteredEvent(pools.runtime, claim, readSourceEvent, async (sql, event) => {
+    await sql.query(`INSERT INTO source_ingestion.message_revisions
+      (message_id,revision,source_delivery_id,transformation_id,canonical) VALUES ($1,1,$2,'provider-message/1',$3)`,
+    [event.messageId, event.sourceDeliveryId, event.canonical]);
+    await sql.query('SELECT 1/0');
+  }), { code: '22012' });
+  assert.equal(await count('source_ingestion.message_revisions'), 0);
+  assert.equal(await count('event_delivery.consumer_inbox'), 0);
+  assert.equal((await p.consumeSource(claim)).result.outcome, 'IMPORTED');
+});
+
+test('metadata-only deliveries, missing observation time and unsupported levels quarantine without invented facts', async () => {
+  const p = pipeline(), raw = fixture();
+  const normalized = normalizeSourceObservation(raw, context(raw), scope.capabilities).value;
+  const receipt = await acceptSourceDelivery(scope, postgresSourceAcceptanceTransaction(pools.runtime), normalized.observation, origin);
+  assert.ok(receipt.ok);
+  assert.equal((await p.consumeSource(await lease(p))).result.reason, 'RETENTION_NOT_PERMITTED');
+  const missing = fixture(); delete missing.sourceObservedAt;
+  assert.ok((await accept(p, missing)).ok);
+  assert.equal((await p.consumeSource(await lease(p))).result.reason, 'MISSING_OBSERVATION_TIME');
+  const frame = fixture(); frame.dataLevel = 'FRAME'; delete frame.text; frame.frameBytesBase64 = 'AQID';
+  assert.ok((await accept(p, frame)).ok);
+  assert.equal((await p.consumeSource(await lease(p))).result.reason, 'UNSUPPORTED_LEVEL');
+  assert.equal(await count('source_ingestion.message_revisions'), 0);
+  assert.equal(await count('source_ingestion.import_quarantine'), 3);
+  await assert.rejects(p.acceptFixture(raw, { ...context(raw), provider: 'airframes' }, scope, origin), /synthetic/);
+});
+
+for (const phase of ['LEASED','COMMITTED']) test(`worker killed at ${phase} recovers across process restart`, { timeout: 15000 }, async t => {
+  const p = pipeline(), raw = fixture(); await accept(p, raw);
+  const child = fork(new URL('./helpers/provider-worker.mjs', import.meta.url), { stdio: ['ignore','ignore','inherit','ipc'] });
+  t.after(() => { if (child.exitCode === null && !child.signalCode) child.kill(); });
+  const exited = once(child, 'exit');
+  await once(child, 'message'); child.send({ phase });
+  assert.deepEqual(await exited, [null,'SIGKILL']);
+  if (phase === 'LEASED') await pools.admin.query(`UPDATE event_delivery.deliveries
+    SET lease_until=clock_timestamp()-interval '1 second' WHERE state='LEASED'`);
+  assert.equal((await accept(p, raw)).value.outcome, 'DUPLICATE');
+  await pipeline().drain();
+  assert.equal(await count('source_ingestion.message_revisions'), 1);
+  assert.equal(await count('correlation.outbox'), 1);
+  assert.equal((await p.readPrivateStatus('ac_demo-001')).freshness, 'RECENT');
+});
+
+test('runtime cannot mutate immutable provider facts, canonical evidence or registry provenance', async () => {
+  for (const table of ['source_ingestion.message_revisions','source_ingestion.retained_inputs','event_delivery.events']) {
+    await assert.rejects(pools.runtime.query(`DELETE FROM ${table}`), { code: '42501' });
+  }
+  await assert.rejects(pools.runtime.query('UPDATE source_ingestion.message_revisions SET canonical=canonical'), { code: '42501' });
+  await assert.rejects(pools.runtime.query('UPDATE source_ingestion.outbox SET normalized_v1_sha256=normalized_v1_sha256'), { code: '42501' });
+});
+
+test('separate deliveries of one provider message share a revision and preserve every immutable delivery link', async () => {
+  const p = pipeline(), raw = fixture();
+  const second = { ...raw, deliveryId: raw.deliveryId + '-transport-2' };
+  assert.ok((await accept(p, raw)).ok); assert.ok((await accept(p, second)).ok);
+  const claims = [await lease(p), await lease(p)];
+  const results = await Promise.all(claims.map(claim => p.consumeSource(claim)));
+  assert.deepEqual(results.map(r => r.result.outcome).sort(), ['DUPLICATE','IMPORTED']);
+  assert.equal(results[0].result.messageId, results[1].result.messageId);
+  assert.equal(await count('source_ingestion.message_sources'), 2);
+  assert.equal(await count('source_ingestion.message_revisions'), 1);
+  assert.equal(await count('correlation.outbox'), 1);
+  const conflict = { ...raw, deliveryId: raw.deliveryId + '-transport-3', text: 'Conflicting synthetic content' };
+  assert.ok((await accept(p, conflict)).ok);
+  assert.equal((await p.consumeSource(await lease(p))).result.reason, 'IDENTITY_CONFLICT');
+  assert.equal(await count('source_ingestion.message_sources'), 2);
+  assert.equal(await count('correlation.outbox'), 1);
+});
+
+test('reimporting a backfill does not refresh status and changed normalized registration cannot replay an old receipt', async () => {
+  const p = pipeline(), raw = fixture(); raw.sourceObservedAt.at = '2026-11-18T10:00:00Z';
+  const first = await accept(p, raw);
+  assert.ok(first.ok);
+  const original = (await pools.admin.query('SELECT canonical FROM source_ingestion.retained_inputs WHERE delivery_id=$1', [first.value.deliveryId])).rows[0].canonical;
+  const later = { ...context(raw), ingestedAt: { ...context(raw).ingestedAt, at: '2026-11-19T11:00:00Z' }, retrievedAt: NOW + 1000 };
+  assert.equal((await p.acceptFixture(raw, later, scope, { ...origin, ingestedAt: NOW + 3_600_000 })).value.outcome, 'DUPLICATE');
+  assert.deepEqual((await pools.admin.query('SELECT canonical FROM source_ingestion.retained_inputs WHERE delivery_id=$1', [first.value.deliveryId])).rows[0].canonical, original);
+  const replay = await p.acceptFixture(raw, later, scope, { ...origin, ingestedAt: NOW + 3_600_000 });
+  assert.deepEqual(replay.value.origin, first.value.origin);
+  // Keep the envelope digest fixed to verify the full normalized evidence comparison itself.
+  const changed = { ...raw, aircraft: { ...raw.aircraft, registration: 'DEMO-002' } };
+  assert.equal((await p.acceptFixture(changed, context(raw), scope, origin)).error.code, 'CONFLICTED');
+  await p.drain();
+  assert.equal((await p.readPrivateStatus('ac_demo-001')).freshness, 'NONE');
+  assert.deepEqual((await messages()).rows[0].canonical, original);
+});
+
+test('a disconnected COMMIT response leaves one durable import and resolves safely on retry', async () => {
+  const p = pipeline(); await accept(p); const claim = await lease(p);
+  const lostResponsePool = {
+    async connect() {
+      const client = await pools.runtime.connect();
+      return { async query(text, values) {
+        const result = await client.query(text, values);
+        if (text === 'COMMIT') throw new Error('Simulated lost COMMIT response');
+        return result;
+      }, release: error => client.release(error) };
+    },
+  };
+  await assert.rejects(pipeline(directory, lostResponsePool).consumeSource(claim), /lost COMMIT/);
+  assert.equal((await p.consumeSource(claim)).outcome, 'STALE_LEASE');
+  await ready(claim.eventId);
+  assert.equal((await p.consumeSource(await lease(p))).outcome, 'DUPLICATE');
+  assert.equal(await count('source_ingestion.message_revisions'), 1);
+  assert.equal(await count('correlation.outbox'), 1);
+});
+
+test('private projection rolls back on failure, replays once and preserves correction tombstones against stale events', async () => {
+  const { projectPrivateDecision } = await import('../../src/modules/source-connectors/infrastructure/postgres/private-availability.ts');
+  const { runSqlTransaction } = await import('../../src/modules/database-transactions/public/index.ts');
+  const { createDecisionEvent, makeDecision } = await import('./helpers/decisions.mjs');
+  const p = pipeline(); await accept(p);
+  const imported = (await p.consumeSource(await lease(p))).result;
+  const claim = await lease(p, PRIVATE_AVAILABILITY_CONSUMER);
+  await assert.rejects(p.queue.consume(claim, async (sql, event) => {
+    await projectPrivateDecision(sql, event.payload); await sql.query('SELECT 1/0');
+  }), { code: '22012' });
+  assert.equal(await count('source_ingestion.private_contributions'), 0);
+  assert.equal(await count('event_delivery.consumer_inbox'), 1);
+  assert.equal(await p.consumePrivate(claim), 'APPLIED');
+  await ready(claim.eventId);
+  assert.equal(await p.consumePrivate(await lease(p, PRIVATE_AVAILABILITY_CONSUMER)), 'DUPLICATE');
+  await createDecisionEvent(pools.runtime, { decision: makeDecision(imported.messageId, 'ac_demo-002'), expectedRevision: 1, decidedAt: NOW });
+  await p.drain();
+  assert.equal((await p.readPrivateStatus('ac_demo-001')).freshness, 'NONE');
+  assert.equal((await p.readPrivateStatus('ac_demo-002')).freshness, 'RECENT');
+  await createDecisionEvent(pools.runtime, { decision: makeDecision(imported.messageId), expectedRevision: 2, decidedAt: NOW });
+  await p.drain();
+  await runSqlTransaction(pools.runtime, sql => projectPrivateDecision(sql, imported.decision));
+  assert.equal((await p.readPrivateStatus('ac_demo-001')).freshness, 'NONE');
+  assert.equal((await p.readPrivateStatus('ac_demo-002')).freshness, 'NONE');
+  const row = (await pools.admin.query('SELECT * FROM source_ingestion.private_contributions')).rows[0];
+  assert.equal(row.aircraft_id, null); assert.equal(Number(row.decision_revision), 3);
+  const sourceEvent = (await pools.admin.query('SELECT event_id FROM event_delivery.deliveries WHERE consumer_id=$1',
+    [SOURCE_IMPORT_CONSUMER])).rows[0].event_id;
+  await ready(sourceEvent);
+  const replay = await p.consumeSource(await lease(p));
+  assert.equal(replay.result.outcome, 'DUPLICATE');
+  assert.equal(replay.result.decision.revision, 1);
+  assert.equal(replay.result.sourceDeliveryId, imported.sourceDeliveryId);
+});
+
+const renderedPermission = { ...scope, retentionAllowed: true, purpose: 'PRIVATE_PROCESSING',
+  evidenceReference: 'repository-synthetic-fixtures-only' };
+const renderedContext = at => ({ ...scope,
+  ingestedAt: { at: new Date(at).toISOString(), basis: 'INGESTED', precision: 'MILLISECOND', uncertaintyMs: 0 } });
+function renderedDelivery(retrievedAt = NOW) {
+  const raw = fixture();
+  return { source: 'https://app.airframes.io/messages/live', retrievedAt,
+    raw: { icao: 'D00001', text: raw.text, station: null, messagePath: '/messages/' + raw.originalSourceId,
+      evidence: { sourceObservedAt: raw.sourceObservedAt.at, receiverReceivedAt: raw.receiverReceivedAt.at,
+        providerPublishedAt: raw.providerPublishedAt.at, uncertaintyMs: '500', registration: 'DEMO-001', bearer: 'VDL2' } } };
+}
+
+test('permitted rendered entry point preserves private lineage across restart and later-clock replay', async () => {
+  const { createPermittedProviderPipeline } = await import('../../src/modules/source-connectors/composition/create-permitted-provider-pipeline.ts');
+  const { createProviderConnector } = await import('../../src/modules/source-connectors/composition/create-provider-connector.ts');
+  const delivery = renderedDelivery();
+  const p = createPermittedProviderPipeline(pools.runtime, directory, renderedPermission, () => NOW);
+  const connector = createProviderConnector('crawl', delivery.raw.icao, { kind: 'SYNTHETIC_PAGE', read: async () => ({ status: 200,
+    body: { status: 'OBSERVED', source: delivery.source, icao: delivery.raw.icao, messages: [delivery.raw] } }) });
+  let receipt, acceptedDelivery, ingestedAt;
+  const outcome = await connector.start(async delivered => {
+    acceptedDelivery = delivered;
+    ingestedAt = Date.now();
+    receipt = await p.acceptRendered(delivered, renderedContext(ingestedAt), scope);
+    return receipt;
+  });
+  assert.equal(outcome, 'COMPLETE'); assert.equal(receipt.value.outcome, 'CREATED');
+  assert.equal(connector.health().accepted, 1);
+  assert.equal(await count('source_ingestion.message_revisions'), 0);
+  const restarted = createPermittedProviderPipeline(pools.runtime, directory, renderedPermission, () => NOW);
+  await restarted.drain();
+  const status = await restarted.readPrivateStatus('ac_demo-001');
+  assert.equal(status.freshness, 'RECENT');
+  assert.equal(status.contributions.length, 1);
+  assert.equal(status.contributions[0].source_delivery_id, receipt.value.deliveryId);
+  assert.deepEqual(status.contributions[0].provenance,
+    { pageUrl: delivery.source, parserVersion: 'airframes-rendered-extractor-v1' });
+  const stored = (await messages()).rows[0];
+  assert.equal(stored.canonical.provenance.originalSourceId, delivery.raw.messagePath);
+  assert.equal(stored.canonical.provenance.retrievedAt, acceptedDelivery.retrievedAt);
+  assert.equal(stored.canonical.provenance.ingestedAt.at, ingestedAt);
+  assert.equal(stored.canonical.observation.observedAt.at, Date.parse(delivery.raw.evidence.sourceObservedAt));
+  assert.equal((await pools.admin.query('SELECT decision FROM correlation.aircraft_link_revisions')).rows[0].decision.status, 'MATCHED');
+  const replay = await restarted.acceptRendered({ ...acceptedDelivery, retrievedAt: ingestedAt + 3_600_000 },
+    renderedContext(ingestedAt + 3_600_001), scope);
+  assert.equal(replay.value.outcome, 'DUPLICATE');
+  assert.equal(replay.value.deliveryId, receipt.value.deliveryId);
+  await restarted.drain();
+  assert.deepEqual((await messages()).rows, [stored]);
+  assert.deepEqual(await restarted.readPrivateStatus('ac_demo-001'), status);
+  for (const table of ['source_ingestion.deliveries', 'source_ingestion.outbox', 'source_ingestion.message_sources',
+    'correlation.aircraft_link_revisions', 'correlation.outbox', 'source_ingestion.private_contributions'])
+    assert.equal(await count(table), 1, table);
+  assert.equal(await count('availability.contributions'), 0);
+  assert.equal(await count('message_ingestion.messages'), 0);
+});
+
+test('rendered entry point rejects invalid pages, clocks, scope and permission before retention', async () => {
+  const { createPermittedProviderPipeline } = await import('../../src/modules/source-connectors/composition/create-permitted-provider-pipeline.ts');
+  const delivery = renderedDelivery(), ctx = renderedContext(NOW);
+  const p = createPermittedProviderPipeline(pools.runtime, directory, renderedPermission, () => NOW);
+  for (const bad of [{ ...delivery, source: 'https://synthetic.example/wrong-page' },
+    { ...delivery, raw: { ...delivery.raw, icao: 'invalid' } },
+    { ...delivery, raw: { ...delivery.raw, evidence: {} } },
+    { ...delivery, retrievedAt: NOW + 1 }]) {
+    assert.equal((await p.acceptRendered(bad, ctx, scope)).ok, false);
+  }
+  const mismatch = await p.acceptRendered(delivery, ctx, { ...scope, accountScope: 'different' });
+  assert.equal(mismatch.error.code, 'INVALID');
+  for (const denied of [undefined, { ...renderedPermission, retentionAllowed: false },
+    { ...renderedPermission, accountScope: 'different' }]) {
+    const deniedPipeline = createPermittedProviderPipeline(pools.runtime, directory, denied, () => NOW);
+    await assert.rejects(deniedPipeline.acceptRendered(delivery, ctx, scope), /Retention permission/);
+  }
+  for (const table of ['source_ingestion.deliveries', 'source_ingestion.retained_inputs', 'source_ingestion.outbox',
+    'source_ingestion.message_revisions', 'source_ingestion.private_contributions']) assert.equal(await count(table), 0, table);
+});
+
+
+test('permitted non-synthetic namespace imports synthetic content privately and rejects absent or mismatched permission', async () => {
+  const { createPermittedProviderPipeline } = await import('../../src/modules/source-connectors/composition/create-permitted-provider-pipeline.ts');
+  const configured = { ...scope, sourceId: 'src_test-provider', provider: 'test-provider' };
+  const permission = { sourceId: configured.sourceId, provider: configured.provider,
+    accountScope: configured.accountScope, sourceEpoch: configured.sourceEpoch,
+    purpose: 'PRIVATE_PROCESSING', retentionAllowed: true, evidenceReference: 'test-only-synthetic-content-permission' };
+  const raw = fixture(), ctx = { ...context(raw), ...configured };
+  for (const denied of [undefined, { ...permission, retentionAllowed: false },
+    { ...permission, evidenceReference: '' }, { ...permission, purpose: 'PUBLIC' },
+    ...['sourceId','provider','accountScope','sourceEpoch'].map(key => ({ ...permission, [key]: 'different' }))]) {
+    const p = createPermittedProviderPipeline(pools.runtime, directory, denied, () => NOW);
+    await assert.rejects(p.accept(raw, ctx, configured, origin), /Retention permission/);
+    assert.equal(await count('source_ingestion.deliveries'), 0);
+  }
+  const p = createPermittedProviderPipeline(pools.runtime, directory, permission, () => NOW);
+  const receipt = await p.accept(raw, ctx, configured, origin);
+  assert.equal(receipt.value.outcome, 'CREATED');
+  assert.equal((await p.accept(raw, ctx, configured, origin)).value.outcome, 'DUPLICATE');
+  // A new composition consumes the durable accepted event after restart.
+  await createPermittedProviderPipeline(pools.runtime, directory, permission, () => NOW).drain();
+  const status = await p.readPrivateStatus('ac_demo-001');
+  assert.equal(status.freshness, 'RECENT');
+  assert.equal(status.contributions[0].source_delivery_id, receipt.value.deliveryId);
+  assert.deepEqual((await pools.admin.query('SELECT permission FROM source_ingestion.retained_inputs')).rows[0].permission, permission);
+  assert.equal((await messages()).rows[0].canonical.observation.sourceDeliveryId.provider, 'test-provider');
+  assert.equal(await count('availability.contributions'), 0);
+  assert.equal(await count('message_ingestion.messages'), 0);
+});
+
+test('same delivery cannot change original provider identity or original registration spelling', async () => {
+  const p = pipeline(), raw = fixture();
+  assert.ok((await accept(p, raw)).ok);
+  // Fix the raw digest so the normalized provenance comparison is tested directly.
+  const variants = [{ ...raw, originalSourceId: raw.originalSourceId + '-changed' },
+    { ...raw, aircraft: { ...raw.aircraft, registration: 'demo-001' } }];
+  for (const changed of variants) {
+    const normalized = normalizeSourceObservation(changed, context(raw), scope.capabilities);
+    assert.ok(normalized.ok);
+    assert.equal(normalized.value.aircraftHints.registration, 'DEMO-001');
+    assert.equal((await p.acceptFixture(changed, context(raw), scope, origin)).error.code, 'CONFLICTED');
+  }
+  await p.drain();
+  assert.equal(await count('source_ingestion.deliveries'), 1);
+  assert.equal((await messages()).rows[0].canonical.provenance.originalSourceId, raw.originalSourceId);
+});
+
+test('queued provider decisions cannot starve demo fanout and neither subscription receives the other owner events', async () => {
+  const p = pipeline();
+  // More than the demo fanout batch, all queued before the demo event.
+  for (let i = 0; i < 3; i++) {
+    await accept(p);
+    await p.consumeSource(await lease(p));
+  }
+  // lease() also routes previous decisions; reset only their fanout in this isolated fixture.
+  await pools.admin.query('DELETE FROM event_delivery.deliveries WHERE consumer_id=$1', [PRIVATE_AVAILABILITY_CONSUMER]);
+  await pools.admin.query('UPDATE correlation.outbox SET fanout_completed_at=NULL');
+  const demo = await createPostgresDemoTracker({ connectionString: process.env.TEST_RUNTIME_DATABASE_URL, now: () => NOW, startWorker: false });
+  try {
+    const result = await demo.tracker.ingest({ messageId: 'msg_mixed-demo', observedAt: new Date(NOW - 1000).toISOString(),
+      icao24: 'D00001', text: 'Synthetic mixed fanout', bearer: 'VDL2' });
+    assert.ok(result.ok, JSON.stringify(result));
+    assert.equal(await p.queue.fanOut(['demo-availability-v1'], 2), 1);
+    const routed = await pools.admin.query('SELECT consumer_id,event_id FROM event_delivery.deliveries WHERE consumer_id=$1', ['demo-availability-v1']);
+    assert.equal(routed.rows.length, 1);
+    const event = await pools.admin.query('SELECT stream_key FROM correlation.outbox WHERE event_id=$1', [routed.rows[0].event_id]);
+    assert.equal(event.rows[0].stream_key, 'msg_mixed-demo');
+    await p.drain();
+    await demo.drain();
+    assert.equal(await count('availability.contributions'), 1);
+    assert.equal(await count('source_ingestion.private_contributions'), 3);
+    assert.equal((await pools.admin.query('SELECT count(*) AS n FROM event_delivery.deliveries WHERE consumer_id=$1', [PRIVATE_AVAILABILITY_CONSUMER])).rows[0].n, '3');
+  } finally { await demo.close(); }
+});

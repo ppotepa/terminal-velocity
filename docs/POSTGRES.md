@@ -93,3 +93,18 @@ npm run test:integration
 That bootstrap login must be able to create a disposable database and roles and run the full migration, including `SET ROLE` to the designated schema owners. Use an isolated test instance: the runner removes its random database and restricted runtime login afterward, while the migration-created fixed `tv_*` owner and permission roles remain in an externally supplied cluster. Test URLs with connection-overriding query parameters are rejected. CI uses a dedicated PostgreSQL service for the same suite.
 
 The suite exercises competing first writes, stale revisions, outbox failure rollback, transaction capability lifetime, fenced lease recovery, inbox deduplication, projector rollback, revision collisions, tombstones, observed-time freshness, schema privileges, and real API process restart. These are functional integration checks; they do not establish production capacity or simulate a host power failure.
+
+
+### Source delivery bridge (migration 004)
+
+Migration 004 replaces the correlation-only delivery FK with an immutable
+producer registry, preserving existing event IDs and queued deliveries. It also
+adds explicitly synthetic normalized input storage, provider message revisions,
+immutable delivery/decision links, import quarantine receipts and a private
+availability projection. The API does not apply this migration. Old dispatchers
+must stop before applying it because they do not register newly emitted events.
+See [the provider pipeline](PROVIDER_PIPELINE.md) for transaction/ACK boundaries,
+lineage SQL and rollback limitations. The integration suite includes an upgrade
+from a populated Stage2 database and consumption of its previously queued event.
+Its execution remains pending in the #11 local handoff; no hosted migration or
+backup/recovery operation has been performed.

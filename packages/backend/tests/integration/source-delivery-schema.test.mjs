@@ -10,6 +10,8 @@ import { trackPoolShutdown } from '../../../../scripts/postgres/drain-pool.mjs';
 import { parseSourceObservation } from '../../src/modules/source-connectors/public/index.ts';
 import { postgresSourceDeliveryStore } from '../../src/modules/source-connectors/infrastructure/postgres/postgres-source-delivery-store.ts';
 import { createTestPools, uniqueId } from './helpers/database.mjs';
+import { createDecisionEvent } from './helpers/decisions.mjs';
+import { createPostgresEventDelivery } from '../../src/modules/event-delivery/infrastructure/postgres-event-delivery.ts';
 
 const pools = createTestPools();
 const store = postgresSourceDeliveryStore(pools.runtime);
@@ -50,7 +52,18 @@ test('a baseline database upgrades once to source storage and preserves its migr
     const message = uniqueId('msg');
     await pool.query('INSERT INTO message_ingestion.messages VALUES ($1,$2,1,1)',
       [message, { messageId: message, observedAt: 1 }]);
-    assert.deepEqual(await applyMigrations(pool), ['002_source_deliveries.sql', '003_source_acceptance_fingerprint.sql']);
+    const event = await createDecisionEvent(pool);
+    await pool.query(`INSERT INTO event_delivery.deliveries(consumer_id,event_id) VALUES ('upgrade-private-test',$1)`, [event.eventId]);
+    assert.deepEqual(await applyMigrations(pool), ['002_source_deliveries.sql', '003_source_acceptance_fingerprint.sql',
+      '004_source_event_delivery_bridge.sql', '005_permitted_source_retention.sql']);
+    const queue = createPostgresEventDelivery(pool);
+    const lease = await queue.leaseNext('upgrade-private-test', 30_000);
+    assert.equal(lease.eventId, event.eventId);
+    let delivered;
+    assert.equal(await queue.consume(lease, async (_sql, input) => { delivered = input; }), 'APPLIED');
+    assert.deepEqual(delivered, event);
+    assert.equal((await pool.query('SELECT correlation_event_id FROM event_delivery.events WHERE event_id=$1',
+      [event.eventId])).rows[0].correlation_event_id, event.eventId);
     assert.deepEqual(await applyMigrations(pool), []);
     assert.deepEqual((await history()).rows, before);
     assert.equal((await pool.query('SELECT * FROM message_ingestion.messages WHERE message_id=$1', [message])).rowCount, 1);
@@ -166,4 +179,38 @@ test('source owner and runtime grants protect immutable facts and source events 
   const event = await pools.runtime.query(`INSERT INTO source_ingestion.outbox
     (delivery_id,stream_revision,event_type,payload) VALUES ($1,1,'source.delivery-accepted.v1',jsonb_build_object('deliveryId',$1::uuid)) RETURNING event_id`, [id]);
   assert.equal((await pools.runtime.query('SELECT FROM event_delivery.deliveries WHERE event_id=$1', [event.rows[0].event_id])).rowCount, 0);
+});
+
+test('retention permission migration preserves existing synthetic snapshots and foreign key targets', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'tv-retention-upgrade-'));
+  let database, pool, closePool;
+  try {
+    for (const name of ['001_durable_correlation.sql', '002_source_deliveries.sql',
+      '003_source_acceptance_fingerprint.sql', '004_source_event_delivery_bridge.sql'])
+      await copyFile(new URL('../../../../db/migrations/' + name, import.meta.url), join(dir, name));
+    database = await createTestDatabase(process.env.TEST_DATABASE_URL, dir);
+    pool = new Pool({ connectionString: database.adminUrl, max: 1 });
+    closePool = trackPoolShutdown(pool);
+    const { fixture, context, scope, origin: fixtureOrigin } = await import('./helpers/provider-fixture.mjs');
+    const { normalizeSourceObservation } = await import('../../src/modules/source-connectors/public/index.ts');
+    const raw = fixture(), canonical = normalizeSourceObservation(raw, context(raw), scope.capabilities).value;
+    const delivery = await postgresSourceDeliveryStore(pool).appendDelivery(canonical.observation, fixtureOrigin, accepted);
+    await pool.query('INSERT INTO source_ingestion.synthetic_inputs(delivery_id,canonical) VALUES ($1,$2)', [delivery, canonical]);
+    assert.deepEqual(await applyMigrations(pool), ['005_permitted_source_retention.sql']);
+    const row = (await pool.query('SELECT * FROM source_ingestion.retained_inputs WHERE delivery_id=$1', [delivery])).rows[0];
+    assert.deepEqual(row.canonical, canonical);
+    assert.equal(row.permission.evidenceReference, 'repository-synthetic-fixtures-only');
+    assert.equal(row.permission.provider, 'synthetic');
+    const links = await pool.query(`SELECT count(*) AS n FROM pg_constraint WHERE contype='f'
+      AND confrelid='source_ingestion.retained_inputs'::regclass`);
+    assert.equal(links.rows[0].n, '2');
+    await assert.rejects(pool.query('UPDATE source_ingestion.retained_inputs SET permission=$1 WHERE delivery_id=$2',
+      [{ ...row.permission, provider: 'different' }, delivery]), { code: '23514' });
+    await assert.rejects(pool.query('UPDATE source_ingestion.retained_inputs SET permission=$1 WHERE delivery_id=$2',
+      [{}, delivery]), { code: '23514' });
+  } finally {
+    if (closePool) await closePool();
+    if (database) await database.close();
+    await rm(dir, { recursive: true, force: true });
+  }
 });

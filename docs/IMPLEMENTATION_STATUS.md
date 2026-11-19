@@ -126,3 +126,38 @@ This is not a verified real Airframes format: optional markup and all records ar
 fabricated fixtures. Permitted real-sample acceptance is blocked under ADR 0001.
 See [the issue #10 handoff](handoffs/issue-10.md) for exact local checks, environment
 failures and coordinator-owned verification. No remote CI or merge is claimed.
+
+
+## Issue #11 engineering update (November 19, 2026)
+
+The worktree adds the [private provider pipeline](PROVIDER_PIPELINE.md): migration
+004 bridges source/correlation producers into a durable registry; source imports
+atomically record inbox, immutable provider message revision, all source delivery
+links, correlation and outbox; a separate consumer projects private availability.
+Migration 005 replaces the synthetic-only retained-input restriction with explicit
+permission scoped to source/provider/account/epoch. The normal permitted-provider
+composition reuses #10 normalization and existing correlation policies; its
+synthetic helper is retained. Permission evidence stays immutable with lineage.
+Tests use synthetic content, including a non-synthetic provider namespace. Demo REST records, counts and availability remain separate.
+The actual rendered Airframes lookup and metadata-only live acceptance remain in
+place. No provider rights, retention permission, public disclosure or deployment
+is inferred from synthetic fixtures.
+
+Verification is **partial**: 165 database-independent tests pass, including 12
+import tests and 3 retention permission tests, with Node 24.22.3. Type checking and boundaries pass. Real
+PostgreSQL verification is blocked because this shell is root; API/smoke and
+browser execution encounter sandbox restrictions. These results do not replace
+remote/exact-SHA CI. See [the issue #11 handoff](handoffs/issue-11.md) for command
+results, unverified acceptance items and migration/replay notes. The issue is not
+DONE and no later engineering issue was started.
+
+### Issue #11 rendered acceptance review revision
+
+The permitted pipeline now exposes `acceptRendered(PageDelivery, context, scope)`
+through its normal composition. It uses the rendered normalizer and the shared
+permission-checked acceptance transaction, deriving page provenance internally.
+PostgreSQL regressions exercise the connector callback, private correlation/status,
+lineage, restart, later-clock replay and rejection without retained effects.
+Fresh execution results and environment limitations are recorded in
+[the issue #11 handoff](handoffs/issue-11.md). Airframes previews remain transient;
+the provider API remains inactive and actual retention rights remain an external gate.
