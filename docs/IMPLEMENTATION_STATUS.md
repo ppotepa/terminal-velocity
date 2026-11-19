@@ -178,11 +178,12 @@ reporting completion before every record is accepted. The on-demand rendered Air
 real content is not retained by replay, and the API adapter remains inactive.
 
 See [SOURCE_OPERATIONS.md](SOURCE_OPERATIONS.md) for limits, recovery, CLI commands,
-health semantics and the private #13 handoff. See [issue #12 evidence](handoffs/issue-12.md)
-for local results and pending coordinator CI. #11 engineering was merged in PR #62
-at `752aa27377abeb53f2042504116422f0ac5d86dc`; the older #11 execution notes above
-are historical. Real-provider acceptance remains an external gate; this change
-does not mark Stage 3 complete.
+health semantics and the private #13 handoff. The [issue #12 handoff](handoffs/issue-12.md)
+records historical implementation-time local results; #12 engineering was merged
+in PR #63 at `b04da88`. #11 engineering was merged in PR #62 at
+`752aa27377abeb53f2042504116422f0ac5d86dc`; the older #11 execution notes
+above are historical. Real-provider acceptance remains an external gate; this
+change does not mark Stage 3 complete.
 
 ## Issue #13 — source validation gate
 
@@ -221,10 +222,11 @@ edges), and backend workspace tests successfully. `git diff --check` passed.
 The full `npm run check` reached the API workspace but failed because this
 shell denies loopback binds (`listen EPERM` on 127.0.0.1); it is not a passing
 full-suite result. The coordinator's isolated local CI passed at
-`91b3ff353aac9e04a217cf793ca2df91c6641408`. A supplied coordinator
-isolated local CI log passed at `fa2b6a5` before these review changes; the coordinator owns exact-SHA evidence
-for the updated head in issue #14 and PR #56. No hosted CI or deployment success
-is claimed here.
+`91b3ff353aac9e04a217cf793ca2df91c6641408`. The coordinator also supplied
+passing isolated local CI for the position-contract changes at
+`5b8881052f4923f5386598c3c2d3e1986449d07f`. Commit `5a4bcfe` changes
+only this status document. PR merge and merged-SHA verification remain pending;
+no hosted CI or deployment success is claimed here.
 
 For the altitude and identity-evidence review changes, Node 24.22.3 ran
 `npm ci --offline --ignore-scripts --no-audit --no-fund`, the focused position
