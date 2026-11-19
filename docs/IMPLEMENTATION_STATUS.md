@@ -1,6 +1,6 @@
 # Terminal Velocity — implementation status, Stage 2
 
-Date: November 19, 2026. Code version: `0.1.0`. The application now offers a durable PostgreSQL mode for one complete synthetic message flow, alongside the original memory demonstration.
+Date: November 19, 2026. Code version: `0.1.0`. The application offers a durable PostgreSQL mode for one complete synthetic message flow, alongside the original memory demonstration. Stage 3 source-observation contracts are implemented on a feature branch; no provider connector or real source is present.
 
 ## Implemented
 
@@ -14,6 +14,7 @@ Date: November 19, 2026. Code version: `0.1.0`. The application now offers a dur
 | Atomic consumer | Consumer inbox, projection effects, and delivery acknowledgment share one PostgreSQL transaction |
 | Availability | Reversible contributions, A→B correction, tombstones, revision collision detection, observation-time freshness, and fallback to the prior eligible message |
 | API | Six existing endpoints, memory/PostgreSQL configuration, database connectivity checks, body/input limits, safe errors, loopback binding, and resource cleanup |
+| Source contracts | Versioned provider-message, receiver-reception, and frame observation models; scoped delivery identity; timestamp evidence; source capability, coverage, and sampling declarations; no provider transport |
 | Database operations | Checked-in migrations, checksum tracking, separate schema owner roles, a restricted runtime login, and a local Compose setup |
 | Verification | Database-independent checks plus an isolated real PostgreSQL integration suite, including actual API crash/restart |
 
@@ -59,6 +60,23 @@ Memory remains the default. It stages a single `DemoState` swap under a mutex, i
 
 Aircraft positions and identities remain synthetic fixtures. Coverage is `UNKNOWN`; real feed health is `DISCONNECTED`. Messages are decoded text examples, not captured RF frames. No real Airframes/ADS-B connector, moving map frontend, flight sessions, reassembly, entitlement enforcement, or public deployment has been added.
 
-The architecture v2 catalog still describes 89 intended responsibilities rather than 89 completed services. Its historical DDL and target event envelope remain design documents; the implemented schema is under `db/migrations`, and the current event is `correlation.aircraft-decision-revised.v1`.
+The architecture v2 catalog still describes 89 intended responsibilities rather than 89 completed services. Stage 3 currently has only the provider-neutral S3-01 contracts; there is no selected or authorized real source, transport, provider fixture, or source persistence. Its source contracts do not grant publication rights. The historical DDL and target event envelope remain design documents; the implemented schema is under `db/migrations`, and the current event is `correlation.aircraft-decision-revised.v1`.
 
 See [POSTGRES.md](POSTGRES.md) for setup and operational behavior, [API.md](API.md) for the HTTP contract, and [ROADMAP.md](ROADMAP.md) for Stage 3: one real connector with established access and permitted usage.
+
+## Stage 3 contract work — S3-01 feature branch
+
+The `feature/s3-01-source-observation-contracts` branch adds only provider-neutral source contracts. It does not select a provider, connect to a source, store source deliveries, or authorize publication.
+
+Local verification used Node.js 24.22.3:
+
+| Command | Result |
+|---|---|
+| `npm ci --ignore-scripts --no-audit --no-fund` | PASS; 20 locked packages installed |
+| `npm run check` | PASS; strict type checks, 177 source files / 593 dependency edges, 28/28 architecture tests, 76/76 backend tests, 30/30 API tests (134 total, including 13 source-observation tests) |
+| `npm run test:postgres:local` | PASS; 37/37 integration tests on isolated PostgreSQL 17.12, durability settings enabled |
+| `npm run demo` | PASS; correlation, outbox, freshness, and correction example completed |
+| `npm run smoke` | PASS; API startup, health, message replay, and clean SIGTERM shutdown |
+| GitHub Actions for PR #54 | BLOCKED; `verify` runs failed before any steps and produced no job logs; the exact cause is not exposed |
+
+The local sequence covers every step in the repository CI workflow. The database integration run used Debian PostgreSQL 17.12 because that is the version available from this host's Debian 13 repository; the workflow currently specifies PostgreSQL 18.7. No database or transaction code changed in S3-01. The repository has a known Actions billing blocker; remote failures are consistent with it, but the available run output does not confirm the cause. No remote CI pass is claimed.
