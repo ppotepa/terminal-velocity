@@ -21,9 +21,10 @@ export function validateWindow(body: unknown, icao: string, retrievedAt: number,
   if (!body || typeof body !== 'object' || !('messages' in body) || !Array.isArray(body.messages)
     || !('status' in body) || !('source' in body) || body.source !== pageUrl
     || !('icao' in body) || body.icao !== icao) return 'INVALID_ENVELOPE';
-  if (body.status === 'QUEUE_FULL' || body.messages.length > maxCards) return 'QUEUE_FULL';
+  if (body.status === 'QUEUE_FULL' || body.messages.length > maxCards
+    || (body.status === 'TRUNCATED' && !allowPartialPreview)) return 'QUEUE_FULL';
   if (body.status !== (body.messages.length ? 'OBSERVED' : 'NO_CONFIRMED_MATCH')
-    && !(allowPartialPreview && body.status === 'PARTIAL_LAYOUT')
+    && !(allowPartialPreview && (body.status === 'PARTIAL_LAYOUT' || body.status === 'TRUNCATED'))
     && !(body.messages.length === 0 && body.status === 'NO_OBSERVATIONS_COVERAGE_UNKNOWN')) return 'INVALID_ENVELOPE';
   let bytes = 0;
   const deliveries: PageDelivery[] = [];

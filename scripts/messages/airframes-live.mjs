@@ -7,7 +7,7 @@ export const liveUrl = pageUrl;
 const cardSelector = '.vue-recycle-scroller__item-view .mb-4.border';
 
 /** Runs inside the rendered page. Return plain data only for the selected aircraft. */
-export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes, maxWindowBytes }) {
+export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes, maxWindowBytes, envelopeOverhead }) {
   const messages = new Map();
   let cards = 0;
   let unsupported = false;
@@ -31,7 +31,7 @@ export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes
     if (detail.pathname.length > 256) { unsupported = true; continue; }
     const message = { icao, messagePath: detail.pathname, text,
       station: station?.textContent.trim().slice(0, 256) || null };
-    const size = new TextEncoder().encode(JSON.stringify(message)).length;
+    const size = new TextEncoder().encode(JSON.stringify(message)).length + envelopeOverhead;
     if (size > maxEnvelopeBytes) { unsupported = true; continue; }
     if (messages.has(message.messagePath)) continue;
     if (messages.size === maxCards || bytes + size > maxWindowBytes) { overflow = true; break; }
@@ -46,7 +46,10 @@ export async function observePage(page, icao, windowMs = 10000, expiresAt = Infi
     throw new Error('Invalid observation window or aircraft scope');
   const remaining = limit => Math.max(1, Math.min(limit, expiresAt - Date.now()));
   const response = await page.goto(liveUrl, { waitUntil: 'domcontentloaded', timeout: remaining(20000) });
-  if (page.url() !== liveUrl) throw new Error('Unexpected source origin');
+  const current = new URL(page.url());
+  const expected = new URL(liveUrl);
+  if (current.origin !== expected.origin || current.pathname !== expected.pathname)
+    throw new Error('Unexpected live page');
   if (!response || response.status() !== 200) return { status: 'HTTP_FAILURE',
     httpStatus: response?.status() ?? 503, retryAfter: await response?.headerValue('retry-after') };
   const scroller = page.locator('.messages-scroller');
@@ -58,16 +61,20 @@ export async function observePage(page, icao, windowMs = 10000, expiresAt = Infi
   let unsupported = false;
   let overflow = false;
   let bytes = 0;
+  // Reserve the wrapper once per card, including room for the retrieval timestamp.
+  const envelopeOverhead = Buffer.byteLength(JSON.stringify({ source: liveUrl, raw: null,
+    retrievedAt: Number.MAX_SAFE_INTEGER })) - 4; // JSON null is replaced by the serialized card.
   const deadline = Math.min(Date.now() + windowMs, expiresAt);
   do {
-    const sample = await scroller.evaluate(readCards, { icao, selector: cardSelector, maxCards, maxEnvelopeBytes, maxWindowBytes }, { timeout: remaining(3000) });
+    const sample = await scroller.evaluate(readCards, { icao, selector: cardSelector, maxCards, maxEnvelopeBytes, maxWindowBytes, envelopeOverhead }, { timeout: remaining(3000) });
     sawCards ||= sample.cards > 0;
     unsupported ||= sample.unsupported;
     overflow ||= sample.overflow;
     for (const message of sample.messages) {
-      bytes += Buffer.byteLength(JSON.stringify(message)) -
-        (messages.has(message.messagePath) ? Buffer.byteLength(JSON.stringify(messages.get(message.messagePath))) : 0);
-      if (bytes > maxWindowBytes || (!messages.has(message.messagePath) && messages.size === maxCards)) {
+      const previous = messages.get(message.messagePath);
+      bytes += Buffer.byteLength(JSON.stringify(message));
+      bytes += previous ? -Buffer.byteLength(JSON.stringify(previous)) : envelopeOverhead;
+      if (bytes > maxWindowBytes || (!previous && messages.size === maxCards)) {
         overflow = true;
         break;
       }
@@ -76,7 +83,7 @@ export async function observePage(page, icao, windowMs = 10000, expiresAt = Infi
     if (overflow || messages.size === maxCards || Date.now() >= deadline) break;
     await page.waitForTimeout(Math.min(500, deadline - Date.now()));
   } while (Date.now() < deadline);
-  const status = overflow ? 'QUEUE_FULL' : unsupported ? 'PARTIAL_LAYOUT' : messages.size ? 'OBSERVED'
+  const status = overflow ? 'TRUNCATED' : unsupported ? 'PARTIAL_LAYOUT' : messages.size ? 'OBSERVED'
     : sawCards ? 'NO_CONFIRMED_MATCH' : 'NO_OBSERVATIONS_COVERAGE_UNKNOWN';
   return { status, source: liveUrl, icao, messages: [...messages.values()] };
 }

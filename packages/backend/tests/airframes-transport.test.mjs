@@ -60,6 +60,7 @@ test('malformed envelopes and size, scope or queue violations deliver nothing', 
     [page([{ ...row, text: '界'.repeat(12000) }]), 'INVALID_ENVELOPE'],
     [page(Array(26).fill(row)), 'QUEUE_FULL'], [page(Array(5).fill({ ...row, text: 'x'.repeat(32000) })), 'QUEUE_FULL'],
     [{ ...page(), body: { ...page().body, status: 'PARTIAL_LAYOUT' } }, 'INVALID_ENVELOPE'],
+    [{ ...page(), body: { ...page().body, status: 'TRUNCATED' } }, 'QUEUE_FULL'],
     [{ ...page(), body: { ...page().body, source: 'https://invalid.example/' } }, 'INVALID_ENVELOPE'],
   ]) {
     const { connection } = setup(() => response);
@@ -154,11 +155,11 @@ test('on-demand preview hands transient cards to its caller without calling dura
   assert.equal(transport.health().accepted, 0);
 });
 
-test('partial previews validate every retained row before invoking the transient callback', async () => {
+for (const status of ['PARTIAL_LAYOUT', 'TRUNCATED']) test(`${status} validates every retained row before preview`, async () => {
   for (const [rows, expected] of [[[row], 'COMPLETE'], [[row, { ...row, icao: 'DEF456' }], 'INVALID_ENVELOPE']]) {
     const cards = [];
     const response = page(rows);
-    response.body.status = 'PARTIAL_LAYOUT';
+    response.body.status = status;
     const transport = createProviderConnector('crawl', icao, { kind: 'ON_DEMAND_PREVIEW',
       read: async () => response, inspect: envelope => cards.push(envelope.raw) });
     assert.equal(await transport.start(assert.fail), expected);

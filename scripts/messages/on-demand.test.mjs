@@ -15,6 +15,7 @@ function card(icao, id) {
 }
 
 const shell = `<!doctype html><main></main><script>
+history.replaceState(null, '', '?icao=ABC123');
 fetch('${analytics}').catch(() => {});
 (async () => {
   const config = await (await fetch('${bootstrap}', { method: 'POST' })).json();
@@ -33,7 +34,7 @@ fetch('${analytics}').catch(() => {});
 
 // Replace only the upstream peer and HTTP responses. Chromium still performs
 // navigation, redirects, cross-origin fetch, socket events and DOM rendering.
-async function crawl(t, { denied, redirect, partial, disconnect, stop } = {}) {
+async function crawl(t, { denied, redirect, partial, disconnect, stop, burst } = {}) {
   const requested = [], blocked = [], sockets = [], closed = [], output = [];
   const launch = chromium.launch.bind(chromium);
   t.mock.method(chromium, 'launch', async options => {
@@ -81,6 +82,10 @@ async function crawl(t, { denied, redirect, partial, disconnect, stop } = {}) {
               if (message !== 'ready') return;
               if (stop) { process.emit('SIGINT'); return; }
               if (disconnect && sockets.length === 1) { receive('disconnect'); return; }
+              if (burst) {
+                receive(Array.from({ length: 26 }, (_, i) => card('ABC123', String(i))).join(''));
+                return;
+              }
               receive(card('ABC123', 'selected') + card('DEF456', 'other') + (partial ? card('ABC123', 'live') : ''));
             },
           };
@@ -108,6 +113,30 @@ async function crawl(t, { denied, redirect, partial, disconnect, stop } = {}) {
   assert.deepEqual(closed, sockets);
   return { result: JSON.parse(output[0]), requested, blocked, sockets, code };
 }
+
+test('a filter query on the live path prints the selected rendered card after one attempt', async t => {
+  const { result, code, requested, sockets } = await crawl(t);
+  assert.deepEqual(requested.filter(url => url === liveUrl), [liveUrl]);
+  assert.deepEqual(requested.filter(url => url === bootstrap), [bootstrap]);
+  assert.deepEqual(sockets, [stream]);
+  assert.equal(code, 0);
+  assert.equal(result.status, 'OBSERVED');
+  assert.deepEqual(result.messages, [{ icao: 'ABC123', messagePath: '/messages/selected',
+    text: 'Synthetic payload selected', station: null }]);
+});
+
+test('a 26-card CLI window prints the first 25 validated cards as a truncated preview', async t => {
+  const { result, code, requested } = await crawl(t, { burst: true });
+  assert.deepEqual(requested.filter(url => url === liveUrl), [liveUrl]);
+  assert.deepEqual(requested.filter(url => url === bootstrap), [bootstrap]);
+  assert.equal(code, 2);
+  assert.equal(result.status, 'TRUNCATED');
+  assert.equal(result.inspected, 25);
+  assert.equal(result.accepted, 0);
+  assert.deepEqual(result.messages, Array.from({ length: 25 }, (_, i) => ({
+    icao: 'ABC123', messagePath: '/messages/' + i, text: 'Synthetic payload ' + i, station: null,
+  })));
+});
 
 test('crawl reconnects after the page socket closes and prints only the selected rendered card', async t => {
   const { result, code, requested, sockets } = await crawl(t, { disconnect: true });
