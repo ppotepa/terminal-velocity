@@ -28,3 +28,6 @@ export type {
 export { acceptSourceDelivery, type AcceptanceResult, type VerifiedSourceScope } from '../application/accept-source-delivery.ts';
 export type { DeliveryReceipt, SourceAcceptanceTransaction } from '../ports/source-acceptance-transaction.ts';
 export { createSourceDeliveryHandler } from '../application/create-source-delivery-handler.ts';
+export { normalizeSourceObservation, type NormalizationContext } from '../application/normalize-source-observation.ts';
+export type { CanonicalSourceObservation, NormalizationError, AircraftHints } from '../domain/normalized-observation.ts';
+export { EXTRACTED_RECORD_VERSION } from '../domain/decode-source-record.ts';

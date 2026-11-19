@@ -2,12 +2,22 @@ import { createProviderConnector } from '../../packages/backend/src/modules/sour
 import { pageUrl, maxCards, maxEnvelopeBytes, maxWindowBytes } from '../../packages/backend/src/modules/source-connectors/infrastructure/airframes/page-window.ts';
 import { boundPage } from './page-budget.mjs';
 import { syntheticShell } from './synthetic-shell.mjs';
+import { isDeepStrictEqual } from 'node:util';
 
 export const liveUrl = pageUrl;
 const cardSelector = '.vue-recycle-scroller__item-view .mb-4.border';
 
 /** Runs inside the rendered page. Return plain data only for the selected aircraft. */
 export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes, maxWindowBytes, envelopeOverhead, liveUrl }) {
+  // Keep this comparison inside the function serialized into the browser.
+  // Display label order is not part of a record's facts.
+  function sameFacts(left, right) {
+    if (left === right) return true;
+    if (!left || !right || typeof left !== 'object' || typeof right !== 'object') return false;
+    const keys = Object.keys(left);
+    return keys.length === Object.keys(right).length
+      && keys.every(key => Object.hasOwn(right, key) && sameFacts(left[key], right[key]));
+  }
   const scope = new URL(liveUrl);
   if (location.origin !== scope.origin || location.pathname !== scope.pathname) return null;
   const messages = new Map();
@@ -15,27 +25,82 @@ export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes
   let unsupported = false;
   let overflow = false;
   let bytes = 0;
-  for (const card of scroller.querySelectorAll(selector)) {
-    cards++;
-    const links = [...card.querySelectorAll('a[href]')].filter(link => link.origin === location.origin);
-    const aircraft = links.filter(link => link.pathname.startsWith('/airframes/'));
-    const addresses = new Set(aircraft.map(link => link.textContent.trim().toUpperCase())
-      .filter(text => /^[A-F0-9]{6}$/.test(text)));
-    if (addresses.size !== 1 || !addresses.has(icao)) continue;
-    const detail = links.find(link => /^\/messages\/[^/]+\/?$/.test(link.pathname)
-      && !['live', 'ar', 'history', 'search'].includes(link.pathname.split('/')[2]));
-    const text = card.querySelector('.bg-inner')?.innerText.trim();
-    if (!detail || !text || text.length > 32768) {
+  const recognizedCards = new Set(scroller.querySelectorAll(selector));
+  // Account for every node outside recognized cards, including text-only drift
+  // and incompatible siblings. A known card must not hide an unknown record.
+  const pending = [...scroller.childNodes];
+  while (pending.length) {
+    const node = pending.pop();
+    if (node.nodeType === 8) continue; // DOM comments are not records.
+    if (node.nodeType === 3) {
+      if (node.textContent.trim()) unsupported = true;
+      continue;
+    }
+    if (recognizedCards.has(node)) continue;
+    if (node.nodeType !== 1) { unsupported = true; continue; }
+    if (node.matches('[role="status"]') && node.innerText.trim() === 'No messages'
+      && recognizedCards.size === 0) continue;
+    if (node.matches('.vue-recycle-scroller__resize-observer') && !node.innerText.trim()) continue;
+    const structuralDiv = node.tagName === 'DIV' && !node.className
+      && (node.querySelector(selector) || !node.childNodes.length);
+    if (!structuralDiv && !node.matches('.vue-recycle-scroller__item-wrapper, .vue-recycle-scroller__item-view')) {
       unsupported = true;
       continue;
     }
-    const station = links.find(link => link.pathname.startsWith('/stations/'));
+    pending.push(...node.childNodes);
+  }
+  for (const card of recognizedCards) {
+    if (!card.getClientRects().length) continue;
+    cards++;
+    const links = [...card.querySelectorAll('a[href]')].filter(link => link.origin === location.origin && link.getClientRects().length);
+    const aircraft = links.filter(link => link.pathname.startsWith('/airframes/'));
+    const addresses = new Set(aircraft.map(link => link.textContent.trim().toUpperCase())
+      .filter(text => /^[A-F0-9]{6}$/.test(text)));
+    if (addresses.size !== 1) { unsupported = true; continue; }
+    if (!addresses.has(icao)) continue;
+    const details = links.filter(link => /^\/messages\/[^/]+\/?$/.test(link.pathname)
+      && !['live', 'ar', 'history', 'search'].includes(link.pathname.split('/')[2]));
+    const bodies = [...card.querySelectorAll('.bg-inner')].filter(body => body.getClientRects().length);
+    if (new Set(details.map(link => link.pathname)).size !== 1 || bodies.length !== 1) {
+      unsupported = true;
+      continue;
+    }
+    const detail = details[0];
+    const text = bodies[0].innerText.trim();
+    if (!text || text.length > 32768) {
+      unsupported = true;
+      continue;
+    }
+    const stations = links.filter(link => link.pathname.startsWith('/stations/'));
+    if (new Set(stations.map(link => link.pathname)).size > 1) { unsupported = true; continue; }
+    const station = stations[0]?.innerText.trim() || null;
+    if (station && station.length > 256) { unsupported = true; continue; }
     if (detail.pathname.length > 256) { unsupported = true; continue; }
+    const evidence = {};
+    const labels = { 'Registration': 'registration', 'Callsign': 'callsign',
+      'Reception time': 'receiverReceivedAt', 'Observation time': 'sourceObservedAt',
+      'Publication time': 'providerPublishedAt', 'Time uncertainty (ms)': 'uncertaintyMs',
+      'Direction': 'direction', 'Bearer': 'bearer', 'Application protocol': 'applicationProtocol' };
+    let invalidEvidence = false;
+    for (const term of card.querySelectorAll('dt')) {
+      if (!term.getClientRects().length) continue;
+      const field = labels[term.innerText.trim()];
+      if (!field) continue;
+      const value = term.nextElementSibling;
+      if (!value || value.tagName !== 'DD' || !value.getClientRects().length || field in evidence) { invalidEvidence = true; break; }
+      const time = value.querySelector('time[datetime]');
+      evidence[field] = time ? time.getAttribute('datetime') : value.innerText.trim();
+    }
+    if (invalidEvidence) { unsupported = true; continue; }
     const message = { icao, messagePath: detail.pathname, text,
-      station: station?.textContent.trim().slice(0, 256) || null };
+      station,
+      ...(Object.keys(evidence).length ? { evidence } : {}) };
     const size = new TextEncoder().encode(JSON.stringify(message)).length + envelopeOverhead;
     if (size > maxEnvelopeBytes) { unsupported = true; continue; }
-    if (messages.has(message.messagePath)) continue;
+    if (messages.has(message.messagePath)) {
+      if (!sameFacts(messages.get(message.messagePath), message)) unsupported = true;
+      continue;
+    }
     if (messages.size === maxCards || bytes + size > maxWindowBytes) { overflow = true; break; }
     bytes += size;
     messages.set(message.messagePath, message);
@@ -96,6 +161,7 @@ export async function observePage(page, icao, windowMs = 10000, expiresAt = Infi
       overflow ||= sample.overflow;
       for (const message of sample.messages) {
         const previous = messages.get(message.messagePath);
+        if (previous && !isDeepStrictEqual(previous, message)) { unsupported = true; continue; }
         bytes += Buffer.byteLength(JSON.stringify(message));
         bytes += previous ? -Buffer.byteLength(JSON.stringify(previous)) : envelopeOverhead;
         if (bytes > maxWindowBytes || (!previous && messages.size === maxCards)) {

@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { Pool } from 'pg';
 import { applyMigrations } from '../../../../scripts/postgres/migrate.mjs';
 import { createTestDatabase } from '../../../../scripts/postgres/test-database.mjs';
+import { trackPoolShutdown } from '../../../../scripts/postgres/drain-pool.mjs';
 import { parseSourceObservation } from '../../src/modules/source-connectors/public/index.ts';
 import { postgresSourceDeliveryStore } from '../../src/modules/source-connectors/infrastructure/postgres/postgres-source-delivery-store.ts';
 import { createTestPools, uniqueId } from './helpers/database.mjs';
@@ -37,11 +38,12 @@ function key(value) { return { sourceId: value.sourceId, identity: value.sourceD
 test('a baseline database upgrades once to source storage and preserves its migration checksum and records', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'tv-baseline-'));
   const first = '001_durable_correlation.sql';
-  let database, pool;
+  let database, pool, closePool;
   try {
     await copyFile(new URL('../../../../db/migrations/' + first, import.meta.url), join(dir, first));
     database = await createTestDatabase(process.env.TEST_DATABASE_URL, dir);
     pool = new Pool({ connectionString: database.adminUrl, max: 1 });
+    closePool = trackPoolShutdown(pool);
     const history = () => pool.query('SELECT * FROM tv_migrations.applied WHERE name=$1', [first]);
     const before = (await history()).rows;
     assert.equal(before.length, 1);
@@ -53,7 +55,7 @@ test('a baseline database upgrades once to source storage and preserves its migr
     assert.deepEqual((await history()).rows, before);
     assert.equal((await pool.query('SELECT * FROM message_ingestion.messages WHERE message_id=$1', [message])).rowCount, 1);
   } finally {
-    if (pool) await pool.end();
+    if (closePool) await closePool();
     if (database) await database.close();
     await rm(dir, { recursive: true, force: true });
   }

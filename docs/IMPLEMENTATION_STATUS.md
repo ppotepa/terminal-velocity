@@ -96,3 +96,33 @@ The source acceptance use case validates a synthetic observation against an inde
 ## Stage 3 bounded source transport — issue #9
 
 The private messages CLI exercises one scoped Airframes rendered-page window with an offline synthetic browser fixture. The backend connector bounds page retries, pending deliveries and bytes, reports health independently of coverage, and drains pending acceptance on stop. The source handler accepts a parser and the existing #8 transaction. Both CLI previews use an inspector. Durable runs require a committed receipt per delivery. Each DOM sample checks page scope, and Chromium owns the socket handshake. A refused upgrade ends that lookup even when Chromium withholds the status or cooldown. A disconnect after acceptance can start another bounded attempt. The browser suite exercises these paths and cancellation against a synthetic loopback TLS peer. The private one-shot lookup allows bounded first-party bootstrap and socket traffic for the rendered page. It returns transient matching cards and reports partial layouts and truncated windows with the validated cards that fit the preview budget. Recurring collection and real-content retention are rights-blocked, and API selection returns unavailable. The public API and database schema have no changes in this issue. See [source operations](SOURCES.md#private-on-demand-page-transport).
+
+## Issue #10 — synthetic normalization engineering
+
+A strict versioned extracted-record parser and pure normalizer now retain immutable
+source provenance, independent clock evidence, validated identifier hints, aircraft
+participant roles, declared data level and separate bearer/application protocol.
+The rendered-card adapter maps displayed optional fields and treats feeder labels
+as provenance, never as invented receptions. Schema drift, invalid clocks,
+conflicting hints and incompatible layouts fail explicitly. Synthetic golden
+regressions cover text-only layout drift and mixed recognized/incompatible records;
+the scroller reader checks content outside recognized cards even when cards exist.
+Cards with multiple distinct message paths or multiple visible bodies are rejected
+as `PARTIAL_LAYOUT`; duplicate links to one path remain valid. Immutable provenance
+also retains original registration spellings per participant alongside the
+normalized aircraft hint, including through JSON serialization.
+Fractional rendered UTC timestamps with one to three digits retain `MILLISECOND`
+precision after ISO normalization, with declared uncertainty unchanged. Synthetic
+fixtures and a browser-to-normalizer regression are included in existing root
+verification entry points. No SQL, demo API, source rights or retention policy
+changed. The provider API remains inactive.
+
+The baseline upgrade integration test now waits for PostgreSQL client disconnects
+before removing its disposable database. Deterministic lifecycle regressions run
+in `npm run check`; the coordinator must verify the database teardown correction
+in the unprivileged exact-SHA integration runner.
+
+This is not a verified real Airframes format: optional markup and all records are
+fabricated fixtures. Permitted real-sample acceptance is blocked under ADR 0001.
+See [the issue #10 handoff](handoffs/issue-10.md) for exact local checks, environment
+failures and coordinator-owned verification. No remote CI or merge is claimed.
