@@ -48,7 +48,7 @@ test('a baseline database upgrades once to source storage and preserves its migr
     const message = uniqueId('msg');
     await pool.query('INSERT INTO message_ingestion.messages VALUES ($1,$2,1,1)',
       [message, { messageId: message, observedAt: 1 }]);
-    assert.deepEqual(await applyMigrations(pool), ['002_source_deliveries.sql']);
+    assert.deepEqual(await applyMigrations(pool), ['002_source_deliveries.sql', '003_source_acceptance_fingerprint.sql']);
     assert.deepEqual(await applyMigrations(pool), []);
     assert.deepEqual((await history()).rows, before);
     assert.equal((await pool.query('SELECT * FROM message_ingestion.messages WHERE message_id=$1', [message])).rowCount, 1);
