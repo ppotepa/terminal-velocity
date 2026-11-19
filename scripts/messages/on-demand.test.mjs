@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { createHash, X509Certificate } from 'node:crypto';
+import { once } from 'node:events';
+import { createSecureServer } from 'node:http2';
 import test from 'node:test';
+import { promisify } from 'node:util';
 import { chromium } from 'playwright-core';
 import { liveUrl } from './airframes-live.mjs';
 
@@ -32,21 +37,57 @@ fetch('${analytics}').catch(() => {});
 })();
 </script>`;
 
+// HTTP/2 supplies :status without a reason phrase. Keep TLS material in memory
+// and resolve only the selected hostname to this per-test loopback server.
+async function http2Document(t) {
+  const { stdout: pem } = await promisify(execFile)('openssl', ['req', '-x509', '-newkey', 'ec',
+    '-pkeyopt', 'ec_paramgen_curve:P-256', '-nodes', '-subj', '/CN=app.airframes.io',
+    '-days', '1', '-keyout', '-', '-out', '-']);
+  const cert = pem.slice(pem.indexOf('-----BEGIN CERTIFICATE-----'));
+  const key = pem.slice(0, pem.indexOf('-----BEGIN CERTIFICATE-----'));
+  const spki = new X509Certificate(cert).publicKey.export({ type: 'spki', format: 'der' });
+  const pin = createHash('sha256').update(spki).digest('base64');
+  const server = createSecureServer({ cert, key });
+  const paths = [];
+  server.on('stream', (stream, headers) => {
+    paths.push(headers[':path']);
+    stream.respond({ ':status': 200, 'content-type': 'text/html' });
+    // A blob worker requires no network. Its policy violation proves Chromium
+    // enforced the response header that the document interceptor appended.
+    stream.end(shell + `<script>
+      document.addEventListener('securitypolicyviolation', event => console.log(event.effectiveDirective));
+      new Worker(URL.createObjectURL(new Blob(['self.close()'], { type: 'text/javascript' })));
+    </script>`);
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  return { paths, args: ['--no-proxy-server', '--ignore-certificate-errors-spki-list=' + pin,
+    `--host-resolver-rules=MAP app.airframes.io 127.0.0.1:${server.address().port}, MAP * ~NOTFOUND`] };
+}
+
 // Replace only the upstream peer and HTTP responses. Chromium still performs
 // navigation, redirects, cross-origin fetch, socket events and DOM rendering.
-async function crawl(t, { denied, redirect, partial, disconnect, stop, burst } = {}) {
+async function crawl(t, { denied, redirect, partial, disconnect, stop, burst, documentServer } = {}) {
   const requested = [], blocked = [], sockets = [], closed = [], output = [];
+  const documentResponses = [], pageLogs = [], browsers = [];
   const launch = chromium.launch.bind(chromium);
   t.mock.method(chromium, 'launch', async options => {
-    const browser = await launch(options);
+    const browser = await launch({ ...options, args: documentServer?.args });
+    browsers.push(browser);
     const newContext = browser.newContext.bind(browser);
     browser.newContext = async config => {
-      const context = await newContext({ ...config, offline: true });
+      const context = await newContext({ ...config, offline: !documentServer });
       const newSession = context.newCDPSession.bind(context);
       context.newCDPSession = async page => {
         const session = await newSession(page);
         const urls = new Map();
-        session.on('Fetch.requestPaused', e => urls.set(e.requestId, e.request.url));
+        page.on('console', message => pageLogs.push(message.text()));
+        session.on('Fetch.requestPaused', event => {
+          urls.set(event.requestId, event.request.url);
+          if (event.resourceType === 'Document' && event.responseStatusCode)
+            documentResponses.push([event.responseStatusCode, event.responseStatusText]);
+        });
         const send = session.send.bind(session);
         session.send = async (method, params) => {
           if (method === 'Fetch.failRequest') blocked.push(urls.get(params.requestId));
@@ -55,6 +96,7 @@ async function crawl(t, { denied, redirect, partial, disconnect, stop, burst } =
           requested.push(url);
           let responseCode = 404, body = '', headers = {};
           if (url === liveUrl) {
+            if (documentServer) return send(method, params);
             responseCode = redirect ? 302 : 200;
             headers = redirect ? { Location: outside } : { 'Content-Type': 'text/html' };
             body = redirect ? '' : shell;
@@ -111,8 +153,23 @@ async function crawl(t, { denied, redirect, partial, disconnect, stop, burst } =
   assert.equal(output.length, 1);
   assert.ok(!requested.includes(analytics));
   assert.deepEqual(closed, sockets);
-  return { result: JSON.parse(output[0]), requested, blocked, sockets, code };
+  assert.ok(browsers.every(browser => !browser.isConnected()));
+  return { result: JSON.parse(output[0]), requested, blocked, sockets, code, documentResponses, pageLogs };
 }
+
+test('a phrase-less HTTP/2 document enforces its policy and previews the selected card after bootstrap', async t => {
+  const documentServer = await http2Document(t);
+  const { result, code, documentResponses, pageLogs, blocked } = await crawl(t, { documentServer });
+  assert.deepEqual(documentServer.paths, ['/messages/live']);
+  assert.deepEqual(documentResponses, [[200, '']]);
+  assert.ok(pageLogs.includes('worker-src'));
+  assert.ok(blocked.includes(analytics));
+  assert.equal(code, 0);
+  assert.equal(result.status, 'OBSERVED');
+  assert.equal(result.accepted, 0);
+  assert.deepEqual(result.messages, [{ icao: 'ABC123', messagePath: '/messages/selected',
+    text: 'Synthetic payload selected', station: null }]);
+});
 
 test('a filter query on the live path prints the selected rendered card after one attempt', async t => {
   const { result, code, requested, sockets } = await crawl(t);
