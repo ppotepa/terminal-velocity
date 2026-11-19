@@ -59,7 +59,7 @@ test('a baseline database upgrades once to source storage and preserves its migr
   }
 });
 
-test('a provider delivery survives client restart with metadata-only retention and distinct retrieval time', async () => {
+test('an independent pool reads provider provenance, metadata-only retention and distinct retrieval time', async () => {
   const item = observation({ decoderVersion: 'v2' });
   const id = await store.appendDelivery(item, origin, accepted);
   const independent = createTestPools();
@@ -93,6 +93,31 @@ test('scoped identity rejects repeat keys including changed content and permits 
     { ...item, sourceDeliveryId: { ...item.sourceDeliveryId, accountScope: 'other' } }])
     await store.appendDelivery(separate, origin, accepted);
   assert.equal((await store.findDelivery(key(item))).payloadDigest, item.payloadDigest);
+});
+
+test('concurrent first inserts commit exactly one coherent delivery across independent pools', async () => {
+  const other = createTestPools();
+  const contender = postgresSourceDeliveryStore(other.runtime);
+  const first = observation({ bearer: 'VDL2' });
+  const second = { ...first, payloadDigest: 'b'.repeat(64), bearer: 'HF' };
+  try {
+    const outcomes = await Promise.allSettled([
+      store.appendDelivery(first, origin, accepted), contender.appendDelivery(second, origin, accepted),
+    ]);
+    const winners = outcomes.filter(result => result.status === 'fulfilled');
+    const losers = outcomes.filter(result => result.status === 'rejected');
+    assert.equal(winners.length, 1);
+    assert.equal(losers.length, 1);
+    assert.equal(losers[0].reason.code, '23505');
+    const expected = outcomes[0].status === 'fulfilled' ? first : second;
+    const saved = await contender.findDelivery(key(first));
+    assert.equal(saved.deliveryId, winners[0].value);
+    assert.equal(saved.payloadDigest, expected.payloadDigest);
+    assert.equal(saved.providerMessage.bearer, expected.bearer);
+    const { rowCount } = await other.runtime.query(
+      'SELECT FROM source_ingestion.provider_message_observations WHERE delivery_id=$1', [saved.deliveryId]);
+    assert.equal(rowCount, 1);
+  } finally { await other.close(); }
 });
 
 test('actual receiver evidence is separate from provider facts; malformed subtype writes roll back completely', async () => {
