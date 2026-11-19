@@ -5,28 +5,29 @@ const cardSelector = '.vue-recycle-scroller__item-view .mb-4.border';
 
 /** Runs inside the rendered page. Return plain data only for the selected aircraft. */
 export function readCards(scroller, { icao, selector }) {
-  const messages = [];
+  const messages = new Map();
   let cards = 0;
   let unsupported = false;
   for (const card of scroller.querySelectorAll(selector)) {
     cards++;
-    const links = [...card.querySelectorAll('a[href]')];
+    const links = [...card.querySelectorAll('a[href]')].filter(link => link.origin === location.origin);
     const aircraft = links.filter(link => link.pathname.startsWith('/airframes/'));
     const addresses = new Set(aircraft.map(link => link.textContent.trim().toUpperCase())
       .filter(text => /^[A-F0-9]{6}$/.test(text)));
     if (addresses.size !== 1 || !addresses.has(icao)) continue;
     const detail = links.find(link => /^\/messages\/[^/]+\/?$/.test(link.pathname)
-      && link.origin === location.origin);
+      && !['live', 'ar', 'history', 'search'].includes(link.pathname.split('/')[2]));
     const text = card.querySelector('.bg-inner')?.innerText.trim();
     if (!detail || !text || text.length > 32768) {
       unsupported = true;
       continue;
     }
     const station = links.find(link => link.pathname.startsWith('/stations/'));
-    messages.push({ icao, messagePath: detail.pathname, text,
-      station: station?.textContent.trim() || null });
+    messages.set(detail.pathname, { icao, messagePath: detail.pathname, text,
+      station: station?.textContent.trim().slice(0, 256) || null });
+    if (messages.size === 25) break;
   }
-  return { messages, cards, unsupported };
+  return { messages: [...messages.values()], cards, unsupported };
 }
 
 export async function observePage(page, icao, windowMs = 10000) {
@@ -34,9 +35,8 @@ export async function observePage(page, icao, windowMs = 10000) {
   if (new URL(page.url()).origin !== new URL(liveUrl).origin) throw new Error('Unexpected source origin');
   const scroller = page.locator('.messages-scroller');
   await scroller.waitFor({ state: 'attached', timeout: 10000 });
-  const filter = page.getByPlaceholder('ICAO in hex', { exact: true });
-  await filter.fill(icao, { timeout: 5000 });
-  await filter.press('Enter');
+  // The site can unmount the live list when its search form is submitted.
+  // Match inside the rendered live list without navigating into archive search.
   const messages = new Map();
   let sawCards = false;
   let unsupported = false;

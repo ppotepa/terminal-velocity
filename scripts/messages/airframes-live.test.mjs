@@ -21,5 +21,16 @@ test('rendered crawl isolates aircraft and deduplicates repeated cards', async (
     assert.equal(result.status, 'OBSERVED');
     assert.deepEqual(result.messages, [{icao:'ABC123', messagePath:'/messages/one', text:'Synthetic message', station:null}]);
     assert.equal((await observePage(page, '123456', 0)).status, 'NO_CONFIRMED_MATCH');
+    async function replaceCards(html) {
+      await page.unroute(liveUrl);
+      await page.route(liveUrl, route => route.fulfill({contentType:'text/html',
+        body:'<div class="messages-scroller">' + html + '</div>'}));
+      return observePage(page, 'ABC123', 0);
+    }
+    assert.equal((await replaceCards(card('ABC123','one').replace('/airframes/test',
+      'https://other.invalid/airframes/test'))).messages.length, 0);
+    assert.equal((await replaceCards(card('ABC123','live'))).status, 'PARTIAL_LAYOUT');
+    assert.equal((await replaceCards(Array.from({length:30}, (_, i) =>
+      card('ABC123', String(i))).join(''))).messages.length, 25);
   } finally { await browser.close(); }
 });
