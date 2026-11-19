@@ -91,6 +91,31 @@ test('only one first-party socket may connect; frames in both directions share t
   assert.ok(server.closed && client.closed);
 });
 
+test('a first-party socket closes as retryable when CDP creation precedes its route', async () => {
+  const { open, session, failures, dispose } = await fixture();
+  const url = 'wss://ws.airframes.io/socket.io/?transport=websocket';
+  session.emit('Network.webSocketCreated', { requestId: 'unrelated', url: 'wss://outside.invalid/socket' });
+  session.emit('Network.webSocketCreated', { requestId: 'active', url });
+  const client = Object.assign(peer(), { url: () => url, connectToServer: peer });
+  open(client);
+  session.emit('Network.webSocketHandshakeResponseReceived', { requestId: 'active', response: { status: 101 } });
+  client.disconnect();
+  assert.deepEqual(failures, [{ status: 503 }]);
+  await dispose();
+});
+
+test('a client frame proves upgrade before a delayed CDP handshake event', async () => {
+  const { open, session, failures, dispose } = await fixture();
+  const url = 'wss://ws.airframes.io/socket.io/?transport=websocket';
+  session.emit('Network.webSocketCreated', { requestId: 'active', url });
+  const client = Object.assign(peer(), { url: () => url, connectToServer: peer });
+  open(client);
+  client.receive('ready');
+  client.disconnect();
+  assert.deepEqual(failures, [{ status: 503 }]);
+  await dispose();
+});
+
 test('a denied bootstrap is classified at response interception before its body is exposed', async () => {
   const { session, failures } = await fixture();
   for (const status of [401, 403, 429, 503]) {
