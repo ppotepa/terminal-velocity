@@ -7,7 +7,19 @@
 - **Implementation branch:** `feature/s3-02-source-selection`
 - **Approved use:** denied until a specific source, account, and permitted use are verified
 
-## Context
+## Current decision
+
+The owner selected the rendered [Airframes Live Messages page](https://app.airframes.io/messages/live) for the first website adapter. The provider API is a deferred, disabled adapter. The page serves a JavaScript application shell. The [usage guide](https://docs.airframes.io/docs/using-airframes/) documents filters for registration, flight, label and text. Field availability in anonymous rendered rows still needs verification. Match a selected aircraft using corroborated identity evidence. Display reception time, station and direction only where the source provides them.
+
+The [application FAQ](https://app.airframes.io/faq) generally permits hobby use and requires an agreement for commercial use, competing products or bulk redistribution. It directs research and bulk data inquiries to Airframes. The [crawler directives](https://app.airframes.io/robots.txt) allow the live path for the generic agent. These sources leave the scope of recurring collection, retention and reuse of a captured row as a fixture unresolved for this project.
+
+**Decision: BLOCKED_PENDING_RIGHTS.** Target and transport are selected. Before live acquisition, record applicable terms or an Airframes response covering the intended cadence, fields, private display, retention and a redacted fixture; verify access and obtain a permitted sample. Public display requires its own later decision. The owner can ask hello@airframes.io about website use. Keep #7 queued until #6 is verified and merged.
+
+## Earlier API and receiver investigation
+
+The following record predates the owner's website selection. Its account and receiver options are historical.
+
+### Original context
 
 Stage 3 needs an authorized source of actual aviation messages. The Stage 3
 observation contract distinguishes provider-decoded messages, receiver
@@ -64,7 +76,7 @@ examples as provider fixtures.
 - [adsb.lol contributor aircraft-data links](https://www.adsb.lol/docs/open-data/aircraft-data-links) — inbound TCP contribution instructions and stated CC0 terms for data submitted to that network.
 - [adsb.lol privacy and license](https://www.adsb.lol/docs/privacy-license) — service disclaimer and contributor-data terms.
 
-## Unblock conditions
+### Earlier unblock conditions
 
 The repository owner must choose one of these paths and record evidence before
 S3-03 starts:
@@ -81,7 +93,7 @@ that only synthetic fixtures may be used. Re-review the current terms before
 implementation. Public display remains prohibited until its separate rights
 and Stage 5 publication controls are satisfied.
 
-## Consequences and limits
+### Earlier consequences and limits
 
 - S3-03 through S3-13 cannot claim or implement a live message acquisition path
   from this decision alone.

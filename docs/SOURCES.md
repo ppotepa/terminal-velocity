@@ -2,13 +2,7 @@
 
 ## Source authorization status
 
-The Stage 3 message-source review is recorded in
-[`docs/adr/0001-first-message-source.md`](adr/0001-first-message-source.md).
-As of 2026-11-19 it is `BLOCKED_PENDING_RIGHTS`: no message provider or
-contributor-owned receiver is authorized for this application. Airframes API
-access and licensing are still under development in its public documentation,
-and this project has no feeder account, credential, or receiver. Do not build a
-live message transport from the synthetic examples in this guide.
+The selected source is the rendered Airframes Live Messages website. The planned provider API adapter stays disabled. Issue #6 remains blocked pending evidence for the intended website collection, retention and use of a redacted sample. The application FAQ covers general hobby use. See the [source decision](adr/0001-first-message-source.md) for the website evidence and exact outstanding questions.
 
 The adsb.lol public API is a separate candidate for **positions**, not messages.
 Its position source selection, ODbL obligations, quotas, and endpoint contract
