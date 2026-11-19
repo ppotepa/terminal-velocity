@@ -28,10 +28,14 @@ Each observation requires:
 | `timestampUncertaintyMs` | Integer from 0 through one year in milliseconds, or `null` when clock uncertainty is unknown. Zero is an explicit zero-uncertainty claim. |
 | `measurementKind` | `ADS_B`, `MLAT`, or `OTHER`. `OTHER` requires an explicit `measurementDetail`. |
 | `latitude`, `longitude` | Finite decimal degrees. Latitude is in [-90, 90], longitude in [-180, 180]. |
+| `identifierHints.icao24` or `confirmedAircraftId` | An ICAO24 address or an application aircraft ID confirmed by an upstream identity decision is required. The observation ID is only a delivery identity. |
 
-Optional `identifierHints` may contain an ICAO24 address, callsign, or
-source-local ID. They are hints only: callsigns and source-local IDs are not
-globally stable, and this contract does not resolve temporal aircraft identity.
+`identifierHints` may also contain a callsign or source-local ID. These alone
+are not stable aircraft identities. Without ICAO24 or `confirmedAircraftId`,
+the parser returns `UNRESOLVED_AIRCRAFT_IDENTITY`; malformed confirmed IDs
+return `INVALID_POSITION_IDENTIFIER`. A provider adapter may only set
+`confirmedAircraftId` after an upstream identity decision. The parser validates
+the ID shape but cannot prove that decision or resolve conflicting identifiers.
 
 Optional measurements preserve provenance and units:
 
@@ -46,6 +50,10 @@ Optional measurements preserve provenance and units:
   `{ kind: "GEOMETRIC_FT", valueFt }`, or `{ kind: "SURFACE", valueFt: null }`
   when the source explicitly reports “ground”. The altitude types are never
   collapsed.
+- Schema v1 has one altitude slot. A payload containing both barometric and
+  geometric values must be rejected at the provider boundary; passing both as
+  an array returns `MULTIPLE_ALTITUDE_MEASUREMENTS`. An adapter must not select
+  one silently. A later schema version is needed to retain both in one fact.
 - For each optional measurement, an omitted field means the source omitted the
   field, `null` means the source explicitly reported it unavailable, and a
   numeric zero remains a reported measurement. No missing value is filled
@@ -111,6 +119,10 @@ the current instant. It returns `CURRENT` only when the oldest plausible event
 time is within the threshold, `STALE` only when the newest plausible event
 time is outside it, and `UNKNOWN` when the uncertainty interval crosses the
 threshold, uncertainty is absent, the clock is ahead, or no position exists.
+The interval includes the declared clock uncertainty plus a conservative full
+precision unit (1 ms, 1 second, 1 minute or 1 hour) around `observedAt`.
+`UNKNOWN` precision cannot produce `CURRENT` or `STALE`. Thus an hour-precision
+position cannot appear current merely because its clock uncertainty is zero.
 This is an event-age rule only; it does not assert source health, identity
 resolution, visibility rights, or map suitability. A later projection must
 combine those separate checks before displaying a current position.

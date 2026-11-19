@@ -198,11 +198,25 @@ Stage 3 external acceptance and any source-derived HTTP read remain blocked.
 
 ## Stage 4 position contracts — issue #14 candidate
 
-The saved `feature/s4-01-position-contracts` branch is being reconciled with the
-Stage 3 main. Its provider-neutral position boundary records source identity,
-measurement kind, coordinates, observed and ingested times and uncertainty.
+The `feature/s4-01-position-contracts` branch is based on the verified Stage 3
+main. Its provider-neutral position boundary records source and aircraft identity,
+measurement kind, coordinates, observed and ingested times, precision and uncertainty.
 It validates the supplied source capability and rejects inconsistent adapter
-results. Position freshness is independent of radio-message availability.
+results. It requires ICAO24 or an upstream confirmed aircraft ID, rejects
+dual-altitude payloads under schema v1, and uses precision when classifying
+position freshness. Position freshness is independent of radio-message availability.
 See [POSITIONS.md](POSITIONS.md) for the contract and limits. The branch still
-requires exact-commit CI, independent review and merge before #14 is accepted.
-No live position source, storage or map is claimed here.
+requires exact-commit CI for these review revisions, independent review and merge
+before #14 is accepted. Earlier isolated CI passed at `208820d`; that result
+does not cover the current changes. There is no migration, persistent position
+state or concurrency change. Before consumers adopt schema v1, rollback is
+removal of the contract and its export. No live position source, storage, map,
+source rights or deployment is claimed here.
+
+In this review revision, `npm ci --offline --ignore-scripts --no-audit --no-fund`,
+`npm run typecheck`, `npm run check:boundaries` (225 source files, 809 dependency
+edges), and `git diff --check` passed in the canonical checkout. `npm run check`
+passed type checking and architecture tests but its workspace tests could not
+run under this shell's Node 20.19.2: Node reported `ERR_UNKNOWN_FILE_EXTENSION`
+for TypeScript imports. The required Node 24 test result for these edits is
+pending coordinator-run isolated CI. No PR merge or hosted CI success is claimed.

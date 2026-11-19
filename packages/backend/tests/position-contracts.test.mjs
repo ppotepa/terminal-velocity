@@ -22,10 +22,11 @@ const base = (overrides = {}) => ({
   measurementKind: 'ADS_B',
   latitude: 0,
   longitude: 0,
+  identifierHints: { icao24: 'A0B1C2' },
   ...overrides,
 });
 
-test('v1 contract validates and normalizes an ADS-B observation without requiring aircraft identity', () => {
+test('v1 contract validates and normalizes an ADS-B observation with an aircraft address', () => {
   const parsed = parsePositionObservation(base());
   assert.equal(parsed.ok, true);
   assert.equal(parsed.value.schemaVersion, POSITION_OBSERVATION_SCHEMA_VERSION);
@@ -33,7 +34,23 @@ test('v1 contract validates and normalizes an ADS-B observation without requirin
   assert.equal(parsed.value.ingestedAt, '2026-11-19T11:00:01.250Z');
   assert.equal(parsed.value.latitude, 0);
   assert.equal(parsed.value.longitude, 0);
-  assert.equal('identifierHints' in parsed.value, false);
+  assert.equal(parsed.value.identifierHints.icao24, 'A0B1C2');
+});
+
+test('aircraft identity requires ICAO24 or an upstream confirmed stable aircraft ID', () => {
+  const withoutHints = base();
+  delete withoutHints.identifierHints;
+  assert.deepEqual(parsePositionObservation(withoutHints).error, { code: 'UNRESOLVED_AIRCRAFT_IDENTITY' });
+  assert.deepEqual(parsePositionObservation(base({ identifierHints: undefined })).error,
+    { code: 'INVALID_IDENTIFIER_HINTS' });
+  assert.deepEqual(parsePositionObservation(base({ identifierHints: { callsign: 'ABC123', sourceLocalId: 'track-1' } })).error,
+    { code: 'UNRESOLVED_AIRCRAFT_IDENTITY' });
+  assert.deepEqual(parsePositionObservation(base({ identifierHints: { callsign: 'ABC123' }, confirmedAircraftId: 'bad' })).error,
+    { code: 'INVALID_POSITION_IDENTIFIER', field: 'confirmedAircraftId' });
+  const confirmed = parsePositionObservation(base({ identifierHints: { callsign: 'ABC123' }, confirmedAircraftId: 'ac_synthetic-1' }));
+  assert.equal(confirmed.ok, true);
+  assert.equal(confirmed.value.confirmedAircraftId, 'ac_synthetic-1');
+  assert.deepEqual(parsePositionObservation(JSON.parse(JSON.stringify(confirmed.value))).value, confirmed.value);
 });
 
 test('coordinate bounds include both poles and the antimeridian but reject out-of-range and nonfinite values', () => {
@@ -87,6 +104,9 @@ test('altitudes retain explicit feet and barometric/geometric distinctions', () 
   assert.equal(parsePositionObservation(base({ altitude: { kind: 'SURFACE', valueFt: 0 } })).ok, false);
   assert.equal(parsePositionObservation(base({ altitude: { kind: 'METERS', value: 4000 } })).ok, false);
   assert.equal(parsePositionObservation(base({ altitude: { kind: 'BAROMETRIC_FT', valueFt: Number.NaN } })).ok, false);
+  assert.deepEqual(parsePositionObservation(base({ altitude: [
+    { kind: 'BAROMETRIC_FT', valueFt: 12000 }, { kind: 'GEOMETRIC_FT', valueFt: 12100 },
+  ] })).error, { code: 'MULTIPLE_ALTITUDE_MEASUREMENTS' });
 });
 
 test('timestamp parser rejects impossible, non-UTC and malformed calendar values', () => {
@@ -141,6 +161,8 @@ test('identifier hints validate ICAO24 without claiming identity resolution', ()
   assert.deepEqual(parsed.value.identifierHints, { icao24: 'A0B1C2', callsign: 'ABC123', sourceLocalId: 'track-1' });
   assert.equal(parsePositionObservation(base({ identifierHints: { icao24: 'GG0000' } })).ok, false);
   assert.equal(parsePositionObservation(base({ identifierHints: {} })).ok, false);
+  assert.deepEqual(parsePositionObservation(base({ identifierHints: { callsign: 'ABC123' } })).error,
+    { code: 'UNRESOLVED_AIRCRAFT_IDENTITY' });
 });
 
 test('unknown fields, unsupported versions, bad IDs, invalid units and invalid optional values fail explicitly', () => {
@@ -189,6 +211,10 @@ test('adapter acceptance enforces canonical fields and configured source capabil
   assert.deepEqual(acceptPositionObservation(wrongIngestion, null, context).error,
     { code: 'INVALID_POSITION_TIME', field: 'ingestedAt' });
   assert.equal(acceptPositionObservation(adapter, base({ latitude: null }), context).error.code, 'INVALID_COORDINATE');
+  const unidentified = base();
+  delete unidentified.identifierHints;
+  assert.deepEqual(acceptPositionObservation(adapter, unidentified, context).error,
+    { code: 'UNRESOLVED_AIRCRAFT_IDENTITY' });
   assert.deepEqual(acceptPositionObservation(adapter, base(), { ...context, ingestedAt: 'invalid' }).error,
     { code: 'INVALID_POSITION_TIME', field: 'ingestedAt' });
 });
@@ -222,6 +248,10 @@ test('position freshness uses observed time and uncertainty without refreshing m
   assert.equal(classifyPositionFreshness(recent, '2026-11-19T11:00:59.500Z', policy), 'UNKNOWN');
   assert.equal(classifyPositionFreshness(recent, '2026-11-19T10:59:59Z', policy), 'UNKNOWN');
   assert.equal(classifyPositionFreshness(null, now, policy), 'UNKNOWN');
+  const coarse = parsePositionObservation(base({ timestampPrecision: 'HOUR', timestampUncertaintyMs: 0 })).value;
+  assert.equal(classifyPositionFreshness(coarse, now, policy), 'UNKNOWN');
+  assert.equal(classifyPositionFreshness(parsePositionObservation(base({ timestampPrecision: 'UNKNOWN' })).value,
+    now, policy), 'UNKNOWN');
   assert.deepEqual(positionFreshnessPolicy({ currentWithinMs: 0 }).error,
     { code: 'INVALID_POSITION_FRESHNESS_POLICY' });
 });

@@ -1,4 +1,5 @@
 import { err, ok, type Result } from '../../../kernel/result.ts';
+import { aircraftId, type AircraftId } from '../../../contracts/identity/aircraft-id.ts';
 import { latitudeDegrees, longitudeDegrees, type LatitudeDegrees, type LongitudeDegrees } from './geo-coordinate.ts';
 import {
   positionSourceId, sourceObservationId, type PositionSourceId, type SourceObservationId,
@@ -40,6 +41,8 @@ export interface PositionObservation {
   readonly latitude: LatitudeDegrees;
   readonly longitude: LongitudeDegrees;
   readonly identifierHints?: PositionIdentifierHints;
+  /** An aircraft ID confirmed by an upstream identity decision, never inferred from a source-local track. */
+  readonly confirmedAircraftId?: AircraftId;
   /** Absent means the provider omitted the field; null means it explicitly reported it unavailable. */
   readonly groundSpeedKnots?: number | null;
   readonly trackDegrees?: number | null;
@@ -57,8 +60,10 @@ export type PositionParseError =
   | { readonly code: 'OBSERVATION_AFTER_INGESTION' }
   | { readonly code: 'INVALID_COORDINATE'; readonly field: 'latitude' | 'longitude' }
   | { readonly code: 'INVALID_POSITION_MEASUREMENT'; readonly field: 'measurementKind' | 'measurementDetail' | 'altitude' | 'groundSpeedKnots' | 'trackDegrees' | 'trackKind' }
-  | { readonly code: 'INVALID_POSITION_IDENTIFIER'; readonly field: 'sourceId' | 'sourceObservationId' }
-  | { readonly code: 'INVALID_IDENTIFIER_HINTS' };
+  | { readonly code: 'INVALID_POSITION_IDENTIFIER'; readonly field: 'sourceId' | 'sourceObservationId' | 'confirmedAircraftId' }
+  | { readonly code: 'INVALID_IDENTIFIER_HINTS' }
+  | { readonly code: 'UNRESOLVED_AIRCRAFT_IDENTITY' }
+  | { readonly code: 'MULTIPLE_ALTITUDE_MEASUREMENTS' };
 
 type PlainRecord = Record<string, unknown>;
 
@@ -115,7 +120,7 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
     'schemaVersion', 'sourceId', 'sourceObservationId', 'observedAt', 'observedAtBasis',
     'sourceTimeReferenceAt', 'sourceAgeSeconds', 'ingestedAt', 'timestampPrecision',
     'timestampUncertaintyMs', 'measurementKind', 'latitude', 'longitude', 'identifierHints',
-    'groundSpeedKnots', 'trackDegrees', 'trackKind', 'altitude', 'measurementDetail',
+    'groundSpeedKnots', 'trackDegrees', 'trackKind', 'altitude', 'measurementDetail', 'confirmedAircraftId',
   ];
   if (!hasOnlyKeys(record, allowed)) return err({ code: 'INVALID_INPUT', field: 'unknown' });
 
@@ -187,6 +192,7 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
     latitude: LatitudeDegrees;
     longitude: LongitudeDegrees;
     identifierHints?: PositionIdentifierHints;
+    confirmedAircraftId?: AircraftId;
     groundSpeedKnots?: number | null;
     trackDegrees?: number | null;
     trackKind?: PositionTrackKind;
@@ -214,6 +220,15 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
     if (!hints.ok) return hints;
     output.identifierHints = hints.value;
   }
+  if (Object.hasOwn(record, 'confirmedAircraftId')) {
+    const value = record['confirmedAircraftId'];
+    if (typeof value !== 'string') return err({ code: 'INVALID_POSITION_IDENTIFIER', field: 'confirmedAircraftId' });
+    const confirmed = aircraftId(value);
+    if (!confirmed.ok) return err({ code: 'INVALID_POSITION_IDENTIFIER', field: 'confirmedAircraftId' });
+    output.confirmedAircraftId = confirmed.value;
+  }
+  if (!output.identifierHints?.icao24 && !output.confirmedAircraftId)
+    return err({ code: 'UNRESOLVED_AIRCRAFT_IDENTITY' });
   if (Object.hasOwn(record, 'groundSpeedKnots')) {
     const speed = groundSpeedKnots(record['groundSpeedKnots']);
     if (!speed.ok) return speed;
@@ -234,6 +249,8 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
   if ((output.trackDegrees === undefined || output.trackDegrees === null) && output.trackKind !== undefined)
     return err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'trackKind' });
   if (Object.hasOwn(record, 'altitude')) {
+    if (Array.isArray(record['altitude']) && record['altitude'].length > 1)
+      return err({ code: 'MULTIPLE_ALTITUDE_MEASUREMENTS' });
     const altitude = positionAltitude(record['altitude']);
     if (!altitude.ok) return altitude;
     output.altitude = altitude.value;

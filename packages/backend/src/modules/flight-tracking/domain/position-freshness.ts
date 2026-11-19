@@ -21,16 +21,20 @@ export function positionFreshnessPolicy(input: unknown):
   }
 }
 
-/** Uses event time and its declared error bound; ingestion time never affects freshness. */
+/** Conservatively bounds precision and clock uncertainty around event time. */
 export function classifyPositionFreshness(
   observation: PositionObservation | null,
   now: string,
   policy: PositionFreshnessPolicy,
 ): PositionFreshness {
   const current = utcTimestamp(now, 'ingestedAt');
-  if (!observation || !current.ok || observation.timestampUncertaintyMs === null) return 'UNKNOWN';
+  if (!observation || !current.ok || observation.timestampUncertaintyMs === null
+    || observation.timestampPrecision === 'UNKNOWN') return 'UNKNOWN';
   const age = Date.parse(current.value) - Date.parse(observation.observedAt);
-  const uncertainty = observation.timestampUncertaintyMs;
+  const precisionMs = {
+    MILLISECOND: 1, SECOND: 1_000, MINUTE: 60_000, HOUR: 3_600_000,
+  }[observation.timestampPrecision];
+  const uncertainty = observation.timestampUncertaintyMs + precisionMs;
   if (age < 0 || age - uncertainty < 0) return 'UNKNOWN';
   if (age + uncertainty < policy.currentWithinMs) return 'CURRENT';
   if (age - uncertainty >= policy.currentWithinMs) return 'STALE';
