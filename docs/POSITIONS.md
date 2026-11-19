@@ -33,17 +33,20 @@ Each observation requires:
 `identifierHints` may also contain a callsign or source-local ID. These alone
 are not stable aircraft identities. Without ICAO24 or `confirmedAircraftId`,
 the parser returns `UNRESOLVED_AIRCRAFT_IDENTITY`; malformed confirmed IDs
-return `INVALID_POSITION_IDENTIFIER`. A confirmed ID requires a separate
+return `INVALID_POSITION_IDENTIFIER`. A confirmed ID requires an
+`identityEvidence: { resolverId, evidenceRef }` object and a separate
 `PositionIdentityDecision` supplied by a trusted upstream resolver. The decision
-must be confirmed, name the same source delivery and aircraft ID, and identify
-the same ICAO24 when the observation carries one. An unsupported claim returns
+must be confirmed, name the same source delivery, aircraft ID, resolver and
+evidence reference, and identify the same ICAO24 when the observation carries
+one. Missing, malformed or conflicting evidence, or an unsupported claim, returns
 `UNSUPPORTED_CONFIRMED_IDENTITY`; a missing or different decision ICAO24 returns
 `CONFLICTING_POSITION_IDENTIFIERS`. Provider wire data must never supply the
 decision. The parser checks consistency with the supplied decision; it cannot
 establish that the caller actually obtained that decision from an authoritative
 resolver. Until such a resolver exists, omit `confirmedAircraftId` and retain
 ICAO24 as a hint only. Revalidating a serialized observation with a confirmed
-ID requires the trusted decision again.
+ID requires the trusted decision again. The evidence reference is an opaque
+resolver-scoped decision ID; it is provenance, not proof that a caller is trusted.
 
 Optional measurements preserve provenance and units:
 
@@ -54,14 +57,13 @@ Optional measurements preserve provenance and units:
   `trackKind` of `GROUND_TRACK` or `TRUE_HEADING`; the source can describe true
   heading while on the ground. `0` is valid; `360` is rejected rather than
   silently rewritten to `0`.
-- `altitude` is either `{ kind: "BAROMETRIC_FT", valueFt }` or
-  `{ kind: "GEOMETRIC_FT", valueFt }`, or `{ kind: "SURFACE", valueFt: null }`
-  when the source explicitly reports “ground”. The altitude types are never
-  collapsed.
-- Schema v1 has one altitude slot. A payload containing both barometric and
-  geometric values must be rejected at the provider boundary; passing both as
-  an array returns `MULTIPLE_ALTITUDE_MEASUREMENTS`. An adapter must not select
-  one silently. A later schema version is needed to retain both in one fact.
+- `altitudes` is an array with one or two tagged values:
+  `{ kind: "BAROMETRIC_FT", valueFt }`, `{ kind: "GEOMETRIC_FT", valueFt }`, or the
+  sole value `{ kind: "SURFACE", valueFt: null }` when the source explicitly
+  reports ground. Barometric and geometric heights can coexist and survive
+  serialization. Duplicate kinds, an empty array, a surface value alongside
+  another altitude, and unknown units are rejected. Adapters must convert
+  source units explicitly before parsing.
 - For each optional measurement, an omitted field means the source omitted the
   field, `null` means the source explicitly reported it unavailable, and a
   numeric zero remains a reported measurement. No missing value is filled
@@ -101,7 +103,7 @@ position or a provider fixture.
   "identifierHints": { "icao24": "A0B1C2" },
   "groundSpeedKnots": 0,
   "trackDegrees": null,
-  "altitude": { "kind": "BAROMETRIC_FT", "valueFt": 0 }
+  "altitudes": [{ "kind": "BAROMETRIC_FT", "valueFt": 0 }, { "kind": "GEOMETRIC_FT", "valueFt": 100 }]
 }
 ```
 

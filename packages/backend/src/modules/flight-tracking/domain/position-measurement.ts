@@ -7,6 +7,7 @@ export type PositionAltitude =
   | { readonly kind: 'BAROMETRIC_FT'; readonly valueFt: number }
   | { readonly kind: 'GEOMETRIC_FT'; readonly valueFt: number }
   | { readonly kind: 'SURFACE'; readonly valueFt: null };
+export type PositionAltitudes = readonly PositionAltitude[];
 export const POSITION_TRACK_KINDS = ['GROUND_TRACK', 'TRUE_HEADING'] as const;
 export type PositionTrackKind = typeof POSITION_TRACK_KINDS[number];
 
@@ -55,6 +56,25 @@ export function positionAltitude(input: unknown): Result<PositionAltitude | null
   } catch {
     return err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'altitude' });
   }
+}
+
+/** One value per altitude datum; surface cannot coexist with an airborne altitude. */
+export function positionAltitudes(input: unknown): Result<PositionAltitudes | null, InvalidPositionMeasurement> {
+  if (input === null) return ok(null);
+  if (!Array.isArray(input) || input.length < 1 || input.length > 2)
+    return err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'altitude' });
+  const values: PositionAltitude[] = [];
+  const kinds = new Set<PositionAltitude['kind']>();
+  for (const raw of input) {
+    const parsed = positionAltitude(raw);
+    if (!parsed.ok || parsed.value === null || kinds.has(parsed.value.kind))
+      return err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'altitude' });
+    kinds.add(parsed.value.kind);
+    values.push(parsed.value);
+  }
+  if (kinds.has('SURFACE') && values.length !== 1)
+    return err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'altitude' });
+  return ok(Object.freeze(values));
 }
 
 export function groundSpeedKnots(input: unknown): Result<number | null, InvalidPositionMeasurement> {

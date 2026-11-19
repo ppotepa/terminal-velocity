@@ -1,6 +1,7 @@
 export {
   parsePositionObservation, POSITION_OBSERVATION_SCHEMA_VERSION,
-  type PositionObservation, type PositionIdentifierHints, type PositionIdentityDecision, type PositionParseError,
+  type PositionObservation, type PositionIdentifierHints, type PositionIdentityDecision,
+  type PositionIdentityEvidence, type PositionParseError,
 } from '../domain/position-observation.ts';
 export {
   positionSourceId, sourceObservationId,
@@ -12,7 +13,8 @@ export {
 } from '../domain/geo-coordinate.ts';
 export {
   POSITION_MEASUREMENT_KINDS, POSITION_TRACK_KINDS,
-  type PositionMeasurementKind, type PositionAltitude, type PositionTrackKind, type InvalidPositionMeasurement,
+  type PositionMeasurementKind, type PositionAltitude, type PositionAltitudes,
+  type PositionTrackKind, type InvalidPositionMeasurement,
 } from '../domain/position-measurement.ts';
 export {
   POSITION_TIME_PRECISIONS, POSITION_OBSERVED_AT_BASES,

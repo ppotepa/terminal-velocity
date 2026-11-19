@@ -29,7 +29,7 @@ const base = (overrides = {}) => ({
 const confirmedDecision = (overrides = {}) => ({
   status: 'CONFIRMED', sourceId: 'src_positions-test',
   sourceObservationId: 'delivery:position-1', aircraftId: 'ac_synthetic-1',
-  icao24: 'A0B1C2', ...overrides,
+  icao24: 'A0B1C2', resolverId: 'resolver_synthetic', evidenceRef: 'decision:1', ...overrides,
 });
 
 test('v1 contract validates and normalizes an ADS-B observation with an aircraft address', () => {
@@ -53,7 +53,8 @@ test('aircraft identity requires ICAO24 or an upstream confirmed stable aircraft
     { code: 'UNRESOLVED_AIRCRAFT_IDENTITY' });
   assert.deepEqual(parsePositionObservation(base({ identifierHints: { callsign: 'ABC123' }, confirmedAircraftId: 'bad' })).error,
     { code: 'INVALID_POSITION_IDENTIFIER', field: 'confirmedAircraftId' });
-  const confirmedInput = base({ identifierHints: { callsign: 'ABC123' }, confirmedAircraftId: 'ac_synthetic-1' });
+  const confirmedInput = base({ identifierHints: { callsign: 'ABC123' }, confirmedAircraftId: 'ac_synthetic-1',
+    identityEvidence: { resolverId: 'resolver_synthetic', evidenceRef: 'decision:1' } });
   assert.deepEqual(parsePositionObservation(confirmedInput).error, { code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
   const confirmed = parsePositionObservation(confirmedInput, confirmedDecision());
   assert.equal(confirmed.ok, true);
@@ -63,13 +64,16 @@ test('aircraft identity requires ICAO24 or an upstream confirmed stable aircraft
 });
 
 test('confirmed identity requires a matching upstream decision bound to this delivery', () => {
-  const input = base({ confirmedAircraftId: 'ac_synthetic-1' });
+  const input = base({ confirmedAircraftId: 'ac_synthetic-1',
+    identityEvidence: { resolverId: 'resolver_synthetic', evidenceRef: 'decision:1' } });
   assert.deepEqual(parsePositionObservation(input).error, { code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
   for (const decision of [
     confirmedDecision({ status: 'UNRESOLVED' }),
     confirmedDecision({ sourceId: 'src_other' }),
     confirmedDecision({ sourceObservationId: 'delivery:other' }),
     confirmedDecision({ aircraftId: 'ac_other' }),
+    confirmedDecision({ resolverId: 'resolver_other' }),
+    confirmedDecision({ evidenceRef: 'decision:other' }),
   ]) assert.deepEqual(parsePositionObservation(input, decision).error, { code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
   assert.deepEqual(parsePositionObservation(input, confirmedDecision({ icao24: 'FFFFFF' })).error,
     { code: 'CONFLICTING_POSITION_IDENTIFIERS' });
@@ -78,6 +82,14 @@ test('confirmed identity requires a matching upstream decision bound to this del
   assert.deepEqual(parsePositionObservation(input, confirmedDecision({ icao24: 123 })).error,
     { code: 'CONFLICTING_POSITION_IDENTIFIERS' });
   assert.equal(parsePositionObservation(input, confirmedDecision()).ok, true);
+  for (const identityEvidence of [undefined, { resolverId: 'resolver_synthetic' },
+    { resolverId: '', evidenceRef: 'decision:1' },
+    { resolverId: 'resolver_synthetic', evidenceRef: 'decision:other' }]) {
+    assert.deepEqual(parsePositionObservation(base({ ...input, identityEvidence }), confirmedDecision()).error,
+      { code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
+  }
+  assert.deepEqual(parsePositionObservation(base({ identityEvidence: { resolverId: 'resolver_synthetic', evidenceRef: 'decision:1' } })).error,
+    { code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
 });
 
 test('coordinate bounds include both poles and the antimeridian but reject out-of-range and nonfinite values', () => {
@@ -103,37 +115,43 @@ test('ADS-B and MLAT remain distinct and OTHER measurements require an explicit 
 
 test('optional measurements preserve zero, explicit null, and omitted as separate values', () => {
   const zero = parsePositionObservation(base({ groundSpeedKnots: 0, trackDegrees: 0, trackKind: 'GROUND_TRACK',
-    altitude: { kind: 'BAROMETRIC_FT', valueFt: 0 } }));
+    altitudes: [{ kind: 'BAROMETRIC_FT', valueFt: 0 }] }));
   assert.equal(zero.ok, true);
   assert.equal(zero.value.groundSpeedKnots, 0);
   assert.equal(zero.value.trackDegrees, 0);
-  assert.deepEqual(zero.value.altitude, { kind: 'BAROMETRIC_FT', valueFt: 0 });
-  const unavailable = parsePositionObservation(base({ groundSpeedKnots: null, trackDegrees: null, altitude: null }));
+  assert.deepEqual(zero.value.altitudes, [{ kind: 'BAROMETRIC_FT', valueFt: 0 }]);
+  const unavailable = parsePositionObservation(base({ groundSpeedKnots: null, trackDegrees: null, altitudes: null }));
   assert.equal(unavailable.ok, true);
   assert.equal(unavailable.value.groundSpeedKnots, null);
   assert.equal(unavailable.value.trackDegrees, null);
-  assert.equal(unavailable.value.altitude, null);
+  assert.equal(unavailable.value.altitudes, null);
   const absent = parsePositionObservation(base());
   assert.equal(absent.ok, true);
   assert.equal('groundSpeedKnots' in absent.value, false);
   assert.equal('trackDegrees' in absent.value, false);
-  assert.equal('altitude' in absent.value, false);
+  assert.equal('altitudes' in absent.value, false);
 });
 
 test('altitudes retain explicit feet and barometric/geometric distinctions', () => {
   for (const kind of ['BAROMETRIC_FT', 'GEOMETRIC_FT']) {
-    const parsed = parsePositionObservation(base({ altitude: { kind, valueFt: 12500 } }));
+    const parsed = parsePositionObservation(base({ altitudes: [{ kind, valueFt: 12500 }] }));
     assert.equal(parsed.ok, true);
-    assert.deepEqual(parsed.value.altitude, { kind, valueFt: 12500 });
+    assert.deepEqual(parsed.value.altitudes, [{ kind, valueFt: 12500 }]);
   }
-  assert.deepEqual(parsePositionObservation(base({ altitude: { kind: 'SURFACE', valueFt: null } })).value.altitude,
-    { kind: 'SURFACE', valueFt: null });
-  assert.equal(parsePositionObservation(base({ altitude: { kind: 'SURFACE', valueFt: 0 } })).ok, false);
-  assert.equal(parsePositionObservation(base({ altitude: { kind: 'METERS', value: 4000 } })).ok, false);
-  assert.equal(parsePositionObservation(base({ altitude: { kind: 'BAROMETRIC_FT', valueFt: Number.NaN } })).ok, false);
-  assert.deepEqual(parsePositionObservation(base({ altitude: [
+  assert.deepEqual(parsePositionObservation(base({ altitudes: [{ kind: 'SURFACE', valueFt: null }] })).value.altitudes,
+    [{ kind: 'SURFACE', valueFt: null }]);
+  assert.equal(parsePositionObservation(base({ altitudes: [{ kind: 'SURFACE', valueFt: 0 }] })).ok, false);
+  assert.equal(parsePositionObservation(base({ altitudes: [{ kind: 'METERS', value: 4000 }] })).ok, false);
+  assert.equal(parsePositionObservation(base({ altitudes: [{ kind: 'BAROMETRIC_FT', valueFt: Number.NaN }] })).ok, false);
+  const pair = parsePositionObservation(base({ altitudes: [
     { kind: 'BAROMETRIC_FT', valueFt: 12000 }, { kind: 'GEOMETRIC_FT', valueFt: 12100 },
-  ] })).error, { code: 'MULTIPLE_ALTITUDE_MEASUREMENTS' });
+  ] }));
+  assert.equal(pair.ok, true);
+  assert.deepEqual(parsePositionObservation(JSON.parse(JSON.stringify(pair.value))).value.altitudes, pair.value.altitudes);
+  for (const altitudes of [[], [{ kind: 'BAROMETRIC_FT', valueFt: 1 }, { kind: 'BAROMETRIC_FT', valueFt: 2 }],
+    [{ kind: 'SURFACE', valueFt: null }, { kind: 'GEOMETRIC_FT', valueFt: 1 }]])
+    assert.deepEqual(parsePositionObservation(base({ altitudes })).error,
+      { code: 'INVALID_POSITION_MEASUREMENT', field: 'altitude' });
 });
 
 test('timestamp parser rejects impossible, non-UTC and malformed calendar values', () => {
@@ -244,7 +262,8 @@ test('adapter acceptance enforces canonical fields and configured source capabil
     { code: 'UNRESOLVED_AIRCRAFT_IDENTITY' });
   assert.deepEqual(acceptPositionObservation(adapter, base(), { ...context, ingestedAt: 'invalid' }).error,
     { code: 'INVALID_POSITION_TIME', field: 'ingestedAt' });
-  const claimed = base({ confirmedAircraftId: 'ac_synthetic-1' });
+  const claimed = base({ confirmedAircraftId: 'ac_synthetic-1',
+    identityEvidence: { resolverId: 'resolver_synthetic', evidenceRef: 'decision:1' } });
   assert.deepEqual(acceptPositionObservation(adapter, claimed, context).error,
     { code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
   assert.deepEqual(acceptPositionObservation(adapter, claimed, {
@@ -260,7 +279,7 @@ test('adapter acceptance enforces canonical fields and configured source capabil
 
 test('canonical JSON roundtrip retains explicit null and does not invent omitted measurements', () => {
   const original = parsePositionObservation(base({ measurementKind: 'MLAT',
-    altitude: { kind: 'GEOMETRIC_FT', valueFt: 0 }, groundSpeedKnots: null }));
+    altitudes: [{ kind: 'GEOMETRIC_FT', valueFt: 0 }], groundSpeedKnots: null }));
   assert.equal(original.ok, true);
   const replayed = parsePositionObservation(JSON.parse(JSON.stringify(original.value)));
   assert.equal(replayed.ok, true);

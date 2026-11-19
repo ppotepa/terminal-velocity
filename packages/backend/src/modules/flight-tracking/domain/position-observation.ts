@@ -5,8 +5,8 @@ import {
   positionSourceId, sourceObservationId, type PositionSourceId, type SourceObservationId,
 } from './position-identifiers.ts';
 import {
-  groundSpeedKnots, measurementDetail, positionAltitude, positionMeasurementKind, positionTrackKind, trackDegrees,
-  type PositionAltitude, type PositionMeasurementKind, type PositionTrackKind,
+  groundSpeedKnots, measurementDetail, positionAltitudes, positionMeasurementKind, positionTrackKind, trackDegrees,
+  type PositionAltitudes, type PositionMeasurementKind, type PositionTrackKind,
 } from './position-measurement.ts';
 import {
   positionObservedAtBasis, positionTimePrecision, sourceAgeSeconds, timestampUncertainty, utcTimestamp,
@@ -30,8 +30,16 @@ export interface PositionIdentityDecision {
   readonly sourceId: PositionSourceId;
   readonly sourceObservationId: SourceObservationId;
   readonly aircraftId: AircraftId;
+  /** Resolver provenance for the confirmed link, scoped by resolverId. */
+  readonly resolverId: string;
+  readonly evidenceRef: string;
   /** The address matched by the decision, when the observation carries an ICAO24 hint. */
   readonly icao24?: string;
+}
+
+export interface PositionIdentityEvidence {
+  readonly resolverId: string;
+  readonly evidenceRef: string;
 }
 
 export interface PositionObservation {
@@ -53,13 +61,15 @@ export interface PositionObservation {
   readonly identifierHints?: PositionIdentifierHints;
   /** An aircraft ID confirmed by an upstream identity decision, never inferred from a source-local track. */
   readonly confirmedAircraftId?: AircraftId;
+  /** Required with confirmedAircraftId; checked against a separately supplied trusted decision. */
+  readonly identityEvidence?: PositionIdentityEvidence;
   /** Absent means the provider omitted the field; null means it explicitly reported it unavailable. */
   readonly groundSpeedKnots?: number | null;
   readonly trackDegrees?: number | null;
   /** Required with a numeric track so on-ground true heading is not mislabeled as airborne track. */
   readonly trackKind?: PositionTrackKind;
   /** Feet are explicit and barometric/geometric values remain separate. */
-  readonly altitude?: PositionAltitude | null;
+  readonly altitudes?: PositionAltitudes | null;
   readonly measurementDetail?: string;
 }
 
@@ -74,8 +84,7 @@ export type PositionParseError =
   | { readonly code: 'INVALID_IDENTIFIER_HINTS' }
   | { readonly code: 'UNRESOLVED_AIRCRAFT_IDENTITY' }
   | { readonly code: 'UNSUPPORTED_CONFIRMED_IDENTITY' }
-  | { readonly code: 'CONFLICTING_POSITION_IDENTIFIERS' }
-  | { readonly code: 'MULTIPLE_ALTITUDE_MEASUREMENTS' };
+  | { readonly code: 'CONFLICTING_POSITION_IDENTIFIERS' };
 
 type PlainRecord = Record<string, unknown>;
 
@@ -134,7 +143,7 @@ export function parsePositionObservation(
     'schemaVersion', 'sourceId', 'sourceObservationId', 'observedAt', 'observedAtBasis',
     'sourceTimeReferenceAt', 'sourceAgeSeconds', 'ingestedAt', 'timestampPrecision',
     'timestampUncertaintyMs', 'measurementKind', 'latitude', 'longitude', 'identifierHints',
-    'groundSpeedKnots', 'trackDegrees', 'trackKind', 'altitude', 'measurementDetail', 'confirmedAircraftId',
+    'groundSpeedKnots', 'trackDegrees', 'trackKind', 'altitudes', 'measurementDetail', 'confirmedAircraftId', 'identityEvidence',
   ];
   if (!hasOnlyKeys(record, allowed)) return err({ code: 'INVALID_INPUT', field: 'unknown' });
 
@@ -207,10 +216,11 @@ export function parsePositionObservation(
     longitude: LongitudeDegrees;
     identifierHints?: PositionIdentifierHints;
     confirmedAircraftId?: AircraftId;
+    identityEvidence?: PositionIdentityEvidence;
     groundSpeedKnots?: number | null;
     trackDegrees?: number | null;
     trackKind?: PositionTrackKind;
-    altitude?: PositionAltitude | null;
+    altitudes?: PositionAltitudes | null;
     measurementDetail?: string;
   } = {
     schemaVersion: POSITION_OBSERVATION_SCHEMA_VERSION,
@@ -239,17 +249,28 @@ export function parsePositionObservation(
     if (typeof value !== 'string') return err({ code: 'INVALID_POSITION_IDENTIFIER', field: 'confirmedAircraftId' });
     const confirmed = aircraftId(value);
     if (!confirmed.ok) return err({ code: 'INVALID_POSITION_IDENTIFIER', field: 'confirmedAircraftId' });
+    const evidence = plainRecord(record['identityEvidence']);
+    if (!evidence || !hasOnlyKeys(evidence, ['resolverId', 'evidenceRef'])
+      || typeof evidence['resolverId'] !== 'string' || typeof evidence['evidenceRef'] !== 'string'
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(evidence['resolverId'])
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(evidence['evidenceRef']))
+      return err({ code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
     if (identityDecision?.status !== 'CONFIRMED'
       || identityDecision.sourceId !== sourceId.value
       || identityDecision.sourceObservationId !== observationId.value
-      || identityDecision.aircraftId !== confirmed.value)
+      || identityDecision.aircraftId !== confirmed.value
+      || identityDecision.resolverId !== evidence['resolverId']
+      || identityDecision.evidenceRef !== evidence['evidenceRef'])
       return err({ code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
     if (output.identifierHints?.icao24 !== undefined
       && (typeof identityDecision.icao24 !== 'string'
         || identityDecision.icao24.toUpperCase() !== output.identifierHints.icao24))
       return err({ code: 'CONFLICTING_POSITION_IDENTIFIERS' });
     output.confirmedAircraftId = confirmed.value;
+    output.identityEvidence = Object.freeze({ resolverId: evidence['resolverId'], evidenceRef: evidence['evidenceRef'] });
   }
+  if (!Object.hasOwn(record, 'confirmedAircraftId') && Object.hasOwn(record, 'identityEvidence'))
+    return err({ code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
   if (!output.identifierHints?.icao24 && !output.confirmedAircraftId)
     return err({ code: 'UNRESOLVED_AIRCRAFT_IDENTITY' });
   if (Object.hasOwn(record, 'groundSpeedKnots')) {
@@ -271,12 +292,10 @@ export function parsePositionObservation(
     return err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'trackKind' });
   if ((output.trackDegrees === undefined || output.trackDegrees === null) && output.trackKind !== undefined)
     return err({ code: 'INVALID_POSITION_MEASUREMENT', field: 'trackKind' });
-  if (Object.hasOwn(record, 'altitude')) {
-    if (Array.isArray(record['altitude']) && record['altitude'].length > 1)
-      return err({ code: 'MULTIPLE_ALTITUDE_MEASUREMENTS' });
-    const altitude = positionAltitude(record['altitude']);
-    if (!altitude.ok) return altitude;
-    output.altitude = altitude.value;
+  if (Object.hasOwn(record, 'altitudes')) {
+    const altitudes = positionAltitudes(record['altitudes']);
+    if (!altitudes.ok) return altitudes;
+    output.altitudes = altitudes.value;
   }
   if (Object.hasOwn(record, 'measurementDetail')) {
     const detail = measurementDetail(record['measurementDetail']);

@@ -202,24 +202,34 @@ The `feature/s4-01-position-contracts` branch is based on the verified Stage 3
 main. Its provider-neutral position boundary records source and aircraft identity,
 measurement kind, coordinates, observed and ingested times, precision and uncertainty.
 It validates the supplied source capability and rejects inconsistent adapter
-results. It requires ICAO24 or an upstream confirmed aircraft ID, rejects
-dual-altitude payloads under schema v1, and uses precision when classifying
-position freshness. Position freshness is independent of radio-message availability.
-Confirmed IDs now require a separate upstream decision bound to the source
-delivery, with conflicting ICAO24 claims rejected. See [POSITIONS.md](POSITIONS.md)
+results. It requires ICAO24 or an upstream confirmed aircraft ID, retains
+simultaneous barometric and geometric altitudes under schema v1, and uses
+precision when classifying position freshness. Position freshness is independent of radio-message availability.
+Confirmed IDs now require a resolver-scoped evidence reference and a separate
+upstream decision bound to the source delivery, with conflicting ICAO24 and
+evidence claims rejected. See [POSITIONS.md](POSITIONS.md)
 for the contract and limits. Independent review and merge remain before #14
 is accepted. There is no migration, persistent position
 state or concurrency change. Before consumers adopt schema v1, rollback is
 removal of the contract and its export. No live position source, storage, map,
 source rights or deployment is claimed here.
 
-For the identity fix in this checkout, Node 24.22.3 ran
+For an earlier identity fix in this checkout, Node 24.22.3 ran
 `npm ci --offline --ignore-scripts --no-audit --no-fund`, the position contract
 suite, type checking, architecture checks (225 source files, 809 dependency
 edges), and backend workspace tests successfully. `git diff --check` passed.
 The full `npm run check` reached the API workspace but failed because this
 shell denies loopback binds (`listen EPERM` on 127.0.0.1); it is not a passing
 full-suite result. The coordinator's isolated local CI passed at
-`91b3ff353aac9e04a217cf793ca2df91c6641408`. The coordinator records CI for
-each reviewed commit in issue #14 and PR #56 after that run completes. No hosted
-CI or deployment success is claimed here.
+`91b3ff353aac9e04a217cf793ca2df91c6641408`. A supplied coordinator
+isolated local CI log passed at `fa2b6a5` before these review changes; the coordinator owns exact-SHA evidence
+for the updated head in issue #14 and PR #56. No hosted CI or deployment success
+is claimed here.
+
+For the altitude and identity-evidence review changes, Node 24.22.3 ran
+`npm ci --offline --ignore-scripts --no-audit --no-fund`, the focused position
+contract suite, `npm run typecheck`, `npm run check:boundaries` (225 source
+files, 809 dependency edges), and `git diff --check` successfully. The backend
+workspace tests passed during `npm run check`; API tests failed solely at
+loopback binding with `listen EPERM` in this shell. These changes await
+coordinator isolated CI on their final commit.
