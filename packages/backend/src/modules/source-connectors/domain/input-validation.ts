@@ -42,3 +42,34 @@ export function isToken(input: unknown, maxLength = 128): input is string {
     && input.length <= maxLength
     && /^[A-Za-z0-9][A-Za-z0-9._+-]*$/u.test(input);
 }
+
+/** Read a bounded, dense array of data properties without using its element getters or iterator. */
+export function plainList(input: unknown, maximum: number): unknown[] | null {
+  try {
+    if (!Array.isArray(input) || Object.getPrototypeOf(input) !== Array.prototype) return null;
+    const length: unknown = Object.getOwnPropertyDescriptor(input, 'length')?.value;
+    if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0 || length > maximum)
+      return null;
+    if (Reflect.ownKeys(input).length !== length + 1) return null;
+    const values: unknown[] = [];
+    for (let i = 0; i < length; i++) {
+      const element = Object.getOwnPropertyDescriptor(input, i);
+      if (!element || !('value' in element)) return null;
+      values.push(element.value);
+    }
+    return values;
+  } catch {
+    return null;
+  }
+}
+
+export function uniqueTokenList(input: unknown, maximum: number): readonly string[] | null {
+  const items = plainList(input, maximum);
+  if (!items) return null;
+  const tokens = new Set<string>();
+  for (const item of items) {
+    if (!isToken(item) || tokens.has(item)) return null;
+    tokens.add(item);
+  }
+  return Object.freeze([...tokens]);
+}
