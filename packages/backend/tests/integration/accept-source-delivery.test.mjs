@@ -160,3 +160,30 @@ test('legacy rows without canonical equivalence evidence fail closed and transac
   await assert.rejects(captured.readPrevious(), /expired/);
   await assert.rejects(captured.append(), /expired/);
 });
+
+test('private rendered-window callbacks acknowledge a committed receipt and replay only one outbox event', async () => {
+  const { createProviderConnector } = await import('../../src/modules/source-connectors/composition/create-provider-connector.ts');
+  const { createSourceDeliveryHandler } = await import('../../src/modules/source-connectors/public/index.ts');
+  const item = envelope();
+  const source = 'https://app.airframes.io/messages/live';
+  const card = { icao: 'ABC123', text: item.decodedText, station: null,
+    messagePath: '/messages/' + item.sourceDeliveryId.externalId };
+  const connector = createProviderConnector('crawl', card.icao, { kind: 'SYNTHETIC_PAGE', read: async () => ({ status: 200,
+    body: { status: 'OBSERVED', source, icao: card.icao, messages: [card] } }) });
+  const acceptCard = createSourceDeliveryHandler(scope, transaction, delivery => ({
+    observation: { ...item, decodedText: delivery.raw.text,
+      sourceDeliveryId: { ...item.sourceDeliveryId, externalId: delivery.raw.messagePath.split('/').at(-1) } },
+    origin: { ...origin, pageUrl: delivery.source, retrievedAt: delivery.retrievedAt, ingestedAt: Date.now() },
+  }));
+  for (const expected of ['CREATED', 'DUPLICATE']) {
+    let outcome;
+    assert.equal(await connector.start(async delivery => {
+      const receipt = await acceptCard(delivery);
+      outcome = receipt.value?.outcome;
+      return receipt;
+    }), 'COMPLETE');
+    assert.equal(outcome, expected);
+    assert.equal(connector.health().accepted, 1);
+  }
+  assert.equal((await effects(item)).length, 1);
+});

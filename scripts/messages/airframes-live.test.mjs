@@ -34,3 +34,14 @@ test('rendered crawl isolates aircraft and deduplicates repeated cards', async (
       card('ABC123', String(i))).join(''))).messages.length, 25);
   } finally { await browser.close(); }
 });
+
+test('private dry-run renders the synthetic shell and reports counts without acceptance or content', async () => {
+  const result = await acquire('dry-run', 'abc123');
+  assert.equal(result.status, 'COMPLETE');
+  assert.equal(result.inspected, 1);
+  assert.equal(result.accepted, 0);
+  assert.equal(result.coverage, 'UNKNOWN');
+  assert.doesNotMatch(JSON.stringify(result), /Synthetic private preview|\/messages\//);
+  assert.equal((await acquire('dry-run', '123456')).inspected, 0);
+  await assert.rejects(acquire('dry-run', '*'), /scope/);
+});

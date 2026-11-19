@@ -92,3 +92,7 @@ Migration 002 adds restricted source deliveries, provider-message facts, receive
 ## Stage 3 atomic acceptance — S3-04
 
 The source acceptance use case validates a synthetic observation against an independently configured source scope and capability revision, then commits delivery metadata and one source outbox event together. Matching retries return the original delivery ID and provenance. A changed canonical fact under that key produces a conflict. The lookup CLI, public API and Stage 2 consumer operate separately. See the [acceptance contract](../db/migrations/README.md#migration-003-and-source-acceptance).
+
+## Stage 3 bounded source transport — issue #9
+
+The private messages CLI exercises one scoped Airframes rendered-page window with an offline synthetic browser fixture. The backend connector bounds page retries, pending deliveries and bytes, reports health independently of coverage, and drains pending acceptance on stop. The source handler accepts a parser and the existing #8 transaction. The fixture preview writes no records. The existing private one-shot lookup returns transient matching cards. Recurring collection and real-content retention are rights-blocked, and API selection returns unavailable. The public API and database schema have no changes in this issue. See [source operations](SOURCES.md#private-on-demand-page-transport).

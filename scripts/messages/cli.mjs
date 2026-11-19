@@ -1,10 +1,18 @@
 import { acquire } from './airframes-live.mjs';
 
+const controller = new AbortController();
+const stop = () => controller.abort();
+process.once('SIGINT', stop);
+process.once('SIGTERM', stop);
 try {
-  const result = await acquire(...process.argv.slice(2));
-  console.log(JSON.stringify(result, null, 2));
-  if (result.status === 'API_UNAVAILABLE' || result.status === 'PARTIAL_LAYOUT') process.exitCode = 2;
-} catch (error) {
-  console.error('Message acquisition failed:', error.message);
+  const [strategy, address] = process.argv.slice(2);
+  const result = await acquire(strategy, address, controller.signal);
+  console.log(JSON.stringify(result));
+  if (!['COMPLETE', 'OBSERVED', 'NO_CONFIRMED_MATCH', 'NO_OBSERVATIONS_COVERAGE_UNKNOWN'].includes(result.status)) process.exitCode = ['API_UNAVAILABLE', 'RIGHTS_BLOCKED'].includes(result.status) ? 2 : 1;
+} catch {
+  console.error('Message acquisition failed. Usage: npm run messages -- dry-run <ICAO24> | crawl <ICAO24> | api');
   process.exitCode = 1;
+} finally {
+  process.removeListener('SIGINT', stop);
+  process.removeListener('SIGTERM', stop);
 }

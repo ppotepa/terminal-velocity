@@ -4,11 +4,23 @@
 
 The selected source is the rendered Airframes Live Messages website. The provider API strategy returns API_UNAVAILABLE without network access. Issue #6 remains blocked pending evidence for the intended website collection, retention and use of a redacted sample. The application FAQ covers general hobby use. See the [source decision](adr/0001-first-message-source.md) for the website evidence and exact outstanding questions.
 
-### Private on-demand message lookup
+### Private on-demand page transport
 
-From the repository root, run `npm ci` and then `npm run messages -- crawl ABC123` with the selected aircraft's six-digit ICAO24 address. Run the browser under an unprivileged account with Chromium installed. The executable defaults to Debian's chromium-headless-shell; set CHROMIUM_PATH to select another compatible Chromium executable. Each invocation opens one anonymous browser session on the live page, matches the selected ICAO against aircraft links on rendered cards. It samples for ten seconds and emits at most 25 distinct provider-message links. The process writes the lookup to standard output. The adapter has no database or scheduled polling.
+Run `npm run messages -- dry-run ABC123` for one synthetic ICAO24 lookup. Use an unprivileged account with a sandbox-capable Chromium executable (`CHROMIUM_PATH`, default `/usr/bin/chromium-headless-shell`). Chromium renders a fabricated JavaScript shell at the selected page URL via an offline intercepted navigation. The fixture also contains an unrelated aircraft. The CLI prints status, counters and transport health. A preview counts as inspected and has zero durable acknowledgments.
 
-A result contains the source page, ICAO24 and matched messages with the displayed text, detail path and optional station. Receiver coverage and message direction may be unknown. An empty window reports the limits of observation. A page load or filter failure exits with status 1. The API strategy (`npm run messages -- api`) and a partially recognized card layout exit with status 2. Run `npm run test:messages` for browser tests using synthetic HTML served entirely inside the test.
+The existing `crawl ABC123` strategy is a private, one-shot preview. Its programmatic result holds matching cards in memory for the caller. The CLI prints the selected messages to standard output. A preview cannot invoke the durable acceptance callback. The API runtime never starts a crawler. Selecting `api` reports `API_UNAVAILABLE` (exit 2) before opening a browser or requesting credentials. Unconfigured durable acquisition reports `RIGHTS_BLOCKED`. Owner verification under ADR 0001 is required for recurring collection, retention, a provider fixture and the live acceptance check.
+
+| Per-connector policy | Behavior |
+|---|---|
+| Page and scope | One anonymous rendered live list, one explicit ICAO24, same-origin aircraft and message links. No archive submission, numbered pages or automatic recurring polls. |
+| Observation | Up to 10 seconds, sampling the DOM at 500 ms intervals (500 ms window for the private fixture). Paths deduplicate cards within the window. |
+| Browser request | One in-flight page read. The fixture serves one fixed shell per browser. The one-shot preview allows the selected navigation and same-origin GET resources, up to 96 requests, 16 concurrent. The client cancels on declared or observed response size above 8 MiB or observed total above 24 MiB. Traffic counters operate on browser chunks. Service workers, downloads and independent WebSocket subscriptions are disabled. |
+| Pagination and queue | One page per attempt. At most 25 cards, 32 KiB serialized UTF-8 per delivery and 128 KiB per batch. An oversized, malformed, partial-layout or overflowing batch produces zero callbacks. |
+| Retry budget | At most three page attempts per start. Starts on one connector are coalesced. Requests are spaced at least 1 second apart. A disconnect, HTTP 429 or 5xx uses full jitter in a 2/4/8 second exponential window. A later Retry-After (seconds or HTTP date) takes precedence. A wait over 10 seconds returns RATE_LIMITED and the same connector retains the cooldown. Other HTTP errors end the run. These are local limits, not a provider quota. |
+| Delivery and stop | One callback at a time. The handler can bind a source parser, verified scope and #8 transaction. Only its committed CREATED or DUPLICATE receipt increments accepted. An unavailable result or interrupted callback retries the identical envelope up to twice after 1 and 2 seconds. A conflict or invalid result ends the run. Stop cancels browser work and waits for an outstanding acceptance call. Unaccepted rows have no durable checkpoint. A subsequent start opens a fresh selected-aircraft window. |
+| Health | DISCONNECTED between windows, DEGRADED during retry, HEALTHY while delivering a validated window. Last receipt time is the local retrieval clock. Coverage stays UNKNOWN. No timestamps are inferred for the aircraft message. |
+
+Run `npm run test:messages` or `npm run test:browser` for synthetic rendered-browser checks. The backend suite exercises the fake provider, rate budget and cancellation. `npm run test:postgres:local` includes a synthetic delivery replay through the connector and #8 transaction.
 
 The adsb.lol public API is a separate candidate for **positions**, not messages.
 Its position source selection, ODbL obligations, quotas, and endpoint contract
@@ -16,11 +28,9 @@ must be recorded in a separate Stage 4 decision before implementation. Sending
 contributor data to its ACARS/VDL2/HFDL endpoints is not an API for reading
 messages back.
 
-Until a source is authorized, synthetic fixtures may exercise only the
-provider-neutral contract. They must not be labeled as provider examples or
-used to claim live ingestion.
+Synthetic fixtures exercise the transport and provider-neutral contract. They contain fabricated data and provide no evidence of live ingestion.
 
-Stage 3 starts with provider-neutral contracts. These types do not connect to a provider, establish data rights, or authorize publication. Provider transport and normalization belong in later issues after a source and its permitted uses have been verified.
+Stage 3 starts with provider-neutral contracts. These types do not connect to a provider, establish data rights, or authorize publication. Provider normalization and live operation require further source evidence.
 
 ## Schema v1
 

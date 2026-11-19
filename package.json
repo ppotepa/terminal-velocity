@@ -24,7 +24,8 @@
     "test:integration": "node scripts/postgres/run-integration.mjs",
     "test:postgres:local": "node scripts/postgres/run-local.mjs",
     "messages": "node scripts/messages/cli.mjs",
-    "test:messages": "node --test scripts/messages/*.test.mjs"
+    "test:messages": "node --test scripts/messages/*.test.mjs",
+    "test:browser": "node --test scripts/messages/*.test.mjs"
   },
   "devDependencies": {
     "@types/node": "24.0.0",
