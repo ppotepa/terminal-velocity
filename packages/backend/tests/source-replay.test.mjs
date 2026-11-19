@@ -162,3 +162,31 @@ test('reader layout drift records successful fetch and failed parse; authorizati
   const failed = await g.run(); assert.equal(failed.lastError, 'TRANSIENT_FAILURE');
   assert.equal(g.calls(), 0); assert.equal(JSON.stringify(failed).includes('confidential'), false);
 });
+
+for (const [name, policy, delay] of [
+  ['exhausted attempts', { maxAttempts: 1 }, 4000],
+  ['delay above automatic policy', { maxRetryMs: 2000 }, 7000],
+]) test(`quarantined 429 preserves response deadline through review: ${name}`, async () => {
+  const f = fixture(); Object.assign(f.deps.policy, policy);
+  f.deps.reader.read = async () => { f.time(15000); return { ok: false,
+    error: { code: 'RETRY_AFTER', status: 429, retryAfterMs: delay } }; };
+  const c = await f.run();
+  assert.equal(c.state, 'QUARANTINED'); assert.equal(c.nextAttemptAt, 15000 + delay);
+  await reviewSourceQuarantine(f.deps.store, request, 'window', 'RETRY_SAME_PAGE', async () => true);
+  f.time(15000 + delay - 1);
+  const restart = { ...f.deps, reader: { read: async () => assert.fail('Provider deadline must survive review') } };
+  assert.equal((await replaySourceRange(request, restart)).requests, 0);
+  f.time(15000 + delay);
+  restart.reader.read = async () => ok({ records: [], bytes: 2, nextCursor: null });
+  assert.equal((await replaySourceRange(request, restart)).state, 'COMPLETE');
+});
+
+test('operator fixture uses normalized provider records with actual observation time and rejects nonfixture scope', async () => {
+  const { syntheticReplay } = await import('../../../scripts/source/synthetic-replay.mjs');
+  const deps = syntheticReplay({}, request, () => 10000);
+  const page = await deps.reader.read({ cursor: null, maxRecords: 1, signal: new AbortController().signal });
+  assert.deepEqual(deps.delivery.observedAt(page.value.records[0]), { ok: true, value: 1000 });
+  assert.deepEqual(deps.delivery.observedAt({ ...page.value.records[0], sourceObservedAt: undefined }),
+    { ok: false, error: 'MALFORMED_PAYLOAD' });
+  assert.throws(() => syntheticReplay({}, { ...request, mode: 'PERMITTED' }), /synthetic/);
+});

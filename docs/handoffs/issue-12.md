@@ -127,3 +127,70 @@ The reader adapter must honor cancellation and enforce allocation bounds during
 fetch; a stalled adapter that ignores AbortSignal cannot be made bounded by a
 Promise race. Counts reflect saved acknowledgments rather than a global unique
 message count, and partial retries can exhaust the bounded budget until reviewed.
+
+## Coordinator review fixes — November 19, 2026, 21:32 UTC
+
+Status remains IN PROGRESS; coordinator owns the issue body, PR, exact-SHA CI and
+merge. This update supersedes the metadata-only composition described above.
+Reviewed starting HEAD `2a9c2912a9a84a6f233a1023f7c52cc2fec23171`; the checkout
+remains on `feature/epic4-issue-12`. No branch changes or commits were made.
+The coordinator supplied passing exact-SHA baseline evidence (81 PostgreSQL
+cases); that evidence does not verify this working-tree revision.
+
+Review changes:
+
+- Added `createPermittedReplayDelivery`: normalization and explicit scoped
+  retention permission feed the existing `createPermittedProviderPipeline`.
+  The synthetic operator fixture now retains only repository-authored synthetic
+  inputs and runs the existing bounded message-import/correlation/private
+  availability workers. The metadata-only adapter remains available separately.
+- Extended the operator integration test to invoke the actual command twice,
+  waiting for its persisted cooldown, and assert retained input, permission,
+  message revision, correlation revision, private contribution and old observed
+  time. Independent-pool restart and lost-checkpoint-ACK tests also verify
+  downstream effects. Private status remains NONE for old backfill.
+- Persisted valid provider Retry-After deadlines independently of automatic retry
+  eligibility. Changing-clock unit and SQL cases cover exhausted attempts and a
+  delay exceeding the automatic policy, including quarantine, restart, review,
+  no fetch before the deadline and recovery at the deadline.
+- Added a two-record durable partial-page case with delivery limit 2. The first
+  receipt commits, the second fails, and restart encounters a full page larger
+  than the remaining allowance. It quarantines without skipping the second
+  record; explicit review replenishes the bounded budget, deduplicates the first
+  record and imports the second. Assertions cover downstream effects as well.
+- Added retention-scope rejection and explicit nonfixture-scope rejection tests.
+  Database tests use the existing isolated fixture reset helper, preventing
+  unrelated test messages from affecting private freshness assertions.
+
+All commands used Node 24.22.3 via
+`PATH="$PWD/tmp/node24/package/bin:$PATH"`. Logs are in ignored
+`tmp/issue12-review-*.log`.
+
+| Exact command | Observed result for review revision |
+|---|---|
+| `npm ci --offline --no-audit --no-fund --cache "$PWD/tmp/npm-cache"` | PASS, 21 packages after copying available dependency cache into the checkout; initial empty-cache attempt failed with ENOTCACHED |
+| `npm run check` | FAIL overall: type checks PASS; boundaries PASS (216 files, 774 dependencies); architecture 1/1 file and backend 15/15 files PASS; API 2/6 files PASS, 4 fail |
+| `node --test --test-isolation=none packages/backend/tests/*.test.mjs` | PASS 142/142, zero skipped, including 14 replay cases |
+| `npm run test:messages` | PASS 3/3 files |
+| `npm run demo` | PASS |
+| `npm run test:postgres:local` | BLOCKED before tests: initdb requires an unprivileged user; no SQL success claimed for these changes |
+| `npm run smoke` | FAIL: loopback listen EPERM |
+| `npm run test:browser` | FAIL 2/2 files; direct diagnostics show Chromium sandbox shutdown denied and loopback listen EPERM |
+| `node --test --test-isolation=none scripts/messages/airframes-live.test.mjs scripts/messages/on-demand.test.mjs` | 1 pass / 25 fail / 0 skipped under those restrictions |
+| `node --test --test-isolation=none apps/api/tests/*.test.mjs` | 4 pass / 26 fail / 0 skipped; denied loopback listeners and child readiness failures |
+| `node --check packages/backend/tests/integration/source-replay.test.mjs` | PASS syntax only |
+| `git diff --check` | PASS |
+
+The expanded 11-case PostgreSQL replay file is discovered by the existing root
+integration runners; unit cases run through `npm run check`. Coordinator must run
+its unprivileged isolated CI against the final revision before marking the
+engineering acceptance items verified. No migration changes are needed; stop
+replay invocations for rollback and retain migration 006/checkpoint history.
+An old metadata-only fixture receipt cannot be silently upgraded to retained
+content: identity conflicts remain conflicts. For testing the revised fixture
+from scratch, choose a distinct explicit synthetic epoch in the isolated database.
+
+The on-demand Airframes reader and browser entry points were not edited. No real
+content, historical provider API, external acceptance or deployment is claimed.
+Approved rights, an actual provider cursor contract and private live acceptance
+remain external gates for #13; this handoff does not advance the issue queue.

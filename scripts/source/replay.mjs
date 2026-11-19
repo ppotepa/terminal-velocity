@@ -11,7 +11,10 @@ try {
   pool = new Pool({ connectionString: localDatabaseUrl(process.env.DATABASE_URL), max: 3, connectionTimeoutMillis: 3000 });
   const store = postgresSourceReplayStore(pool), deps = syntheticReplay(pool, request);
   if (resolution) await reviewSourceQuarantine(store, scope, request.checkpoint, resolution, deps.authorized);
-  else await replaySourceRange(request, { ...deps, store });
+  else {
+    await replaySourceRange(request, { ...deps, store });
+    await deps.pipeline.drain();
+  }
   console.log(JSON.stringify(await inspectSourceReplay(store, scope, Date.now())));
 } catch {
   console.error('SOURCE_REPLAY_FAILED: check local scope, checkpoint, permission and database availability.');

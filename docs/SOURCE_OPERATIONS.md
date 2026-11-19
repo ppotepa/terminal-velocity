@@ -11,9 +11,18 @@ real content, or grants collection, retention, or publication rights.
 `replaySourceRange` is exported by the source-connectors public boundary. Supply a
 configured reader, current collection authorization, durable receipt adapter,
 source coverage, clock and PostgreSQL replay store. The supplied
-`createObservationReplayDelivery` composition uses the existing atomic metadata
-acceptance/outbox transaction. It excludes decoded text and RF content from SQL.
-The CLI configures only the explicit synthetic fixture reader. A future approved
+`createPermittedReplayDelivery` composition normalizes provider records and checks
+scope-specific retention permission before calling `createPermittedProviderPipeline`.
+The existing transaction retains the permitted canonical input and source outbox;
+the pipeline imports message facts, correlates aircraft and projects private
+availability through its inbox/ACK transactions. Replay completion means durable
+receipt, not completion of downstream workers. The CLI runs one bounded pipeline
+drain after replay (including an already COMPLETE checkpoint), so interrupted
+imports can recover on another invocation. Inspect downstream delivery quarantine
+using the provider pipeline runbook if an import cannot complete. The separate
+`createObservationReplayDelivery` remains available for metadata-only acceptance.
+The CLI configures only the explicit synthetic fixture reader and a repository
+fixture-only retention grant; it cannot grant retention for real records. A future approved
 provider reader must enforce byte/record limits while reading, honor AbortSignal,
 and implement the provider's actual cursor contract. This is not an implemented
 Airframes historical pagination API.
@@ -41,7 +50,9 @@ receipts recorded in the checkpoint, not a unique-source completeness estimate;
 a crash before saving an acknowledgment can later report that receipt as duplicate.
 
 Retry-After is measured from response receipt, never request start. The scheduled
-retry is no earlier than the durable reservation and provider delay. Backoff is
+retry is no earlier than the durable reservation and provider delay. The provider
+deadline persists even when attempts are exhausted or the delay exceeds the
+automatic retry policy; quarantine, restart and manual review cannot shorten it. Backoff is
 deterministic exponential; no jitter shortens that delay. A new completed-range
 checkpoint preserves source cooldown and health. Incomplete/quarantined ranges
 cannot be silently replaced. Epoch changes require an explicit operator decision;
@@ -65,8 +76,11 @@ npm run source:inspect -- --source src_synthetic --provider synthetic \
 ```
 
 Run the same replay command after `nextAttemptAt` to resume its overlapping second
-fixture page. This produces one metadata delivery, one source event and a duplicate
-receipt. Repeating a COMPLETE checkpoint does no work. A different named range is
+fixture page. This produces one source delivery, retained synthetic input, message
+revision, correlation decision and private contribution, plus a duplicate receipt.
+The old observation timestamp remains unchanged in the message and contribution;
+a current private status read does not classify the old fixture as fresh.
+Repeating a COMPLETE checkpoint does no source acquisition. A different named range is
 accepted only after completion of the previous range.
 
 Inspection returns digested source/checkpoint IDs, bounded range, mode, counters,

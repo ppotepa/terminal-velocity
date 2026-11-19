@@ -168,7 +168,10 @@ The canonical checkout adds scoped replay checkpoints (migration 006), determini
 retry planning, independent fetch/parse health, redacted durable quarantine and
 local synthetic administrative commands. Each source scope serializes fetches;
 reserved attempts and cooldown survive restart, and cursor advancement follows
-existing durable metadata acceptance. Overlap reuses source idempotency and
+existing durable acceptance. The explicit synthetic operator fixture now uses the
+permission-checked provider pipeline through retained inputs, message import,
+correlation and private availability. Provider cooldown survives quarantine and
+manual review even after automatic retries are exhausted. Overlap reuses source idempotency and
 preserves actual observed time. The on-demand rendered Airframes lookup is unchanged,
 real content is not retained by replay, and the API adapter remains inactive.
 

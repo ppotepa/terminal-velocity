@@ -1,13 +1,14 @@
-import test, { after } from 'node:test';
+import test, { after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { replaySourceRange, reviewSourceQuarantine } from '../../src/modules/source-connectors/public/index.ts';
+import { replaySourceRange, reviewSourceQuarantine, DEFAULT_REPLAY_POLICY } from '../../src/modules/source-connectors/public/index.ts';
 import { postgresSourceReplayStore } from '../../src/modules/source-connectors/infrastructure/postgres/source-replay-store.ts';
 import { inspectSourceReplay } from '../../src/modules/source-connectors/infrastructure/postgres/source-health-reader.ts';
 import { syntheticReplay } from '../../../../scripts/source/synthetic-replay.mjs';
-import { createTestPools, uniqueId } from './helpers/database.mjs';
+import { createTestPools, uniqueId, resetTestData } from './helpers/database.mjs';
 import { spawn } from 'node:child_process';
 
 const pools = createTestPools();
+beforeEach(() => resetTestData(pools.admin));
 after(() => pools.close());
 const request = () => ({ sourceId: 'src_synthetic', provider: 'synthetic', account: 'private-fixture',
   sourceEpoch: uniqueId('replay'), checkpoint: 'window', from: 1000, to: 2000, limit: 10, mode: 'SYNTHETIC' });
@@ -22,7 +23,7 @@ async function effects(r) {
     WHERE d.source_epoch=$1 GROUP BY d.delivery_id`, [r.sourceEpoch])).rows;
 }
 
-test('normal synthetic replay composition survives pool restart, overlaps once and retains metadata only', async () => {
+test('normal synthetic replay composition survives pool restart, overlaps once and imports retained inputs into private availability', async () => {
   const r = request(), f = setup(r);
   const first = await replaySourceRange(r, f.deps);
   assert.equal(first.applied, 1); assert.equal(first.cursor, 'synthetic-overlap');
@@ -32,6 +33,8 @@ test('normal synthetic replay composition survives pool restart, overlaps once a
     const final = await replaySourceRange(r, restart.deps);
     assert.equal(final.state, 'COMPLETE'); assert.equal(final.applied, 1); assert.equal(final.duplicate, 1);
     assert.equal(final.health.lastProviderEventAt, 1000);
+    await restart.deps.pipeline.drain();
+    await assertDownstream(r, restart.deps.pipeline);
     assert.deepEqual(await effects(r), [{ observed_at_ms: '1000', retention: 'METADATA_ONLY', events: 1 }]);
     const report = JSON.stringify(await inspectSourceReplay(restart.deps.store, r, 40000));
     assert.equal(report.includes('Synthetic replay fixture'), false);
@@ -52,6 +55,7 @@ test('receipt committed before crash is recovered through duplicate acceptance w
   f.deps.store = store; f.time(30000);
   const recovered = await replaySourceRange(r, f.deps);
   assert.equal(recovered.duplicate, 1); assert.equal((await effects(r))[0].events, 1);
+  await f.deps.pipeline.drain(); await assertDownstream(r, f.deps.pipeline);
 });
 
 test('source lock excludes concurrent ranges and is released after a failed operation', async () => {
@@ -109,8 +113,18 @@ test('local operator commands exercise real receipt composition and reject unsaf
   const scope = ['--source', r.sourceId, '--provider', r.provider, '--account', r.account, '--epoch', r.sourceEpoch];
   const run = await cli('replay', [...scope, '--fixture', '--checkpoint', 'window', '--from', '1000', '--to', '2000', '--limit', '10']);
   assert.equal(run.code, 0, run.err); assert.equal(JSON.parse(run.out).applied, 1);
+  const pipeline = syntheticReplay(pools.runtime, r).pipeline;
+  await assertDownstream(r, pipeline);
+  // Restart the real command after its persisted source cooldown, then overlap.
+  const checkpoint = await postgresSourceReplayStore(pools.runtime).exclusive(r, s => s.read());
+  await new Promise(resolve => setTimeout(resolve, Math.max(0, checkpoint.nextAttemptAt - Date.now())));
+  const overlap = await cli('replay', [...scope, '--fixture', '--checkpoint', 'window', '--from', '1000', '--to', '2000', '--limit', '10']);
+  assert.equal(overlap.code, 0, overlap.err);
+  assert.equal(JSON.parse(overlap.out).duplicate, 1);
+  assert.equal(JSON.parse(overlap.out).state, 'COMPLETE');
+  await assertDownstream(r, pipeline);
   const inspect = await cli('inspect-quarantine', scope);
-  assert.equal(inspect.code, 0, inspect.err); assert.equal(JSON.parse(inspect.out).cursorPresent, true);
+  assert.equal(inspect.code, 0, inspect.err); assert.equal(JSON.parse(inspect.out).cursorPresent, false);
   assert.equal(inspect.out.includes(r.sourceEpoch), false);
   const rejected = await cli('replay', [...scope, '--delete-all']);
   assert.equal(rejected.code, 1); assert.match(rejected.err, /SOURCE_REPLAY_FAILED/);
@@ -121,7 +135,7 @@ test('poison observation is durably quarantined before any receipt and corrected
   const r = request(), f = setup(r), validReader = f.deps.reader;
   f.deps.reader = { async read(input) {
     const result = await validReader.read(input);
-    result.value.records[0].observedAt = null;
+    result.value.records[0].sourceObservedAt = null;
     return result;
   } };
   const c = await replaySourceRange(r, f.deps);
@@ -135,4 +149,96 @@ test('poison observation is durably quarantined before any receipt and corrected
     assert.equal((await replaySourceRange(r, g.deps)).applied, 1);
     assert.equal((await effects(r)).length, 1);
   } finally { await other.close(); }
+});
+
+async function assertDownstream(r, pipeline, expected = 1) {
+  const rows = (await pools.runtime.query(`SELECT i.permission, m.canonical, c.aircraft_id,
+    c.observed_at_ms, c.decision_revision
+    FROM source_ingestion.deliveries d
+    JOIN source_ingestion.retained_inputs i USING (delivery_id)
+    JOIN source_ingestion.message_revisions m ON m.source_delivery_id=d.delivery_id
+    JOIN correlation.aircraft_link_revisions a ON a.message_id=m.message_id AND a.revision=1
+    JOIN source_ingestion.private_contributions c ON c.message_id=m.message_id
+    WHERE d.source_epoch=$1`, [r.sourceEpoch])).rows;
+  assert.equal(rows.length, expected);
+  for (const row of rows) {
+    assert.equal(row.permission.evidenceReference, 'repository-synthetic-fixtures-only');
+    assert.equal(row.canonical.observation.decodedText, 'Synthetic replay fixture');
+    assert.equal(row.canonical.observation.observedAt.at, 1000);
+    assert.equal(row.observed_at_ms, '1000');
+    assert.equal(row.aircraft_id, 'ac_demo-001');
+    assert.equal(row.decision_revision, '1');
+  }
+  // A later read clock must not turn historical observations into fresh status.
+  const later = syntheticReplay(pools.runtime, r, () => 86_400_000).pipeline;
+  assert.equal((await later.readPrivateStatus('ac_demo-001')).freshness, 'NONE');
+  assert.ok((await pipeline.readPrivateStatus('ac_demo-001')).contributions.length >= expected);
+}
+
+for (const [maxAttempts, maxRetryMs, delay] of [[1, 60000, 4000], [5, 2000, 7000]])
+  test(`quarantined provider deadline survives PostgreSQL restart and review (${maxAttempts}/${maxRetryMs})`, async () => {
+    const r = request(), f = setup(r);
+    f.deps.policy = { ...DEFAULT_REPLAY_POLICY, requestTimeoutMs: 1000, maxAttempts, maxRetryMs };
+    f.deps.reader.read = async () => { f.time(15000); return { ok: false,
+      error: { code: 'RETRY_AFTER', status: 429, retryAfterMs: delay } }; };
+    const c = await replaySourceRange(r, f.deps);
+    assert.equal(c.state, 'QUARANTINED'); assert.equal(c.nextAttemptAt, 15000 + delay);
+    const other = createTestPools();
+    try {
+      const g = setup(r, other.runtime); g.time(15000 + delay - 1);
+      await reviewSourceQuarantine(g.deps.store, r, 'window', 'RETRY_SAME_PAGE', g.deps.authorized);
+      const reader = g.deps.reader;
+      g.deps.reader = { read: async () => assert.fail('Cooldown must prevent fetch after review') };
+      assert.equal((await replaySourceRange(r, g.deps)).requests, 0);
+      g.time(15000 + delay); g.deps.reader = reader;
+      assert.equal((await replaySourceRange(r, g.deps)).applied, 1);
+    } finally { await other.close(); }
+  });
+
+test('partial two-record page exhausts small budget safely then recovers after explicit review', async () => {
+  const r = { ...request(), limit: 2 }, f = setup(r);
+  const pageReader = deps => {
+    const reader = deps.reader;
+    return { async read(input) {
+      const result = await reader.read(input), first = result.value.records[0];
+      return { ok: true, value: { records: [first, { ...first,
+        originalSourceId: first.originalSourceId + '-two', deliveryId: first.deliveryId + '-two' }],
+        bytes: 2000, nextCursor: null } };
+    } };
+  };
+  f.deps.reader = pageReader(f.deps);
+  const accept = f.deps.delivery.accept; let receipts = 0;
+  f.deps.delivery.accept = async raw => ++receipts === 2
+    ? { ok: false, error: { code: 'TRANSIENT_FAILURE' } } : accept(raw);
+  const partial = await replaySourceRange(r, f.deps);
+  assert.equal(partial.processed, 1); assert.equal(partial.cursor, null);
+  assert.equal((await effects(r)).length, 1);
+  const other = createTestPools();
+  try {
+    const g = setup(r, other.runtime); g.time(30000); g.deps.reader = pageReader(g.deps);
+    // The full retried page exceeds the remaining allowance: no record is skipped.
+    const exhausted = await replaySourceRange(r, g.deps);
+    assert.equal(exhausted.state, 'QUARANTINED'); assert.equal(exhausted.cursor, null);
+    assert.equal(exhausted.processed, 1); assert.equal((await effects(r)).length, 1);
+    await reviewSourceQuarantine(g.deps.store, r, 'window', 'RETRY_SAME_PAGE', g.deps.authorized);
+    g.time(50000);
+    const final = await replaySourceRange(r, g.deps);
+    assert.equal(final.state, 'COMPLETE'); assert.equal(final.applied, 2); assert.equal(final.duplicate, 1);
+    await g.deps.pipeline.drain(); await assertDownstream(r, g.deps.pipeline, 2);
+  } finally { await other.close(); }
+});
+
+test('permitted replay rejects mismatched retention scope before durable receipt', async () => {
+  const r = request(), f = setup(r), reader = f.deps.reader;
+  // Fixture grants cannot be repurposed as real-provider collection permissions.
+  assert.throws(() => syntheticReplay(pools.runtime, { ...r, provider: 'airframes' }), /synthetic/);
+  const { createPermittedReplayDelivery } = await import('../../src/modules/source-connectors/composition/create-permitted-replay-delivery.ts');
+  const { scope, context, origin } = await import('./helpers/provider-fixture.mjs');
+  const { delivery } = createPermittedReplayDelivery(pools.runtime, { find: async () => assert.fail('No correlation allowed') },
+    { ...scope, sourceEpoch: 'wrong', retentionAllowed: true, purpose: 'PRIVATE_PROCESSING',
+      evidenceReference: 'repository-synthetic-fixtures-only' }, { ...scope, sourceEpoch: r.sourceEpoch },
+    raw => ({ ...context(raw), sourceEpoch: r.sourceEpoch }), () => origin);
+  const page = await reader.read({ cursor: null, maxRecords: 2, signal: new AbortController().signal });
+  assert.deepEqual(await delivery.accept(page.value.records[0]), { ok: false, error: { code: 'RIGHTS_REVOKED' } });
+  assert.deepEqual(await effects(r), []);
 });

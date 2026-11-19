@@ -45,6 +45,13 @@ export async function replaySourceRange<Raw>(request: ReplayRequest, deps: Repla
       c.health[phase] = failure.code;
       c.health.connectionState = 'DEGRADED';
       c.attempts += 1;
+      // Provider cooldown is independent of our automatic retry budget. Review and
+      // restart must not turn a quarantined 429 into an early provider request.
+      if (typeof failure.retryAfterMs === 'number' && Number.isFinite(failure.retryAfterMs)
+        && failure.retryAfterMs >= 0) {
+        const deadline = Math.min(Number.MAX_SAFE_INTEGER, receivedAt + Math.ceil(failure.retryAfterMs));
+        c.nextAttemptAt = Math.max(c.nextAttemptAt, deadline);
+      }
       const retry = planSourceRetry(failure, c.attempts, policy);
       if (retry.kind === 'RETRY') c.nextAttemptAt = Math.max(c.nextAttemptAt, receivedAt + retry.delayMs);
       else quarantineSourceDelivery(c, failure.code);
