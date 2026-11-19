@@ -1,6 +1,10 @@
 # Issue #10 — normalization handoff
 
 ## Status / execution log
+- 2026-11-19 19:24 UTC — IN PROGRESS for coordinator CI feedback on 9668ba1;
+  owner implementation agent, branch feature/epic4-issue-10, prerequisite #9
+  unchanged. Scope: baseline migration test teardown, deterministic lifecycle
+  regressions and verification evidence. External acceptance remains blocked.
 - Status: BLOCKED for external acceptance and coordinator verification; local engineering prepared.
 - Owner: implementation agent assigned by coordinator.
 - Branch: feature/epic4-issue-10; baseline 4761d31 (merge PR #60 for #9).
@@ -147,3 +151,46 @@ explicit decoder failures and blocked real sample. The coordinator owns all
 GitHub status transitions, branch integration, CI evidence, PR/merge links and
 EPIC updates. This agent made no GitHub writes, commits, pushes or external
 messages and did not advance the queue.
+
+### PostgreSQL CI feedback correction — 2026-11-19 19:24 UTC
+
+Coordinator evidence for **9668ba172bdf497d41e261ba0f18d91a0e350c4f**:
+`npm run check` passed 28 architecture, 106 backend and 30 API tests.
+PostgreSQL passed 52/53 tests, with the baseline upgrade test reporting
+`terminating connection due to administrator command`. That run stopped before
+browser verification; it does not establish a complete CI pass.
+
+Inspection of the installed `pg-pool` implementation identifies a teardown race:
+`pool.end()` can resolve after removing clients from its list but before their
+`end` events. The baseline test then calls its disposable database's forced drop,
+which can terminate a still-closing client. The test now registers disconnect
+promises before its first connection and awaits all of them before database
+cleanup. It keeps the migration, checksum and preserved-record assertions intact.
+Unexpected pool errors are not suppressed. Two deterministic tests cover delayed
+and already-ended clients, an unused pool, and propagation of shutdown errors;
+they run through the existing root `check` command. This removes the identified
+race; confirmation that it resolves the reported PostgreSQL failure still needs
+the coordinator's unprivileged integration run.
+
+Local verification used Node 24.22.3 via `PATH="$PWD/tmp/node24/bin:$PATH"`:
+
+| Command | Actual result |
+|---|---|
+| `npm ci --offline --no-audit --no-fund` | PASS, 21 packages; sandbox fchown warnings |
+| `npm run check` | FAIL at API suite: 2/6 files pass, 4 fail. Typecheck, boundaries (193 files/663 dependencies), architecture file and all 11 backend test files pass |
+| `node --test --test-isolation=none packages/backend/tests/*.test.mjs scripts/architecture/*.test.mjs scripts/messages/page-budget.test.mjs` | PASS, 148 tests, zero failures/skips |
+| `node packages/backend/tests/postgres-pool-lifecycle.test.mjs` | PASS, 2 tests, zero failures/skips |
+| `npm run test:messages` | PASS, 3/3 files |
+| `npm run test:postgres:local` | BLOCKED before tests: initdb requires an unprivileged user |
+| `npm run test:browser` | FAIL, 0/2 files pass |
+| `node scripts/messages/airframes-live.test.mjs` | FAIL; Chromium startup reports `shutdown: Operation not permitted` |
+| `npm run demo` | PASS |
+| `npm run smoke` | FAIL: listen EPERM on 127.0.0.1 |
+| `git diff --check` | PASS |
+
+No production code, SQL, migrations, rights checks, real crawl path or retention
+behavior changed in this correction. No assertions were weakened. All earlier
+external sample/rights and merge gates remain open. Coordinator: commit this
+patch and rerun the full exact-SHA sequence, including PostgreSQL and browser
+E2E; record actual results before review/merge. No GitHub writes or branch
+integration were performed by this agent.

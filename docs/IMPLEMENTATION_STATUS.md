@@ -113,6 +113,11 @@ fixtures and a browser-to-normalizer regression are included in existing root
 verification entry points. No SQL, demo API, source rights or retention policy
 changed. The provider API remains inactive.
 
+The baseline upgrade integration test now waits for PostgreSQL client disconnects
+before removing its disposable database. Deterministic lifecycle regressions run
+in `npm run check`; the coordinator must verify the database teardown correction
+in the unprivileged exact-SHA integration runner.
+
 This is not a verified real Airframes format: optional markup and all records are
 fabricated fixtures. Permitted real-sample acceptance is blocked under ADR 0001.
 See [the issue #10 handoff](handoffs/issue-10.md) for exact local checks, environment
