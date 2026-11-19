@@ -1,6 +1,7 @@
 # Issue #11 local execution and handoff
 
 Status: IN PROGRESS (local record; coordinator owns the GitHub issue).
+Review P1 started: 2026-11-19 20:36 UTC. Owner: implementation agent; branch `feature/epic4-issue-11`; #10 DONE per coordinator and merged PR #61 in history. Plan: explicit rendered-delivery bridge in permitted composition, PostgreSQL success/rejection/replay coverage, pipeline documentation. No GitHub writes; external provider rights remain blocked pending owner approval.
 Review revision started: 2026-11-19 20:27 UTC, same owner/branch and #10 prerequisite.
 Plan: add explicit scoped retention permission and normal provider composition, migration 005 preserving existing lineage, provenance conflict and mixed fanout regressions. External rights remain blocked; no GitHub writes authorized.
 Owner: implementation agent for the Terminal Velocity coordinator.
@@ -173,3 +174,58 @@ migration 005 or new tests. Migration/rollback and lineage query are documented 
 External acceptance remains unchecked: owner must establish retention/use rights
 and supply approved private payload/permission evidence before live verification.
 Merged PR/checks remain coordinator-owned and unchecked. No later issue started.
+
+## P1 rendered-delivery bridge revision — 2026-11-19 20:40 UTC
+
+Local status: implementation ready for coordinator review; fresh PostgreSQL and
+full CI verification remain pending. No GitHub status/merge/closure is claimed.
+
+- Added `createPermittedProviderPipeline(...).acceptRendered(delivery, context,
+  scope)`. It invokes the existing rendered normalizer and shares the extracted
+  record path's permission check and acceptance transaction. It derives digest,
+  page URL, extractor version and retrieval/ingestion provenance internally.
+- Replaced the integration test's manual normalizer/SQL assembly with the actual
+  permitted entry point from an injected synthetic connector callback. Assertions
+  cover private MATCHED correlation/status, immutable message/status lineage,
+  worker reconstruction, later-clock acceptance replay, single effects and empty
+  demo tables. Added PostgreSQL rejection coverage for page/identifier/time,
+  verified scope and retention permission with no retained effects.
+- Added three database-independent regressions for the bridge: valid normalization
+  reaching unavailable storage without false ACK; permission/scope rejection
+  before SQL; invalid rendered evidence rejection. Root `check` discovers them.
+  The integration runner discovers the updated suite (18 tests in that file).
+- No migrations, CLI changes, API activation, real content capture or new rights
+  grants. Existing migration 004/005 upgrade and rollback limitations still apply.
+
+### Fresh local verification of this revision
+
+All commands used `PATH="$PWD/tmp/node24/bin:$PATH"` (existing Node 24.22.3,
+npm 9.2.0). Logs are in ignored `tmp/issue11-p1-*.log` in this worktree.
+
+| Command | Actual result |
+|---|---|
+| `npm ci --offline --no-audit --no-fund` | PASS, 21 packages; sandbox fchown warnings |
+| `npm run check` | FAIL overall: typechecks PASS; boundaries PASS (204 files / 736 edges); architecture 1/1 test files PASS; backend 14/14 files PASS; API 2/6 files PASS, 4 FAIL |
+| `node --test --test-isolation=none packages/backend/tests/*.test.mjs scripts/architecture/*.test.mjs` | PASS, 156 tests, 0 failures, including all 3 new bridge tests |
+| `npm run test:messages` | PASS, 3/3 files |
+| `node --test --test-isolation=none scripts/messages/page-budget.test.mjs packages/backend/tests/airframes-transport.test.mjs packages/backend/tests/source-normalization.test.mjs` | PASS, 41 tests |
+| `npm run test:postgres:local` | FAIL at setup: initdb requires an unprivileged user; 0 database tests executed |
+| `npm run test:browser` | FAIL, 0/2 files pass |
+| `node --test --test-isolation=none scripts/messages/airframes-live.test.mjs scripts/messages/on-demand.test.mjs` | FAIL, 1/26 tests pass, 25 fail; Chromium sandbox operation not permitted and fixture listener restrictions |
+| `node --test --test-isolation=none apps/api/tests/*.test.mjs` | FAIL, 4/30 tests pass, 26 fail; loopback listen EPERM / children exit before readiness |
+| `npm run demo` | PASS, synthetic demonstration completed |
+| `npm run smoke` | FAIL, loopback listen EPERM |
+| `git diff --check` | PASS |
+
+The initial typecheck found a raw number where branded `EpochMillis` was required;
+the bridge now uses the normalizer's validated retrieval timestamp. Initial unit
+fixtures omitted required timestamp uncertainty; corrected the synthetic evidence,
+without weakening assertions, before the passing run above.
+
+The coordinator's supplied earlier exact-SHA CI result is historical evidence for
+`cb327dd`, not verification of this revision. Required next verification is the
+coordinator's isolated unprivileged CI on the revised SHA, especially real
+PostgreSQL rendered acceptance/replay. No host changes or privilege workarounds
+were attempted. Actual provider retention/use rights and approved-payload
+acceptance remain BLOCKED externally until the owner supplies confirmed rights
+and an approved private payload. Synthetic fixtures do not satisfy that gate.

@@ -271,35 +271,82 @@ test('private projection rolls back on failure, replays once and preserves corre
   assert.equal(replay.result.sourceDeliveryId, imported.sourceDeliveryId);
 });
 
-test('injected rendered page reader feeds accepted source events into private correlation without a provider API', async () => {
-  const { randomUUID } = await import('node:crypto');
+const renderedPermission = { ...scope, retentionAllowed: true, purpose: 'PRIVATE_PROCESSING',
+  evidenceReference: 'repository-synthetic-fixtures-only' };
+const renderedContext = at => ({ ...scope,
+  ingestedAt: { at: new Date(at).toISOString(), basis: 'INGESTED', precision: 'MILLISECOND', uncertaintyMs: 0 } });
+function renderedDelivery(retrievedAt = NOW) {
+  const raw = fixture();
+  return { source: 'https://app.airframes.io/messages/live', retrievedAt,
+    raw: { icao: 'D00001', text: raw.text, station: null, messagePath: '/messages/' + raw.originalSourceId,
+      evidence: { sourceObservedAt: raw.sourceObservedAt.at, receiverReceivedAt: raw.receiverReceivedAt.at,
+        providerPublishedAt: raw.providerPublishedAt.at, uncertaintyMs: '500', registration: 'DEMO-001', bearer: 'VDL2' } } };
+}
+
+test('permitted rendered entry point preserves private lineage across restart and later-clock replay', async () => {
+  const { createPermittedProviderPipeline } = await import('../../src/modules/source-connectors/composition/create-permitted-provider-pipeline.ts');
   const { createProviderConnector } = await import('../../src/modules/source-connectors/composition/create-provider-connector.ts');
-  const { normalizeRenderedDelivery } = await import('../../src/modules/source-connectors/infrastructure/airframes/normalize-rendered-delivery.ts');
-  const raw = fixture(), p = pipeline();
-  const source = 'https://app.airframes.io/messages/live';
-  const card = { icao: 'D00001', text: raw.text, station: null, messagePath: '/messages/' + raw.originalSourceId,
-    evidence: { sourceObservedAt: raw.sourceObservedAt.at, receiverReceivedAt: raw.receiverReceivedAt.at,
-      providerPublishedAt: raw.providerPublishedAt.at, uncertaintyMs: '500', registration: 'DEMO-001', bearer: 'VDL2' } };
-  const connector = createProviderConnector('crawl', card.icao, { kind: 'SYNTHETIC_PAGE', read: async () => ({ status: 200,
-    body: { status: 'OBSERVED', source, icao: card.icao, messages: [card] } }) });
-  let receipt;
-  const outcome = await connector.start(async delivery => {
-    const ingestedAt = Date.now();
-    const canonical = normalizeRenderedDelivery(delivery, { ...scope,
-      ingestedAt: { at: new Date(ingestedAt).toISOString(), basis: 'INGESTED', precision: 'MILLISECOND', uncertaintyMs: 0 } }, scope.capabilities);
-    assert.ok(canonical.ok, JSON.stringify(canonical));
-    receipt = await acceptSourceDelivery(scope,
-      postgresSourceAcceptanceTransaction(pools.runtime, randomUUID, { canonical: canonical.value, permission: { ...scope, retentionAllowed: true, purpose: 'PRIVATE_PROCESSING', evidenceReference: 'repository-synthetic-fixtures-only' } }), canonical.value.observation,
-      { pageUrl: delivery.source, parserVersion: 'airframes-rendered-extractor-v1', retrievedAt: delivery.retrievedAt, ingestedAt });
+  const delivery = renderedDelivery();
+  const p = createPermittedProviderPipeline(pools.runtime, directory, renderedPermission, () => NOW);
+  const connector = createProviderConnector('crawl', delivery.raw.icao, { kind: 'SYNTHETIC_PAGE', read: async () => ({ status: 200,
+    body: { status: 'OBSERVED', source: delivery.source, icao: delivery.raw.icao, messages: [delivery.raw] } }) });
+  let receipt, acceptedDelivery, ingestedAt;
+  const outcome = await connector.start(async delivered => {
+    acceptedDelivery = delivered;
+    ingestedAt = Date.now();
+    receipt = await p.acceptRendered(delivered, renderedContext(ingestedAt), scope);
     return receipt;
   });
   assert.equal(outcome, 'COMPLETE'); assert.equal(receipt.value.outcome, 'CREATED');
   assert.equal(connector.health().accepted, 1);
-  await p.drain();
-  const status = await p.readPrivateStatus('ac_demo-001');
+  assert.equal(await count('source_ingestion.message_revisions'), 0);
+  const restarted = createPermittedProviderPipeline(pools.runtime, directory, renderedPermission, () => NOW);
+  await restarted.drain();
+  const status = await restarted.readPrivateStatus('ac_demo-001');
   assert.equal(status.freshness, 'RECENT');
+  assert.equal(status.contributions.length, 1);
   assert.equal(status.contributions[0].source_delivery_id, receipt.value.deliveryId);
-  assert.equal((await messages()).rows[0].canonical.provenance.originalSourceId, card.messagePath);
+  assert.deepEqual(status.contributions[0].provenance,
+    { pageUrl: delivery.source, parserVersion: 'airframes-rendered-extractor-v1' });
+  const stored = (await messages()).rows[0];
+  assert.equal(stored.canonical.provenance.originalSourceId, delivery.raw.messagePath);
+  assert.equal(stored.canonical.provenance.retrievedAt, acceptedDelivery.retrievedAt);
+  assert.equal(stored.canonical.provenance.ingestedAt.at, ingestedAt);
+  assert.equal(stored.canonical.observation.observedAt.at, Date.parse(delivery.raw.evidence.sourceObservedAt));
+  assert.equal((await pools.admin.query('SELECT decision FROM correlation.aircraft_link_revisions')).rows[0].decision.status, 'MATCHED');
+  const replay = await restarted.acceptRendered({ ...acceptedDelivery, retrievedAt: ingestedAt + 3_600_000 },
+    renderedContext(ingestedAt + 3_600_001), scope);
+  assert.equal(replay.value.outcome, 'DUPLICATE');
+  assert.equal(replay.value.deliveryId, receipt.value.deliveryId);
+  await restarted.drain();
+  assert.deepEqual((await messages()).rows, [stored]);
+  assert.deepEqual(await restarted.readPrivateStatus('ac_demo-001'), status);
+  for (const table of ['source_ingestion.deliveries', 'source_ingestion.outbox', 'source_ingestion.message_sources',
+    'correlation.aircraft_link_revisions', 'correlation.outbox', 'source_ingestion.private_contributions'])
+    assert.equal(await count(table), 1, table);
+  assert.equal(await count('availability.contributions'), 0);
+  assert.equal(await count('message_ingestion.messages'), 0);
+});
+
+test('rendered entry point rejects invalid pages, clocks, scope and permission before retention', async () => {
+  const { createPermittedProviderPipeline } = await import('../../src/modules/source-connectors/composition/create-permitted-provider-pipeline.ts');
+  const delivery = renderedDelivery(), ctx = renderedContext(NOW);
+  const p = createPermittedProviderPipeline(pools.runtime, directory, renderedPermission, () => NOW);
+  for (const bad of [{ ...delivery, source: 'https://synthetic.example/wrong-page' },
+    { ...delivery, raw: { ...delivery.raw, icao: 'invalid' } },
+    { ...delivery, raw: { ...delivery.raw, evidence: {} } },
+    { ...delivery, retrievedAt: NOW + 1 }]) {
+    assert.equal((await p.acceptRendered(bad, ctx, scope)).ok, false);
+  }
+  const mismatch = await p.acceptRendered(delivery, ctx, { ...scope, accountScope: 'different' });
+  assert.equal(mismatch.error.code, 'INVALID');
+  for (const denied of [undefined, { ...renderedPermission, retentionAllowed: false },
+    { ...renderedPermission, accountScope: 'different' }]) {
+    const deniedPipeline = createPermittedProviderPipeline(pools.runtime, directory, denied, () => NOW);
+    await assert.rejects(deniedPipeline.acceptRendered(delivery, ctx, scope), /Retention permission/);
+  }
+  for (const table of ['source_ingestion.deliveries', 'source_ingestion.retained_inputs', 'source_ingestion.outbox',
+    'source_ingestion.message_revisions', 'source_ingestion.private_contributions']) assert.equal(await count(table), 0, table);
 });
 
 

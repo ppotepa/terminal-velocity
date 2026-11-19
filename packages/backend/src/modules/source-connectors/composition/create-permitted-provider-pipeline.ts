@@ -9,6 +9,9 @@ import { consumeRegisteredEvent } from '../../event-delivery/infrastructure/cons
 import { EventIdentityConflict, type DeliveryLease } from '../../event-delivery/public/index.ts';
 import { acceptSourceDelivery, type VerifiedSourceScope } from '../application/accept-source-delivery.ts';
 import { normalizeSourceObservation, type NormalizationContext } from '../application/normalize-source-observation.ts';
+import { normalizeRenderedDelivery } from '../infrastructure/airframes/normalize-rendered-delivery.ts';
+import type { PageDelivery } from '../infrastructure/airframes/page-window.ts';
+import type { CanonicalSourceObservation } from '../domain/normalized-observation.ts';
 import { importProviderMessage } from '../application/import-provider-message.ts';
 import type { SourceDeliveryOrigin } from '../ports/source-delivery-store.ts';
 import type { ProviderImportResult } from '../ports/provider-message-commit.ts';
@@ -46,14 +49,26 @@ export function createPermittedProviderPipeline(pool: SqlPool, directory: Candid
     if (lease.consumerId !== PRIVATE_AVAILABILITY_CONSUMER) throw new Error('Wrong private consumer.');
     return queue.consume(lease, (sql, event) => projectPrivateDecision(sql, event.payload));
   }
+  async function acceptCanonical(canonical: CanonicalSourceObservation, scope: VerifiedSourceScope, origin: SourceDeliveryOrigin) {
+    if (!permitsRetention(grant, canonical.observation)) throw new Error('Retention permission is missing or outside its scope.');
+    return acceptSourceDelivery(scope, postgresSourceAcceptanceTransaction(pool, randomUUID, { canonical, permission: grant }), canonical.observation, origin);
+  }
   return {
     queue, route: () => routeSourceEvents(pool), consumeSource, consumePrivate,
     async accept(input: unknown, context: NormalizationContext, scope: VerifiedSourceScope, origin: SourceDeliveryOrigin) {
       const normalized = normalizeSourceObservation(input, context, scope.capabilities);
       if (!normalized.ok) return normalized;
+      return acceptCanonical(normalized.value, scope, origin);
+    },
+    /** Rendered-page bridge: provenance and digest come from the validated delivery. */
+    async acceptRendered(delivery: PageDelivery, context: Omit<NormalizationContext, 'payloadDigest' | 'retrievedAt'>, scope: VerifiedSourceScope) {
+      const normalized = normalizeRenderedDelivery(delivery, context, scope.capabilities);
+      if (!normalized.ok) return normalized;
       const canonical = normalized.value;
-      if (!permitsRetention(grant, canonical.observation)) throw new Error('Retention permission is missing or outside its scope.');
-      return acceptSourceDelivery(scope, postgresSourceAcceptanceTransaction(pool, randomUUID, { canonical, permission: grant }), canonical.observation, origin);
+      return acceptCanonical(canonical, scope, {
+        pageUrl: delivery.source, parserVersion: 'airframes-rendered-extractor-v1',
+        retrievedAt: canonical.provenance.retrievedAt!, ingestedAt: canonical.provenance.ingestedAt.at,
+      });
     },
     async drain() {
       await queue.recoverExpired(100);

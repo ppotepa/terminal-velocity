@@ -4,6 +4,16 @@
 private durable entry point. Its `accept(input, normalizationContext, verifiedScope,
 origin)` method normalizes extracted provider records, checks operator permission,
 and commits accepted delivery metadata, canonical snapshot and source outbox.
+Rendered page callers use `acceptRendered(pageDelivery, context, verifiedScope)`.
+The context supplies source/provider/account/epoch and ingestion-time evidence;
+callers do not reconstruct wire records, supply a digest or assemble SQL adapters.
+This method uses the existing rendered normalizer, derives the page URL, retrieval
+clock and extractor version from the delivery/adapter, and shares the same
+permission-checked acceptance transaction as `accept`. Invalid page evidence or
+clocks fail normalization; scope and retention checks still apply before storage.
+A repeated page delivery with later retrieval/ingestion clocks returns the original
+receipt and leaves observation time, canonical facts and private status unchanged.
+
 The caller supplies a candidate directory and owns the SQL pool and worker lifecycle.
 No HTTP endpoint, provider account or publication grant is introduced.
 

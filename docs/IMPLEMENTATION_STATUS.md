@@ -150,3 +150,14 @@ browser execution encounter sandbox restrictions. These results do not replace
 remote/exact-SHA CI. See [the issue #11 handoff](handoffs/issue-11.md) for command
 results, unverified acceptance items and migration/replay notes. The issue is not
 DONE and no later engineering issue was started.
+
+### Issue #11 rendered acceptance review revision
+
+The permitted pipeline now exposes `acceptRendered(PageDelivery, context, scope)`
+through its normal composition. It uses the rendered normalizer and the shared
+permission-checked acceptance transaction, deriving page provenance internally.
+PostgreSQL regressions exercise the connector callback, private correlation/status,
+lineage, restart, later-clock replay and rejection without retained effects.
+Fresh execution results and environment limitations are recorded in
+[the issue #11 handoff](handoffs/issue-11.md). Airframes previews remain transient;
+the provider API remains inactive and actual retention rights remain an external gate.
