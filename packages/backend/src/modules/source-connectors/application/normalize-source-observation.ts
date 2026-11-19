@@ -62,11 +62,14 @@ export function normalizeSourceObservation(input: unknown, context: Normalizatio
       > times.providerPublishedAt.at + times.providerPublishedAt.uncertaintyMs)
     return fail('UNTRUSTED_TIME', 'providerPublishedAt');
   const hints: Record<string, AircraftHints> = {};
-  for (const field of ['aircraft', 'originator', 'addressee']) {
+  const originalRegistrations: Partial<Record<'aircraft' | 'originator' | 'addressee', string>> = {};
+  for (const field of ['aircraft', 'originator', 'addressee'] as const) {
     if (!hasOwn(row, field)) continue;
     const parsed = normalizeAircraftHints(row[field]);
     if (!parsed.ok) return fail('INVALID_INPUT', field);
     hints[field] = parsed.value;
+    const original = plainRecord(row[field])?.['registration'];
+    if (typeof original === 'string') originalRegistrations[field] = original;
   }
   const direction = row['direction'];
   if (hasOwn(row, 'direction') && (typeof direction !== 'string'
@@ -128,6 +131,7 @@ export function normalizeSourceObservation(input: unknown, context: Normalizatio
     ...(protocol === undefined ? {} : { applicationProtocol: protocol }),
     ...(typeof direction === 'string' ? { direction } : {}),
     provenance: Object.freeze({ originalSourceId: row['originalSourceId'] as string,
+      originalRegistrations: Object.freeze(originalRegistrations),
       deliveryId: row['deliveryId'] as string, sourceDescription: row['sourceDescription'] as string,
       decoder: Object.freeze({ name: decoder['name'], version: decoder['version'] }), ...times,
       ingestedAt: ingested.value, ...(retrieved?.ok ? { retrievedAt: retrieved.value } : {}),

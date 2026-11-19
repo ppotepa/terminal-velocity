@@ -177,3 +177,28 @@ test('synthetic displayed fields normalize end to end; empty and incompatible la
     assert.equal(optional.messages[0].evidence, undefined);
   } finally { await browser.close(); }
 });
+
+for (const [name, extra, status] of [
+  ['distinct message links', '<a href="/messages/second">Second</a>', 'PARTIAL_LAYOUT'],
+  ['distinct bodies', '<div class="bg-inner">Second synthetic body</div>', 'PARTIAL_LAYOUT'],
+  ['identical bodies', '<div class="bg-inner">Synthetic body</div>', 'PARTIAL_LAYOUT'],
+  ['duplicate links to the same message', '<a href="/messages/first">Same record</a>', 'OBSERVED'],
+]) {
+  test(`rendered card cardinality handles ${name}`, async () => {
+    const { validateWindow } = await import('../../packages/backend/src/modules/source-connectors/infrastructure/airframes/page-window.ts');
+    const browser = await chromium.launch({ chromiumSandbox: true, executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium-headless-shell' });
+    try {
+      const page = await browser.newPage();
+      await page.route(liveUrl, route => route.fulfill({ contentType: 'text/html', body: `
+        <div class="messages-scroller"><div class="vue-recycle-scroller__item-view"><div class="mb-4 border">
+          <a href="/airframes/synthetic">ABC123</a><a href="/messages/first">First</a>
+          <div class="bg-inner">Synthetic body</div>${extra}</div></div></div>` }));
+      const result = await observePage(page, 'ABC123', 0);
+      assert.equal(result.status, status);
+      assert.equal(result.messages.length, status === 'OBSERVED' ? 1 : 0);
+      const validated = validateWindow(result, 'ABC123', 1);
+      if (status === 'PARTIAL_LAYOUT') assert.equal(validated, 'INVALID_ENVELOPE');
+      else assert.equal(validated.length, 1);
+    } finally { await browser.close(); }
+  });
+}

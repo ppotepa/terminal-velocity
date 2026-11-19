@@ -25,11 +25,15 @@ test('golden levels preserve immutable provenance and serialize without changing
     assert.equal(result.provenance.providerPublishedAt.iso, '2026-11-19T10:00:02.000Z');
     assert.equal(result.provenance.sourceObservedAt.uncertaintyMs, 500);
     assert.equal(result.aircraftHints.registration, 'N-TEST');
+    assert.deepEqual(result.provenance.originalRegistrations, { aircraft: 'n-test' });
     assert.equal(result.aircraftRole, 'ORIGINATOR');
     assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
     assert.deepEqual(value(JSON.parse(JSON.stringify(raw))), result);
     assert.deepEqual(value(Object.fromEntries(Object.entries(raw).reverse())), result);
     raw.decoder.version = 'mutated'; raw.aircraft.icao24 = 'FFFFFF';
+    raw.aircraft.registration = 'N-CHANGED';
+    assert.equal(result.provenance.originalRegistrations.aircraft, 'n-test');
+    assert.throws(() => { result.provenance.originalRegistrations.aircraft = 'changed'; }, TypeError);
     assert.equal(result.provenance.decoder.version, '1');
     assert.equal(result.aircraftHints.icao24, 'ABC123');
     assert.throws(() => { result.provenance.decoder.version = 'mutated'; }, TypeError);
@@ -79,6 +83,7 @@ test('optional fields stay absent and identical text with independent source IDs
   const raw = fixture('message');
   for (const key of ['aircraft', 'originator', 'direction', 'bearer', 'applicationProtocol', 'feeder', 'sourceObservedAt']) delete raw[key];
   const first = value(raw);
+  assert.deepEqual(first.provenance.originalRegistrations, {});
   assert.deepEqual(first.aircraftHints, {}); assert.equal(first.observation.observedAt, undefined);
   assert.equal(first.aircraftRole, 'UNKNOWN');
   raw.deliveryId = 'synthetic-delivery-2'; raw.originalSourceId = 'synthetic-message-2';
@@ -108,6 +113,10 @@ test('rendered delivery maps only displayed evidence; a feeder never creates a r
   assert.equal(result.value.provenance.retrievedAt, delivery.retrievedAt);
   assert.equal(result.value.aircraftRole, 'ADDRESSEE');
   assert.equal(result.value.aircraftHints.registration, 'N-TEST');
+  assert.equal(result.value.provenance.originalRegistrations.aircraft, 'n-test');
+  assert.deepEqual(JSON.parse(JSON.stringify(result.value)), result.value);
+  delivery.raw.evidence.registration = 'N-CHANGED';
+  assert.equal(result.value.provenance.originalRegistrations.aircraft, 'n-test');
   delete delivery.raw.evidence.receiverReceivedAt;
   assert.equal(normalizeRenderedDelivery(delivery, context, capability).error.code, 'UNTRUSTED_TIME');
   delivery.raw.evidence.unrecognized = 'extra';
@@ -169,3 +178,20 @@ test('a wide receiver interval cannot hide observation after provider publicatio
   raw.receiverReceivedAt.uncertaintyMs = 20000;
   assert.equal(normalize(raw).error.code, 'UNTRUSTED_TIME');
 });
+
+for (const [direction, participant] of [['UPLINK', 'addressee'], ['DOWNLINK', 'originator']]) {
+  test(`original registration evidence retains each supplied ${participant} spelling`, () => {
+    const raw = fixture('message');
+    delete raw.originator;
+    raw.direction = direction;
+    raw[participant] = { registration: 'N-Test' };
+    const result = value(raw);
+    assert.deepEqual(result.provenance.originalRegistrations, { aircraft: 'n-test', [participant]: 'N-Test' });
+    assert.equal(result.aircraftHints.registration, 'N-TEST');
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+    raw[participant].registration = 'N-OTHER';
+    assert.equal(result.provenance.originalRegistrations[participant], 'N-Test');
+    assert.throws(() => { result.provenance.originalRegistrations[participant] = 'N-OTHER'; }, TypeError);
+    assert.equal(normalize(raw).error.code, 'CONFLICTING_HINTS');
+  });
+}

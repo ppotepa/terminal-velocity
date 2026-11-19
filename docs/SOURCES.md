@@ -190,7 +190,11 @@ from observations and rights.
 The immutable wrapper version is `1`. Its `observation` is the existing S3-01
 union. `provenance` retains original record ID, scoped external delivery ID,
 source description, decoder name/version, distinct time evidence, feeder label
-and original protocol labels. `aircraftHints`, `aircraftRole`, optional bearer,
+and original protocol labels. `provenance.originalRegistrations` retains exact
+supplied registration strings keyed by `aircraft`, `originator` or `addressee`;
+its frozen entries preserve distinct spellings even when they normalize to the
+same registration. The normalized value remains in `aircraftHints.registration`.
+Absent registration evidence produces an empty map. `aircraftHints`, `aircraftRole`, optional bearer,
 application protocol and direction are revision facts, including for receptions.
 Nested values are copied/frozen; input mutation cannot alter them. JSON roundtrip
 tests compare all facts and independently re-normalize the serialized wire input.

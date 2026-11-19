@@ -107,6 +107,10 @@ as provenance, never as invented receptions. Schema drift, invalid clocks,
 conflicting hints and incompatible layouts fail explicitly. Synthetic golden
 regressions cover text-only layout drift and mixed recognized/incompatible records;
 the scroller reader checks content outside recognized cards even when cards exist.
+Cards with multiple distinct message paths or multiple visible bodies are rejected
+as `PARTIAL_LAYOUT`; duplicate links to one path remain valid. Immutable provenance
+also retains original registration spellings per participant alongside the
+normalized aircraft hint, including through JSON serialization.
 Fractional rendered UTC timestamps with one to three digits retain `MILLISECOND`
 precision after ISO normalization, with declared uncertainty unchanged. Synthetic
 fixtures and a browser-to-normalizer regression are included in existing root

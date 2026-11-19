@@ -1,6 +1,48 @@
 # Issue #10 — normalization handoff
 
-### Latest review correction — duplicate field order (2026-11-19)
+### Latest review correction — cardinality and registration (2026-11-19)
+
+Baseline: `a9a8fea`; branch `feature/epic4-issue-10`. Both requested engineering
+corrections are prepared for coordinator review:
+
+- A rendered card must have exactly one distinct message path and one visible
+  body. Multiple distinct paths or multiple bodies produce `PARTIAL_LAYOUT` and
+  no observation from that card. Repeated links to the same path remain valid.
+  Four synthetic browser regressions cover distinct links, distinct/identical
+  bodies and valid duplicate links, including rejection by the window validator.
+- Immutable `provenance.originalRegistrations` preserves each supplied participant's
+  original spelling alongside the normalized `aircraftHints.registration`.
+  Golden and rendered normalization tests verify serialization, input mutation,
+  frozen output, absent evidence, both direction roles and conflicting values.
+
+Local verification used `PATH="$PWD/tmp/node24/bin:$PATH"` (Node 24.22.3):
+
+| Command | Actual result |
+|---|---|
+| `npm ci --offline --no-audit --no-fund` | PASS, 21 packages; sandbox fchown warnings |
+| `npm run check` | FAIL: typecheck and boundaries pass; architecture 1/1 files and backend 11/11 files pass; API 2/6 files pass, 4 fail |
+| `node apps/api/tests/health.test.mjs` | FAIL; direct diagnostic confirms `listen EPERM 127.0.0.1` |
+| `npm run test:messages` | PASS, 3/3 files, no skips |
+| `node --test --test-isolation=none scripts/messages/page-budget.test.mjs packages/backend/tests/airframes-transport.test.mjs packages/backend/tests/source-normalization.test.mjs` | PASS, 41/41 tests, no skips |
+| `node packages/backend/tests/source-normalization.test.mjs` | PASS, 16/16 tests, no skips |
+| `npm run test:browser` | FAIL, 0/2 files pass |
+| `node scripts/messages/airframes-live.test.mjs` | 1/13 tests passes, 12 fail at Chromium sandbox startup with `shutdown: Operation not permitted`; no skips |
+| `git diff --check` | PASS |
+
+The four new browser cases remain unverified locally and require coordinator
+exact-SHA CI. Supplied prior-head CI evidence is not evidence for this patch.
+No SQL or startup wiring changed; PostgreSQL, demo and smoke were not rerun for
+these corrections. Rollback is a code revert with no data migration. The actual
+rendered crawl remains on demand and transient; no live capture, database content
+retention, GitHub writes, commits or merge occurred.
+
+External acceptance remains **BLOCKED** on permission evidence and an authorized,
+versioned source sample validating the fabricated optional selectors and timestamp
+assumptions. Real-shape fixture and live-provider acceptance remain unchecked.
+The coordinator owns PR/merge and exact-SHA checks; this is not a DONE claim.
+
+
+### Earlier review correction — duplicate field order (2026-11-19)
 
 Baseline: `793f897`. Duplicate rendered records now compare facts independently
 of property order, both within a DOM sample and across the observation window.
@@ -34,6 +76,12 @@ selectors and timestamp assumptions against it. Synthetic tests do not establish
 real-provider compatibility. PR, merge and final acceptance remain coordinator-owned.
 
 ## Status / execution log
+- 2026-11-19 19:41 UTC — IN PROGRESS for cardinality and original-registration
+  review corrections; owner implementation agent, branch feature/epic4-issue-10,
+  baseline a9a8fea. Dependency #9 DONE per coordinator. Planned paths: rendered
+  reader/browser regressions, normalization contract/tests and source docs.
+  External acceptance remains BLOCKED on authorized versioned samples and rights;
+  GitHub, merge and exact-SHA CI remain coordinator-owned.
 - 2026-11-19 19:35 UTC — IN PROGRESS for duplicate-field-order review correction;
   owner implementation agent, branch feature/epic4-issue-10, baseline 793f897.
   Dependency #9 remains merged per coordinator and local history. Scope: rendered

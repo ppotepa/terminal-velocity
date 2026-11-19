@@ -25,6 +25,8 @@ export interface CanonicalSourceObservation {
     readonly feeder?: string;
     readonly bearerLabel?: string;
     readonly applicationProtocolLabel?: string;
+    /** Exact supplied spellings keyed by participant; normalized value is in aircraftHints. */
+    readonly originalRegistrations: Readonly<Partial<Record<'aircraft' | 'originator' | 'addressee', string>>>;
   };
   readonly bearer?: string;
   readonly applicationProtocol?: string;

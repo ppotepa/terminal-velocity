@@ -58,10 +58,16 @@ export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes
       .filter(text => /^[A-F0-9]{6}$/.test(text)));
     if (addresses.size !== 1) { unsupported = true; continue; }
     if (!addresses.has(icao)) continue;
-    const detail = links.find(link => /^\/messages\/[^/]+\/?$/.test(link.pathname)
+    const details = links.filter(link => /^\/messages\/[^/]+\/?$/.test(link.pathname)
       && !['live', 'ar', 'history', 'search'].includes(link.pathname.split('/')[2]));
-    const text = card.querySelector('.bg-inner')?.innerText.trim();
-    if (!detail || !text || text.length > 32768) {
+    const bodies = [...card.querySelectorAll('.bg-inner')].filter(body => body.getClientRects().length);
+    if (new Set(details.map(link => link.pathname)).size !== 1 || bodies.length !== 1) {
+      unsupported = true;
+      continue;
+    }
+    const detail = details[0];
+    const text = bodies[0].innerText.trim();
+    if (!text || text.length > 32768) {
       unsupported = true;
       continue;
     }
