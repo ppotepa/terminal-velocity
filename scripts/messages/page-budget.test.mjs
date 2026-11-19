@@ -11,7 +11,9 @@ async function fixture() {
   const failures = [], decisions = [];
   let nextId = 0, open;
   session.send = async (method, params) => {
-    if (method === 'Fetch.continueResponse') decisions.push(params);
+    if (method === 'Fetch.takeResponseBodyAsStream') return { stream: 'document' };
+    if (method === 'IO.read') return { data: '<html></html>', eof: true };
+    if (method === 'Fetch.fulfillRequest') decisions.push(params);
     if (method === 'Fetch.continueRequest' || method === 'Fetch.failRequest') decisions.push(method);
   };
   const dispose = await boundPage({
@@ -121,6 +123,7 @@ test('a successful HTTP/2 document response can omit the reason phrase', async (
   const { session, decisions } = await fixture();
   session.emit('Fetch.requestPaused', { requestId: 'document', resourceType: 'Document',
     request: { url }, responseStatusCode: 200, responseStatusText: '', responseHeaders: [] });
+  await new Promise(resolve => setImmediate(resolve));
   assert.equal(decisions.at(-1).responsePhrase, 'OK');
   assert.equal(decisions.at(-1).responseCode, 200);
 });

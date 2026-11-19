@@ -48,8 +48,31 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
         // and popups from creating other targets outside that accounting.
         const policy = { name: 'Content-Security-Policy',
           value: "sandbox allow-scripts allow-same-origin; worker-src 'none'; frame-src 'none'; form-action 'none'" };
-        return session.send('Fetch.continueResponse', { requestId, responseCode: responseStatusCode,
-          responsePhrase: responseStatusText || 'OK', responseHeaders: [...responseHeaders, policy] });
+        // Chromium applies the replacement policy when it receives a new document
+        // response. Read decoded bytes in bounded chunks before supplying that body.
+        if (Number(headers.get('content-length')) > maxResponseBytes) return;
+        const { stream } = await session.send('Fetch.takeResponseBodyAsStream', { requestId });
+        const chunks = [];
+        let bytes = 0;
+        try {
+          while (!closed) {
+            const part = await session.send('IO.read', { handle: stream, size: 65536 });
+            const chunk = Buffer.from(part.data, part.base64Encoded ? 'base64' : 'utf8');
+            bytes += chunk.length;
+            if (!countBytes(chunk.length, bytes)) return;
+            if (chunk.length) chunks.push(chunk);
+            if (part.eof) break;
+            if (!chunk.length) { cancel({ status: 503 }); return; }
+          }
+        } finally {
+          await session.send('IO.close', { handle: stream });
+        }
+        if (closed) return;
+        const decodedHeaders = responseHeaders.filter(({ name }) =>
+          !['content-encoding', 'transfer-encoding', 'content-length'].includes(name.toLowerCase()));
+        return session.send('Fetch.fulfillRequest', { requestId, responseCode: responseStatusCode,
+          responsePhrase: responseStatusText || 'OK', responseHeaders: [...decodedHeaders, policy],
+          body: Buffer.concat(chunks, bytes).toString('base64') });
       }
       return session.send('Fetch.continueResponse', { requestId });
     }

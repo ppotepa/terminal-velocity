@@ -52,11 +52,11 @@ async function http2Document(t) {
   server.on('stream', (stream, headers) => {
     paths.push(headers[':path']);
     stream.respond({ ':status': 200, 'content-type': 'text/html' });
-    // A blob worker requires no network. Its policy violation proves Chromium
+    // A frame navigation blocked before reaching the loopback server proves Chromium
     // enforced the response header that the document interceptor appended.
     stream.end(shell + `<script>
       document.addEventListener('securitypolicyviolation', event => console.log(event.effectiveDirective));
-      new Worker(URL.createObjectURL(new Blob(['self.close()'], { type: 'text/javascript' })));
+      const frame = document.createElement('iframe'); frame.src = '/fixture-child'; document.body.append(frame);
     </script>`);
   });
   server.listen(0, '127.0.0.1');
@@ -162,7 +162,7 @@ test('a phrase-less HTTP/2 document enforces its policy and previews the selecte
   const { result, code, documentResponses, pageLogs, blocked } = await crawl(t, { documentServer });
   assert.deepEqual(documentServer.paths, ['/messages/live']);
   assert.deepEqual(documentResponses, [[200, '']]);
-  assert.ok(pageLogs.includes('worker-src'));
+  assert.ok(pageLogs.includes('frame-src'), JSON.stringify(pageLogs));
   assert.ok(blocked.includes(analytics));
   assert.equal(code, 0);
   assert.equal(result.status, 'OBSERVED');
