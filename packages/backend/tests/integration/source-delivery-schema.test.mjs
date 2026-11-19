@@ -10,6 +10,8 @@ import { trackPoolShutdown } from '../../../../scripts/postgres/drain-pool.mjs';
 import { parseSourceObservation } from '../../src/modules/source-connectors/public/index.ts';
 import { postgresSourceDeliveryStore } from '../../src/modules/source-connectors/infrastructure/postgres/postgres-source-delivery-store.ts';
 import { createTestPools, uniqueId } from './helpers/database.mjs';
+import { createDecisionEvent } from './helpers/decisions.mjs';
+import { createPostgresEventDelivery } from '../../src/modules/event-delivery/infrastructure/postgres-event-delivery.ts';
 
 const pools = createTestPools();
 const store = postgresSourceDeliveryStore(pools.runtime);
@@ -50,7 +52,18 @@ test('a baseline database upgrades once to source storage and preserves its migr
     const message = uniqueId('msg');
     await pool.query('INSERT INTO message_ingestion.messages VALUES ($1,$2,1,1)',
       [message, { messageId: message, observedAt: 1 }]);
-    assert.deepEqual(await applyMigrations(pool), ['002_source_deliveries.sql', '003_source_acceptance_fingerprint.sql']);
+    const event = await createDecisionEvent(pool);
+    await pool.query(`INSERT INTO event_delivery.deliveries(consumer_id,event_id) VALUES ('upgrade-private-test',$1)`, [event.eventId]);
+    assert.deepEqual(await applyMigrations(pool), ['002_source_deliveries.sql', '003_source_acceptance_fingerprint.sql',
+      '004_source_event_delivery_bridge.sql']);
+    const queue = createPostgresEventDelivery(pool);
+    const lease = await queue.leaseNext('upgrade-private-test', 30_000);
+    assert.equal(lease.eventId, event.eventId);
+    let delivered;
+    assert.equal(await queue.consume(lease, async (_sql, input) => { delivered = input; }), 'APPLIED');
+    assert.deepEqual(delivered, event);
+    assert.equal((await pool.query('SELECT correlation_event_id FROM event_delivery.events WHERE event_id=$1',
+      [event.eventId])).rows[0].correlation_event_id, event.eventId);
     assert.deepEqual(await applyMigrations(pool), []);
     assert.deepEqual((await history()).rows, before);
     assert.equal((await pool.query('SELECT * FROM message_ingestion.messages WHERE message_id=$1', [message])).rowCount, 1);

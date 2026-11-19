@@ -31,3 +31,5 @@ export { createSourceDeliveryHandler } from '../application/create-source-delive
 export { normalizeSourceObservation, type NormalizationContext } from '../application/normalize-source-observation.ts';
 export type { CanonicalSourceObservation, NormalizationError, AircraftHints } from '../domain/normalized-observation.ts';
 export { EXTRACTED_RECORD_VERSION } from '../domain/decode-source-record.ts';
+export { importProviderMessage } from '../application/import-provider-message.ts';
+export type { ProviderMessageCommit, ProviderImportResult, ImportQuarantine } from '../ports/provider-message-commit.ts';

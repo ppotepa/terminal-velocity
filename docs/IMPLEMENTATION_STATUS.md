@@ -126,3 +126,24 @@ This is not a verified real Airframes format: optional markup and all records ar
 fabricated fixtures. Permitted real-sample acceptance is blocked under ADR 0001.
 See [the issue #10 handoff](handoffs/issue-10.md) for exact local checks, environment
 failures and coordinator-owned verification. No remote CI or merge is claimed.
+
+
+## Issue #11 engineering update (November 19, 2026)
+
+The worktree adds the [private provider pipeline](PROVIDER_PIPELINE.md): migration
+004 bridges source/correlation producers into a durable registry; source imports
+atomically record inbox, immutable provider message revision, all source delivery
+links, correlation and outbox; a separate consumer projects private availability.
+The explicit synthetic composition reuses #10 normalization and existing
+correlation policies. Demo REST records, counts and availability remain separate.
+The actual rendered Airframes lookup and metadata-only live acceptance remain in
+place. No provider rights, retention permission, public disclosure or deployment
+is inferred from synthetic fixtures.
+
+Verification is **partial**: 162 database-independent tests pass, including 12
+new import tests, with Node 24.22.3. Type checking and boundaries pass. Real
+PostgreSQL verification is blocked because this shell is root; API/smoke and
+browser execution encounter sandbox restrictions. These results do not replace
+remote/exact-SHA CI. See [the issue #11 handoff](handoffs/issue-11.md) for command
+results, unverified acceptance items and migration/replay notes. The issue is not
+DONE and no later engineering issue was started.
