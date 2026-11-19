@@ -132,3 +132,79 @@ The parser error types are deterministic for the same input: malformed input, mi
 The canonical parser distinguishes invalid input, unsupported schema versions, missing time or other required evidence, unsupported observation levels, conflicting time bases, and impossible future observations. It validates timestamp syntax and shape; it cannot independently prove that a provider's clock, receiver identity, digest, decoder label, or source rights are truthful. Provider contract fixtures must be anonymized and licensed before they are added in later issues.
 
 No network connection, database schema, real provider fixture, publication decision, or live-data claim is part of S3-01.
+
+## Issue #10: transient normalization
+
+`normalizeSourceObservation(raw, context, capability)` is the public pure boundary
+for the **synthetic extracted-record v1** format. Its `Result` contains either an
+immutable `CanonicalSourceObservation` or a safe `{code, field, schemaVersion}`
+failure. This version identifies our adapter contract, not an Airframes API
+schema. Unknown versions return `UNKNOWN_SCHEMA`; extra fields fail explicitly.
+Invalid/missing receipt evidence, inconsistent clock order and unsupported time
+bases return `UNTRUSTED_TIME`. Errors contain no message text or raw values.
+
+The infrastructure `normalizeRenderedDelivery` adapter accepts a validated page
+delivery and maps only its displayed fields. It computes a SHA-256 digest with
+stable JSON key ordering, excluding the local ingestion clock. The existing
+on-demand preview and API strategy retain their behavior; neither starts durable
+normalization or storage. Consumers can call this adapter after `validateWindow`,
+as exercised by `test:browser`. The demo message endpoint is unchanged.
+
+The reader preserves optional semantic labels (registration, callsign, reception,
+observation and publication time, explicit time uncertainty, direction, bearer,
+and application protocol). These selectors are **synthetic fixture conventions**
+until a permitted sample verifies them. A filter supplies no aircraft hint: the
+card must supply one unambiguous ICAO24. Conflicting aircraft links, duplicate
+labels, conflicting records under one message link, and unknown card layouts
+report `PARTIAL_LAYOUT`; durable window validation rejects the whole window.
+An empty list is `NO_OBSERVATIONS_COVERAGE_UNKNOWN`, never proof of coverage.
+
+No time is replaced with retrieval/ingestion time. A displayed timestamp without
+explicit uncertainty fails canonical normalization. The preview can still show
+such a card. `sourceObservedAt`, `receiverReceivedAt`, `providerPublishedAt` and
+trusted caller `ingestedAt` remain distinct. The page adapter also preserves its
+transport `retrievedAt` and rejects retrieval after ingestion. Overlapping uncertainty intervals
+are retained; impossible future/order relationships fail. `receivedAt` in the
+S3-01 observation uses receiver receipt, or provider publication with its own
+basis when receipt is absent. `observedAt` is omitted unless explicitly supplied.
+
+A rendered card is always `PROVIDER_MESSAGE`, even when it names a feeder. Its
+feeder is a source label, not a station identity or evidence of a reception.
+The synthetic versioned decoder also validates separate `RECEPTION` and `FRAME`
+paths through S3-01: reception requires a supplied receiver ID and frame requires
+supplied canonical Base64 bytes. Mixed level fields fail. No raw capture,
+provider API, retention grant or actual reception is claimed.
+
+ICAO24, registration and callsign are normalized and validated. In this input
+schema participant objects contain aircraft hints only. Uplink aircraft hints
+belong to the addressee, downlink hints to the originator. Inappropriate roles or
+conflicting hints of the same kind fail. Different identifier kinds are retained
+as unconfirmed hints; a later identity resolver must establish their consistency.
+No flight or confirmed aircraft match is produced. Unknown bearer/application
+protocol labels are retained in provenance and classified as `UNKNOWN`; VDL2
+alone never implies ACARS. Capability and coverage declarations remain separate
+from observations and rights.
+
+### Revision handoff for #11
+
+The immutable wrapper version is `1`. Its `observation` is the existing S3-01
+union. `provenance` retains original record ID, scoped external delivery ID,
+source description, decoder name/version, distinct time evidence, feeder label
+and original protocol labels. `aircraftHints`, `aircraftRole`, optional bearer,
+application protocol and direction are revision facts, including for receptions.
+Nested values are copied/frozen; input mutation cannot alter them. JSON roundtrip
+tests compare all facts and independently re-normalize the serialized wire input.
+
+For #11, reference a message revision by the source ID, scoped delivery tuple,
+original source record ID, payload digest, extracted-record/decoder version and
+capability revision. A message revision must retain the entire wrapper and its
+independent authoritative revision; it must not use a decision revision as its
+source revision. Identical text under different delivery IDs is independent.
+A changed payload under one delivery ID is a conflict/revision decision for the
+consumer, never a silent overwrite here. Preserve the first ingestion provenance
+on replay. The current #8 metadata store does **not** persist this wrapper's text,
+registration, participant roles or expanded provenance; passing just `observation`
+to that store is not a lossless message-revision persistence implementation.
+No SQL migration or durable wiring is introduced in #10. Real retention remains
+blocked by ADR 0001. #11 must establish its persistence policy before storing any
+real-source content; this handoff grants no rights.

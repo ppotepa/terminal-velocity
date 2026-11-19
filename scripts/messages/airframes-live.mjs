@@ -16,12 +16,14 @@ export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes
   let overflow = false;
   let bytes = 0;
   for (const card of scroller.querySelectorAll(selector)) {
+    if (!card.getClientRects().length) continue;
     cards++;
-    const links = [...card.querySelectorAll('a[href]')].filter(link => link.origin === location.origin);
+    const links = [...card.querySelectorAll('a[href]')].filter(link => link.origin === location.origin && link.getClientRects().length);
     const aircraft = links.filter(link => link.pathname.startsWith('/airframes/'));
     const addresses = new Set(aircraft.map(link => link.textContent.trim().toUpperCase())
       .filter(text => /^[A-F0-9]{6}$/.test(text)));
-    if (addresses.size !== 1 || !addresses.has(icao)) continue;
+    if (addresses.size !== 1) { unsupported = true; continue; }
+    if (!addresses.has(icao)) continue;
     const detail = links.find(link => /^\/messages\/[^/]+\/?$/.test(link.pathname)
       && !['live', 'ar', 'history', 'search'].includes(link.pathname.split('/')[2]));
     const text = card.querySelector('.bg-inner')?.innerText.trim();
@@ -29,16 +31,45 @@ export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes
       unsupported = true;
       continue;
     }
-    const station = links.find(link => link.pathname.startsWith('/stations/'));
+    const stations = links.filter(link => link.pathname.startsWith('/stations/'));
+    if (new Set(stations.map(link => link.pathname)).size > 1) { unsupported = true; continue; }
+    const station = stations[0]?.innerText.trim() || null;
+    if (station && station.length > 256) { unsupported = true; continue; }
     if (detail.pathname.length > 256) { unsupported = true; continue; }
+    const evidence = {};
+    const labels = { 'Registration': 'registration', 'Callsign': 'callsign',
+      'Reception time': 'receiverReceivedAt', 'Observation time': 'sourceObservedAt',
+      'Publication time': 'providerPublishedAt', 'Time uncertainty (ms)': 'uncertaintyMs',
+      'Direction': 'direction', 'Bearer': 'bearer', 'Application protocol': 'applicationProtocol' };
+    let invalidEvidence = false;
+    for (const term of card.querySelectorAll('dt')) {
+      if (!term.getClientRects().length) continue;
+      const field = labels[term.innerText.trim()];
+      if (!field) continue;
+      const value = term.nextElementSibling;
+      if (!value || value.tagName !== 'DD' || !value.getClientRects().length || field in evidence) { invalidEvidence = true; break; }
+      const time = value.querySelector('time[datetime]');
+      evidence[field] = time ? time.getAttribute('datetime') : value.innerText.trim();
+    }
+    if (invalidEvidence) { unsupported = true; continue; }
     const message = { icao, messagePath: detail.pathname, text,
-      station: station?.textContent.trim().slice(0, 256) || null };
+      station,
+      ...(Object.keys(evidence).length ? { evidence } : {}) };
     const size = new TextEncoder().encode(JSON.stringify(message)).length + envelopeOverhead;
     if (size > maxEnvelopeBytes) { unsupported = true; continue; }
-    if (messages.has(message.messagePath)) continue;
+    if (messages.has(message.messagePath)) {
+      if (JSON.stringify(messages.get(message.messagePath)) !== JSON.stringify(message)) unsupported = true;
+      continue;
+    }
     if (messages.size === maxCards || bytes + size > maxWindowBytes) { overflow = true; break; }
     bytes += size;
     messages.set(message.messagePath, message);
+  }
+  if (cards === 0 && scroller.children.length > 0) {
+    const empty = scroller.querySelector('[role=\"status\"]');
+    const wrapper = scroller.querySelector('.vue-recycle-scroller__item-wrapper');
+    const emptyWrapper = wrapper && wrapper.children.length === 0 && !scroller.textContent.trim();
+    if (!emptyWrapper && (!empty || empty.innerText.trim() !== 'No messages')) unsupported = true;
   }
   return { messages: [...messages.values()], cards, unsupported, overflow };
 }
@@ -96,6 +127,7 @@ export async function observePage(page, icao, windowMs = 10000, expiresAt = Infi
       overflow ||= sample.overflow;
       for (const message of sample.messages) {
         const previous = messages.get(message.messagePath);
+        if (previous && JSON.stringify(previous) !== JSON.stringify(message)) { unsupported = true; continue; }
         bytes += Buffer.byteLength(JSON.stringify(message));
         bytes += previous ? -Buffer.byteLength(JSON.stringify(previous)) : envelopeOverhead;
         if (bytes > maxWindowBytes || (!previous && messages.size === maxCards)) {

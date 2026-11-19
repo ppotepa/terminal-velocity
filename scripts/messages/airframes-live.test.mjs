@@ -69,3 +69,52 @@ test('leaving the live path between samples discards the window before reading o
     assert.deepEqual(await page.evaluate(() => window.samplePaths), ['/messages/live']);
   } finally { await browser.close(); }
 });
+
+test('synthetic displayed fields normalize end to end; empty and incompatible layouts differ', async () => {
+  const { normalizeRenderedDelivery } = await import('../../packages/backend/src/modules/source-connectors/infrastructure/airframes/normalize-rendered-delivery.ts');
+  const { validateWindow } = await import('../../packages/backend/src/modules/source-connectors/infrastructure/airframes/page-window.ts');
+  const browser = await chromium.launch({ chromiumSandbox: true, executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium-headless-shell' });
+  try {
+    const page = await browser.newPage();
+    const card = `<div class="vue-recycle-scroller__item-view"><div class="mb-4 border">
+      <a href="/airframes/synthetic">ABC123</a><a href="/messages/synthetic-record">Details</a>
+      <a href="/stations/synthetic">Synthetic feeder</a><div class="bg-inner">Synthetic only</div>
+      <dl><dt>Registration</dt><dd>N-TEST</dd><dt>Callsign</dt><dd>TEST123</dd>
+      <dt>Reception time</dt><dd><time datetime="2026-11-19T10:00:00Z">10:00 UTC</time></dd>
+      <dt>Time uncertainty (ms)</dt><dd>500</dd><dt>Direction</dt><dd>UPLINK</dd>
+      <dt>Bearer</dt><dd>VDL2</dd></dl></div></div>`;
+    let html = card;
+    await page.route(liveUrl, route => route.fulfill({ contentType: 'text/html',
+      body: `<div class="messages-scroller">${html}</div>` }));
+    const result = await observePage(page, 'ABC123', 0);
+    assert.equal(result.status, 'OBSERVED');
+    const deliveries = validateWindow(result, 'ABC123', Date.parse('2026-11-19T10:01:00Z'));
+    assert.equal(deliveries.length, 1);
+    const normalized = normalizeRenderedDelivery(deliveries[0], {
+      sourceId: 'src_synthetic', provider: 'airframes', accountScope: 'synthetic', sourceEpoch: 'v1',
+      ingestedAt: { at: '2026-11-19T10:01:00Z', basis: 'INGESTED', precision: 'SECOND', uncertaintyMs: 500 },
+    }, { revision: 1, supportedDataLevels: ['PROVIDER_MESSAGE'], coverage: { kind: 'UNKNOWN' },
+      receiverCoverageCompleteness: 'UNKNOWN', sampling: { kind: 'NOT_DECLARED' },
+      messageDirection: 'UNKNOWN', bearer: null, protocolStack: [] });
+    assert.equal(normalized.ok, true, JSON.stringify(normalized));
+    assert.equal(normalized.value.observation.dataLevel, 'PROVIDER_MESSAGE');
+    assert.equal(normalized.value.aircraftHints.registration, 'N-TEST');
+    assert.equal(normalized.value.aircraftRole, 'ADDRESSEE');
+    assert.equal(normalized.value.provenance.feeder, 'Synthetic feeder');
+    assert.equal(normalized.value.observation.protocolStack, undefined);
+    html = '';
+    assert.equal((await observePage(page, 'ABC123', 0)).status, 'NO_OBSERVATIONS_COVERAGE_UNKNOWN');
+    html = '<div class="vue-recycle-scroller__item-wrapper"></div>';
+    assert.equal((await observePage(page, 'ABC123', 0)).status, 'NO_OBSERVATIONS_COVERAGE_UNKNOWN');
+    html = '<article>Incompatible fabricated layout</article>';
+    assert.equal((await observePage(page, 'ABC123', 0)).status, 'PARTIAL_LAYOUT');
+    html = card.replace('ABC123', 'no aircraft address');
+    assert.equal((await observePage(page, 'ABC123', 0)).status, 'PARTIAL_LAYOUT');
+    html = card.replace('<dt>Registration</dt>', '<dt>Registration</dt><dd>N-OTHER</dd><dt>Registration</dt>');
+    assert.equal((await observePage(page, 'ABC123', 0)).status, 'PARTIAL_LAYOUT');
+    html = card.replace(/<dl>[\s\S]*?<\/dl>/, '');
+    const optional = await observePage(page, 'ABC123', 0);
+    assert.equal(optional.status, 'OBSERVED');
+    assert.equal(optional.messages[0].evidence, undefined);
+  } finally { await browser.close(); }
+});
