@@ -1,6 +1,6 @@
 # Sequential GitHub issue execution workflow
 
-**Canonical EPIC:** [#4 — Complete Terminal Velocity Roadmap](https://github.com/ppotepa/terminal-velocity/issues/4)  
+**Canonical EPIC:** [#4 — Complete Terminal Velocity Roadmap](https://github.com/ppotepa/terminal-velocity/issues/4)
 **Scope:** 48 ordered implementation issues, [#5–#52](https://github.com/ppotepa/terminal-velocity/issues) (Stages 3–6 and release readiness). The epic issue body is the **current progress dashboard and canonical execution order**. The child issue body is the **authoritative requirement and progress record** for that single deliverable.
 
 All project-authored issue descriptions, updates, tests, comments, commits, PRs, and documentation use **English**.

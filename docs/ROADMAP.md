@@ -22,6 +22,8 @@ Select a source for which access and permitted usage are established. The adapte
 
 ## Stage 4 — positions and map reads
 
+**Status: position-contract implementation is under review in #14; source transport, storage, map reads and UI follow in later issues.**
+
 A separate position adapter, observations with timestamps and provenance, stable aircraft identity, and a map read model. The first map version may fetch a coherent snapshot over HTTP. Flight history and position freshness do not depend on the presence of radio messages. The frontend keeps the agreed minimal design: map, list, details, and clear statuses.
 
 ## Stage 5 — visibility and incremental updates

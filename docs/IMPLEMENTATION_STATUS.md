@@ -178,11 +178,12 @@ reporting completion before every record is accepted. The on-demand rendered Air
 real content is not retained by replay, and the API adapter remains inactive.
 
 See [SOURCE_OPERATIONS.md](SOURCE_OPERATIONS.md) for limits, recovery, CLI commands,
-health semantics and the private #13 handoff. See [issue #12 evidence](handoffs/issue-12.md)
-for local results and pending coordinator CI. #11 engineering was merged in PR #62
-at `752aa27377abeb53f2042504116422f0ac5d86dc`; the older #11 execution notes above
-are historical. Real-provider acceptance remains an external gate; this change
-does not mark Stage 3 complete.
+health semantics and the private #13 handoff. The [issue #12 handoff](handoffs/issue-12.md)
+records historical implementation-time local results; #12 engineering was merged
+in PR #63 at `b04da88`. #11 engineering was merged in PR #62 at
+`752aa27377abeb53f2042504116422f0ac5d86dc`; the older #11 execution notes
+above are historical. Real-provider acceptance remains an external gate; this
+change does not mark Stage 3 complete.
 
 ## Issue #13 — source validation gate
 
@@ -195,3 +196,47 @@ sample, crawl and retention rights decision, measured source lag or actual
 end-to-end latency is available; no real data has been retained. The source-derived
 read port is internal and the unauthenticated demo HTTP API remains synthetic.
 Stage 3 external acceptance and any source-derived HTTP read remain blocked.
+
+## Stage 4 position contracts — issue #14 candidate
+
+The `feature/s4-01-position-contracts` branch is based on the verified Stage 3
+main. Its provider-neutral position boundary records source and aircraft identity,
+measurement kind, coordinates, observed and ingested times, precision and uncertainty.
+It validates the supplied source capability and rejects inconsistent adapter
+results. It requires ICAO24 or an upstream confirmed aircraft ID, retains
+simultaneous barometric and geometric altitudes under schema v1, and uses
+precision when classifying position freshness. Position freshness is independent of radio-message availability.
+Confirmed IDs now require a resolver-scoped evidence reference and a separate
+upstream decision bound to the source delivery, with conflicting ICAO24 and
+evidence claims rejected. See [POSITIONS.md](POSITIONS.md)
+for the contract and limits. Independent review and merge remain before #14
+is accepted. There is no migration, persistent position
+state or concurrency change. Before consumers adopt schema v1, rollback is
+removal of the contract and its export. No live position source, storage, map,
+source rights or deployment is claimed here.
+
+For an earlier identity fix in this checkout, Node 24.22.3 ran
+`npm ci --offline --ignore-scripts --no-audit --no-fund`, the position contract
+suite, type checking, architecture checks (225 source files, 809 dependency
+edges), and backend workspace tests successfully. `git diff --check` passed.
+The full `npm run check` reached the API workspace but failed because this
+shell denies loopback binds (`listen EPERM` on 127.0.0.1); it is not a passing
+full-suite result. The coordinator's isolated local CI passed at
+`91b3ff353aac9e04a217cf793ca2df91c6641408`. The coordinator also supplied
+passing isolated local CI for the position-contract changes at
+`5b8881052f4923f5386598c3c2d3e1986449d07f`. Commit `5a4bcfe` changes
+only this status document. PR merge and merged-SHA verification remain pending;
+no hosted CI or deployment success is claimed here.
+
+For the altitude and identity-evidence review changes, Node 24.22.3 ran
+`npm ci --offline --ignore-scripts --no-audit --no-fund`, the focused position
+contract suite, `npm run typecheck`, `npm run check:boundaries` (225 source
+files, 809 dependency edges), and `git diff --check` successfully. The backend
+workspace tests passed during `npm run check`; API tests failed solely at
+loopback binding with `listen EPERM` in this shell. The coordinator supplied a
+passing isolated local CI log at committed SHA
+`711ee6336ab27428fe44fb5119dc014bea9cf5db` for those changes. For the
+later source-reference-time correction, Node 24.22.3 passed offline `npm ci`,
+the focused position-contract suite, type checking, architecture checks, and
+all backend tests. `npm run check` could not complete its API tests because this shell
+denies loopback binds (`listen EPERM` on 127.0.0.1).
