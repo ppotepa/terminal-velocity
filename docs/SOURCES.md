@@ -1,5 +1,25 @@
 # Source observation contracts
 
+## Source authorization status
+
+The Stage 3 message-source review is recorded in
+[`docs/adr/0001-first-message-source.md`](adr/0001-first-message-source.md).
+As of 2026-11-19 it is `BLOCKED_PENDING_RIGHTS`: no message provider or
+contributor-owned receiver is authorized for this application. Airframes API
+access and licensing are still under development in its public documentation,
+and this project has no feeder account, credential, or receiver. Do not build a
+live message transport from the synthetic examples in this guide.
+
+The adsb.lol public API is a separate candidate for **positions**, not messages.
+Its position source selection, ODbL obligations, quotas, and endpoint contract
+must be recorded in a separate Stage 4 decision before implementation. Sending
+contributor data to its ACARS/VDL2/HFDL endpoints is not an API for reading
+messages back.
+
+Until a source is authorized, synthetic fixtures may exercise only the
+provider-neutral contract. They must not be labeled as provider examples or
+used to claim live ingestion.
+
 Stage 3 starts with provider-neutral contracts. These types do not connect to a provider, establish data rights, or authorize publication. Provider transport and normalization belong in later issues after a source and its permitted uses have been verified.
 
 ## Schema v1

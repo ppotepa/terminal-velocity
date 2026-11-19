@@ -80,3 +80,7 @@ Local verification used Node.js 24.22.3:
 | GitHub Actions for PR #54 | BLOCKED; `verify` runs failed before any steps and produced no job logs; the exact cause is not exposed |
 
 The local sequence covers every step in the repository CI workflow. The database integration run used Debian PostgreSQL 17.12 because that is the version available from this host's Debian 13 repository; the workflow currently specifies PostgreSQL 18.7. No database or transaction code changed in S3-01. The repository has a known Actions billing blocker; remote failures are consistent with it, but the available run output does not confirm the cause. No remote CI pass is claimed.
+
+## Stage 3 source decision — S3-02
+
+The first-party source review is recorded in [`adr/0001-first-message-source.md`](adr/0001-first-message-source.md). The outcome is **BLOCKED_PENDING_RIGHTS / NO-GO**: no message provider or project-owned receiver has verified access, account-level permissions, a permitted fixture, and retention terms. Airframes' API/access documentation and licensing are marked under development; this project has no feeder station, key, or early-access approval. The adsb.lol public API is a positions source under ODbL, while its documented ACARS/VDL2/HFDL endpoints accept contributor submissions under CC0 and do not provide an inbound message API. No connector or live-data claim is made. S3-03 through S3-13 remain gated on the unblock conditions in the ADR.
