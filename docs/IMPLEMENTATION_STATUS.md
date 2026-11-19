@@ -75,5 +75,6 @@ Local verification used Node.js 24.22.3:
 | `npm ci` | PASS; 20 packages installed, zero reported vulnerabilities |
 | `node --test packages/backend/tests/source-observation.test.mjs` | PASS; 13/13 tests |
 | `npm run check` | PASS; strict type checks, 177 source files / 593 dependency edges, 28/28 architecture tests, 76/76 backend tests, 30/30 API tests (134 total) |
+| GitHub Actions for PR #54 | BLOCKED; both `verify` runs failed before any steps and produced no job logs (run IDs `44521016078`, `44521086842`); the exact cause is not exposed |
 
-The full check does not include PostgreSQL integration tests. No database or transaction code changed in S3-01. These are local results; no remote GitHub Actions result is claimed.
+The full check does not include PostgreSQL integration tests. No database or transaction code changed in S3-01. The repository has a known Actions billing blocker; the two remote failures are consistent with it, but the available run output does not confirm the cause. No remote CI pass is claimed.
