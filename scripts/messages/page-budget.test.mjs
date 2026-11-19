@@ -11,6 +11,7 @@ async function fixture() {
   const failures = [], decisions = [];
   let nextId = 0, open;
   session.send = async (method, params) => {
+    if (method === 'Fetch.continueResponse') decisions.push(params);
     if (method === 'Fetch.continueRequest' || method === 'Fetch.failRequest') decisions.push(method);
   };
   const dispose = await boundPage({
@@ -21,7 +22,7 @@ async function fixture() {
     session.emit('Fetch.requestPaused', { request: { url: href, method }, resourceType, networkId, requestId: String(nextId) });
     return { decision: decisions.at(-1), finish: () => session.emit('Network.loadingFinished', { requestId: networkId }) };
   }
-  return { failures, session, request, open, dispose };
+  return { failures, decisions, session, request, open, dispose };
 }
 
 test('browser budget restricts navigation, methods and origins before spending network capacity', async () => {
@@ -114,4 +115,12 @@ test('an oversized socket update ends the attempt before forwarding its payload'
   assert.deepEqual(failures, [{ status: 413 }]);
   assert.equal(client.sent.length, 0);
   await dispose();
+});
+
+test('a successful HTTP/2 document response can omit the reason phrase', async () => {
+  const { session, decisions } = await fixture();
+  session.emit('Fetch.requestPaused', { requestId: 'document', resourceType: 'Document',
+    request: { url }, responseStatusCode: 200, responseStatusText: '', responseHeaders: [] });
+  assert.equal(decisions.at(-1).responsePhrase, 'OK');
+  assert.equal(decisions.at(-1).responseCode, 200);
 });

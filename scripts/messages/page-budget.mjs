@@ -49,7 +49,7 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
         const policy = { name: 'Content-Security-Policy',
           value: "sandbox allow-scripts allow-same-origin; worker-src 'none'; frame-src 'none'; form-action 'none'" };
         return session.send('Fetch.continueResponse', { requestId, responseCode: responseStatusCode,
-          responsePhrase: responseStatusText, responseHeaders: [...responseHeaders, policy] });
+          responsePhrase: responseStatusText || 'OK', responseHeaders: [...responseHeaders, policy] });
       }
       return session.send('Fetch.continueResponse', { requestId });
     }
@@ -60,12 +60,18 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
     const publicStreamBootstrap = (resourceType === 'Fetch' || resourceType === 'XHR')
       && request.method === 'POST' && request.url === 'https://api.airframes.io/stream/visitor-token';
     const allowedMethod = request.method === 'GET' || publicStreamBootstrap
-      || (resourceType === 'Preflight' && request.method === 'OPTIONS');
-    const allowed = !closed && reserve() && firstParty(new URL(request.url), 'https:')
-      && allowedMethod && (!navigation || (!navigationStarted && request.url === liveUrl));
+      || (request.method === 'OPTIONS' && (resourceType === 'Preflight' || resourceType === 'XHR' || resourceType === 'Fetch'));
+    const allowed = !closed && firstParty(new URL(request.url), 'https:')
+      && allowedMethod && (!navigation || (!navigationStarted && request.url === liveUrl)) && reserve();
     if (!allowed || (syntheticShell && !navigation)) {
       if (navigation) cancel({ status: 403 });
-      return session.send('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' });
+      try {
+        return await session.send('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' });
+      } catch (error) {
+        // Chromium can discard a removed image before acknowledging the block.
+        if (!String(error.message).includes('Invalid InterceptionId')) throw error;
+      }
+      return;
     }
     navigationStarted ||= navigation;
     active.set(networkId, 0);
