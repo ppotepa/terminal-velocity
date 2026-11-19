@@ -24,6 +24,16 @@ export interface PositionIdentifierHints {
   readonly sourceLocalId?: string;
 }
 
+/** Supplied by a trusted identity resolver, never decoded from provider position data. */
+export interface PositionIdentityDecision {
+  readonly status: 'CONFIRMED';
+  readonly sourceId: PositionSourceId;
+  readonly sourceObservationId: SourceObservationId;
+  readonly aircraftId: AircraftId;
+  /** The address matched by the decision, when the observation carries an ICAO24 hint. */
+  readonly icao24?: string;
+}
+
 export interface PositionObservation {
   readonly schemaVersion: typeof POSITION_OBSERVATION_SCHEMA_VERSION;
   readonly sourceId: PositionSourceId;
@@ -63,6 +73,8 @@ export type PositionParseError =
   | { readonly code: 'INVALID_POSITION_IDENTIFIER'; readonly field: 'sourceId' | 'sourceObservationId' | 'confirmedAircraftId' }
   | { readonly code: 'INVALID_IDENTIFIER_HINTS' }
   | { readonly code: 'UNRESOLVED_AIRCRAFT_IDENTITY' }
+  | { readonly code: 'UNSUPPORTED_CONFIRMED_IDENTITY' }
+  | { readonly code: 'CONFLICTING_POSITION_IDENTIFIERS' }
   | { readonly code: 'MULTIPLE_ALTITUDE_MEASUREMENTS' };
 
 type PlainRecord = Record<string, unknown>;
@@ -113,7 +125,9 @@ function parseIdentifierHints(input: unknown): Result<PositionIdentifierHints, P
 }
 
 /** Validates an already normalized v1 observation; this does not parse any provider's wire format. */
-export function parsePositionObservation(input: unknown): Result<PositionObservation, PositionParseError> {
+export function parsePositionObservation(
+  input: unknown, identityDecision?: PositionIdentityDecision,
+): Result<PositionObservation, PositionParseError> {
   const record = plainRecord(input);
   if (!record) return err({ code: 'INVALID_INPUT', field: 'object' });
   const allowed = [
@@ -225,6 +239,15 @@ export function parsePositionObservation(input: unknown): Result<PositionObserva
     if (typeof value !== 'string') return err({ code: 'INVALID_POSITION_IDENTIFIER', field: 'confirmedAircraftId' });
     const confirmed = aircraftId(value);
     if (!confirmed.ok) return err({ code: 'INVALID_POSITION_IDENTIFIER', field: 'confirmedAircraftId' });
+    if (identityDecision?.status !== 'CONFIRMED'
+      || identityDecision.sourceId !== sourceId.value
+      || identityDecision.sourceObservationId !== observationId.value
+      || identityDecision.aircraftId !== confirmed.value)
+      return err({ code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
+    if (output.identifierHints?.icao24 !== undefined
+      && (typeof identityDecision.icao24 !== 'string'
+        || identityDecision.icao24.toUpperCase() !== output.identifierHints.icao24))
+      return err({ code: 'CONFLICTING_POSITION_IDENTIFIERS' });
     output.confirmedAircraftId = confirmed.value;
   }
   if (!output.identifierHints?.icao24 && !output.confirmedAircraftId)

@@ -33,9 +33,17 @@ Each observation requires:
 `identifierHints` may also contain a callsign or source-local ID. These alone
 are not stable aircraft identities. Without ICAO24 or `confirmedAircraftId`,
 the parser returns `UNRESOLVED_AIRCRAFT_IDENTITY`; malformed confirmed IDs
-return `INVALID_POSITION_IDENTIFIER`. A provider adapter may only set
-`confirmedAircraftId` after an upstream identity decision. The parser validates
-the ID shape but cannot prove that decision or resolve conflicting identifiers.
+return `INVALID_POSITION_IDENTIFIER`. A confirmed ID requires a separate
+`PositionIdentityDecision` supplied by a trusted upstream resolver. The decision
+must be confirmed, name the same source delivery and aircraft ID, and identify
+the same ICAO24 when the observation carries one. An unsupported claim returns
+`UNSUPPORTED_CONFIRMED_IDENTITY`; a missing or different decision ICAO24 returns
+`CONFLICTING_POSITION_IDENTIFIERS`. Provider wire data must never supply the
+decision. The parser checks consistency with the supplied decision; it cannot
+establish that the caller actually obtained that decision from an authoritative
+resolver. Until such a resolver exists, omit `confirmedAircraftId` and retain
+ICAO24 as a hint only. Revalidating a serialized observation with a confirmed
+ID requires the trusted decision again.
 
 Optional measurements preserve provenance and units:
 
@@ -112,6 +120,9 @@ cannot claim an undeclared receiver time basis. Missing coordinates fail
 validation; the adapter must not fill them from a prior position. A future
 provider adapter must map its own units and null semantics explicitly before
 calling this boundary.
+The acceptance context carries the trusted identity decision separately from
+raw provider input, and acceptance rechecks it even if an adapter returns a
+prebuilt canonical object.
 
 `positionFreshnessPolicy` requires a positive `currentWithinMs` threshold.
 `classifyPositionFreshness` compares **observedAt**, not `ingestedAt`, with

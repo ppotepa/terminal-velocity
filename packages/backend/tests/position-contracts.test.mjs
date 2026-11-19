@@ -26,6 +26,12 @@ const base = (overrides = {}) => ({
   ...overrides,
 });
 
+const confirmedDecision = (overrides = {}) => ({
+  status: 'CONFIRMED', sourceId: 'src_positions-test',
+  sourceObservationId: 'delivery:position-1', aircraftId: 'ac_synthetic-1',
+  icao24: 'A0B1C2', ...overrides,
+});
+
 test('v1 contract validates and normalizes an ADS-B observation with an aircraft address', () => {
   const parsed = parsePositionObservation(base());
   assert.equal(parsed.ok, true);
@@ -47,10 +53,31 @@ test('aircraft identity requires ICAO24 or an upstream confirmed stable aircraft
     { code: 'UNRESOLVED_AIRCRAFT_IDENTITY' });
   assert.deepEqual(parsePositionObservation(base({ identifierHints: { callsign: 'ABC123' }, confirmedAircraftId: 'bad' })).error,
     { code: 'INVALID_POSITION_IDENTIFIER', field: 'confirmedAircraftId' });
-  const confirmed = parsePositionObservation(base({ identifierHints: { callsign: 'ABC123' }, confirmedAircraftId: 'ac_synthetic-1' }));
+  const confirmedInput = base({ identifierHints: { callsign: 'ABC123' }, confirmedAircraftId: 'ac_synthetic-1' });
+  assert.deepEqual(parsePositionObservation(confirmedInput).error, { code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
+  const confirmed = parsePositionObservation(confirmedInput, confirmedDecision());
   assert.equal(confirmed.ok, true);
   assert.equal(confirmed.value.confirmedAircraftId, 'ac_synthetic-1');
-  assert.deepEqual(parsePositionObservation(JSON.parse(JSON.stringify(confirmed.value))).value, confirmed.value);
+  assert.deepEqual(parsePositionObservation(JSON.parse(JSON.stringify(confirmed.value)), confirmedDecision()).value,
+    confirmed.value);
+});
+
+test('confirmed identity requires a matching upstream decision bound to this delivery', () => {
+  const input = base({ confirmedAircraftId: 'ac_synthetic-1' });
+  assert.deepEqual(parsePositionObservation(input).error, { code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
+  for (const decision of [
+    confirmedDecision({ status: 'UNRESOLVED' }),
+    confirmedDecision({ sourceId: 'src_other' }),
+    confirmedDecision({ sourceObservationId: 'delivery:other' }),
+    confirmedDecision({ aircraftId: 'ac_other' }),
+  ]) assert.deepEqual(parsePositionObservation(input, decision).error, { code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
+  assert.deepEqual(parsePositionObservation(input, confirmedDecision({ icao24: 'FFFFFF' })).error,
+    { code: 'CONFLICTING_POSITION_IDENTIFIERS' });
+  assert.deepEqual(parsePositionObservation(input, confirmedDecision({ icao24: undefined })).error,
+    { code: 'CONFLICTING_POSITION_IDENTIFIERS' });
+  assert.deepEqual(parsePositionObservation(input, confirmedDecision({ icao24: 123 })).error,
+    { code: 'CONFLICTING_POSITION_IDENTIFIERS' });
+  assert.equal(parsePositionObservation(input, confirmedDecision()).ok, true);
 });
 
 test('coordinate bounds include both poles and the antimeridian but reject out-of-range and nonfinite values', () => {
@@ -195,7 +222,7 @@ test('untrusted accessors are rejected without invoking them and output values a
 test('adapter acceptance enforces canonical fields and configured source capabilities', () => {
   const sourceId = positionSourceId('src_positions-test').value;
   const capabilities = { sourceId, measurementKinds: ['ADS_B'], observedAtBases: ['SOURCE_TIMESTAMP'] };
-  const adapter = { parse(raw) { return parsePositionObservation(raw); } };
+  const adapter = { parse(raw, context) { return parsePositionObservation(raw, context.identityDecision); } };
   const context = { sourceId, ingestedAt: base().ingestedAt, capabilities };
   assert.equal(acceptPositionObservation(adapter, base(), context).ok, true);
   assert.deepEqual(acceptPositionObservation(adapter, base({ measurementKind: 'MLAT' }), context).error,
@@ -217,6 +244,18 @@ test('adapter acceptance enforces canonical fields and configured source capabil
     { code: 'UNRESOLVED_AIRCRAFT_IDENTITY' });
   assert.deepEqual(acceptPositionObservation(adapter, base(), { ...context, ingestedAt: 'invalid' }).error,
     { code: 'INVALID_POSITION_TIME', field: 'ingestedAt' });
+  const claimed = base({ confirmedAircraftId: 'ac_synthetic-1' });
+  assert.deepEqual(acceptPositionObservation(adapter, claimed, context).error,
+    { code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
+  assert.deepEqual(acceptPositionObservation(adapter, claimed, {
+    ...context, identityDecision: confirmedDecision({ icao24: 'FFFFFF' }),
+  }).error, { code: 'CONFLICTING_POSITION_IDENTIFIERS' });
+  assert.equal(acceptPositionObservation(adapter, claimed, {
+    ...context, identityDecision: confirmedDecision(),
+  }).ok, true);
+  const forgedAdapter = { parse() { return { ok: true, value: claimed }; } };
+  assert.deepEqual(acceptPositionObservation(forgedAdapter, null, context).error,
+    { code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
 });
 
 test('canonical JSON roundtrip retains explicit null and does not invent omitted measurements', () => {

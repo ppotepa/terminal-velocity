@@ -205,18 +205,24 @@ It validates the supplied source capability and rejects inconsistent adapter
 results. It requires ICAO24 or an upstream confirmed aircraft ID, rejects
 dual-altitude payloads under schema v1, and uses precision when classifying
 position freshness. Position freshness is independent of radio-message availability.
-See [POSITIONS.md](POSITIONS.md) for the contract and limits. The branch still
-requires exact-commit CI for these review revisions, independent review and merge
-before #14 is accepted. Earlier isolated CI passed at `208820d`; that result
-does not cover the current changes. There is no migration, persistent position
+Confirmed IDs now require a separate upstream decision bound to the source
+delivery, with conflicting ICAO24 claims rejected. See [POSITIONS.md](POSITIONS.md)
+for the contract and limits. Coordinator-run isolated local CI passed for the
+reviewed predecessor revision `2f99770483b886275ebac4b1710567548fdf6659`.
+That result does not verify the subsequent identity fix; the coordinator owns
+exact-SHA CI for the final revision, independent review and merge before #14
+is accepted. There is no migration, persistent position
 state or concurrency change. Before consumers adopt schema v1, rollback is
 removal of the contract and its export. No live position source, storage, map,
 source rights or deployment is claimed here.
 
-In this review revision, `npm ci --offline --ignore-scripts --no-audit --no-fund`,
-`npm run typecheck`, `npm run check:boundaries` (225 source files, 809 dependency
-edges), and `git diff --check` passed in the canonical checkout. `npm run check`
-passed type checking and architecture tests but its workspace tests could not
-run under this shell's Node 20.19.2: Node reported `ERR_UNKNOWN_FILE_EXTENSION`
-for TypeScript imports. The required Node 24 test result for these edits is
-pending coordinator-run isolated CI. No PR merge or hosted CI success is claimed.
+For the identity fix in this checkout, Node 24.22.3 ran
+`npm ci --offline --ignore-scripts --no-audit --no-fund`, the position contract
+suite, type checking, architecture checks (225 source files, 809 dependency
+edges), and backend workspace tests successfully. `git diff --check` passed.
+The full `npm run check` reached the API workspace but failed because this
+shell denies loopback binds (`listen EPERM` on 127.0.0.1); it is not a passing
+full-suite result. The coordinator's isolated local CI passed at
+`2f99770483b886275ebac4b1710567548fdf6659`, before this fix. The final
+revision still needs coordinator-run exact-SHA CI and independent review. No
+PR merge or hosted CI success is claimed.

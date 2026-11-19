@@ -1,6 +1,6 @@
 export {
   parsePositionObservation, POSITION_OBSERVATION_SCHEMA_VERSION,
-  type PositionObservation, type PositionIdentifierHints, type PositionParseError,
+  type PositionObservation, type PositionIdentifierHints, type PositionIdentityDecision, type PositionParseError,
 } from '../domain/position-observation.ts';
 export {
   positionSourceId, sourceObservationId,
