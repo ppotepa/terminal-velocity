@@ -207,10 +207,7 @@ dual-altitude payloads under schema v1, and uses precision when classifying
 position freshness. Position freshness is independent of radio-message availability.
 Confirmed IDs now require a separate upstream decision bound to the source
 delivery, with conflicting ICAO24 claims rejected. See [POSITIONS.md](POSITIONS.md)
-for the contract and limits. Coordinator-run isolated local CI passed for the
-reviewed predecessor revision `2f99770483b886275ebac4b1710567548fdf6659`.
-That result does not verify the subsequent identity fix; the coordinator owns
-exact-SHA CI for the final revision, independent review and merge before #14
+for the contract and limits. Independent review and merge remain before #14
 is accepted. There is no migration, persistent position
 state or concurrency change. Before consumers adopt schema v1, rollback is
 removal of the contract and its export. No live position source, storage, map,
@@ -222,7 +219,6 @@ suite, type checking, architecture checks (225 source files, 809 dependency
 edges), and backend workspace tests successfully. `git diff --check` passed.
 The full `npm run check` reached the API workspace but failed because this
 shell denies loopback binds (`listen EPERM` on 127.0.0.1); it is not a passing
-full-suite result. The coordinator's isolated local CI passed at
-`2f99770483b886275ebac4b1710567548fdf6659`, before this fix. The final
-revision still needs coordinator-run exact-SHA CI and independent review. No
-PR merge or hosted CI success is claimed.
+full-suite result. The coordinator's subsequent isolated local CI passed at
+`b069917`. This documentation edit has not been included in an exact-SHA CI
+run. No PR merge or hosted CI success is claimed.
