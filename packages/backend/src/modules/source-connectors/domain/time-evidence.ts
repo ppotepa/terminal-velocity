@@ -2,9 +2,9 @@ import { epochMillis, type EpochMillis } from '../../../kernel/time/epoch-millis
 import { err, ok, type Result } from '../../../kernel/result.ts';
 import { hasOnlyKeys, plainRecord } from './input-validation.ts';
 
-export const TIME_PRECISIONS = ['MILLISECOND', 'SECOND', 'MINUTE', 'HOUR', 'DAY', 'UNKNOWN'] as const;
+export const TIME_PRECISIONS = Object.freeze(['MILLISECOND', 'SECOND', 'MINUTE', 'HOUR', 'DAY', 'UNKNOWN'] as const);
 export type TimePrecision = typeof TIME_PRECISIONS[number];
-export const TIME_BASES = ['OBSERVED', 'RECEIVED', 'PROVIDER', 'INGESTED'] as const;
+export const TIME_BASES = Object.freeze(['OBSERVED', 'RECEIVED', 'PROVIDER', 'INGESTED'] as const);
 export type TimeBasis = typeof TIME_BASES[number];
 
 export interface ObservationTimeEvidence {
