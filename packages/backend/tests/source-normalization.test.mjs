@@ -129,6 +129,31 @@ test('reception and frame paths require their supplied evidence and validate sta
     .error.code, 'CAPABILITY_MISMATCH');
 });
 
+test('rendered timestamps retain fractional precision across all source clocks', () => {
+  for (const [suffix, canonical, precision] of [
+    ['Z', '.000Z', 'SECOND'], ['.1Z', '.100Z', 'MILLISECOND'],
+    ['.12Z', '.120Z', 'MILLISECOND'], ['.123Z', '.123Z', 'MILLISECOND'],
+  ]) {
+    const at = `2026-11-19T10:00:00${suffix}`;
+    const delivery = { source: pageUrl, retrievedAt: Date.parse('2026-11-19T10:01:00Z'), raw: {
+      icao: 'ABC123', messagePath: '/messages/synthetic-fraction', text: 'Synthetic only', station: null,
+      evidence: { receiverReceivedAt: at, sourceObservedAt: at, providerPublishedAt: at, uncertaintyMs: '500' },
+    } };
+    const result = normalizeRenderedDelivery(delivery, context, capability);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    for (const key of ['receiverReceivedAt', 'sourceObservedAt', 'providerPublishedAt']) {
+      assert.equal(result.value.provenance[key].iso, `2026-11-19T10:00:00${canonical}`);
+      assert.equal(result.value.provenance[key].precision, precision);
+      assert.equal(result.value.provenance[key].uncertaintyMs, 500);
+    }
+    assert.equal(result.value.observation.receivedAt.precision, precision);
+    assert.equal(result.value.observation.observedAt.precision, precision);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), result.value);
+    delivery.raw.evidence.receiverReceivedAt = '2026-11-19T10:00:00.1234Z';
+    assert.equal(normalizeRenderedDelivery(delivery, context, capability).error.code, 'UNTRUSTED_TIME');
+  }
+});
+
 test('publication-only receipt retains its basis without creating an observation clock', () => {
   const raw = fixture('message'); delete raw.receiverReceivedAt; delete raw.sourceObservedAt;
   const result = value(raw);

@@ -105,6 +105,10 @@ participant roles, declared data level and separate bearer/application protocol.
 The rendered-card adapter maps displayed optional fields and treats feeder labels
 as provenance, never as invented receptions. Schema drift, invalid clocks,
 conflicting hints and incompatible layouts fail explicitly. Synthetic golden
+regressions cover text-only layout drift and mixed recognized/incompatible records;
+the scroller reader checks content outside recognized cards even when cards exist.
+Fractional rendered UTC timestamps with one to three digits retain `MILLISECOND`
+precision after ISO normalization, with declared uncertainty unchanged. Synthetic
 fixtures and a browser-to-normalizer regression are included in existing root
 verification entry points. No SQL, demo API, source rights or retention policy
 changed. The provider API remains inactive.

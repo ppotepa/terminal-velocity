@@ -106,8 +106,29 @@ test('synthetic displayed fields normalize end to end; empty and incompatible la
     assert.equal((await observePage(page, 'ABC123', 0)).status, 'NO_OBSERVATIONS_COVERAGE_UNKNOWN');
     html = '<div class="vue-recycle-scroller__item-wrapper"></div>';
     assert.equal((await observePage(page, 'ABC123', 0)).status, 'NO_OBSERVATIONS_COVERAGE_UNKNOWN');
+    html = '<div>' + card + '</div><div class="vue-recycle-scroller__resize-observer"></div>';
+    assert.equal((await observePage(page, 'ABC123', 0)).status, 'OBSERVED');
+    html = '<div>' + card + '<article>Incompatible sibling</article></div>';
+    assert.equal((await observePage(page, 'ABC123', 0)).status, 'PARTIAL_LAYOUT');
     html = '<article>Incompatible fabricated layout</article>';
     assert.equal((await observePage(page, 'ABC123', 0)).status, 'PARTIAL_LAYOUT');
+    for (const incompatible of ['Incompatible text-only layout',
+      '<article>Incompatible fabricated record</article>',
+      '<div class="vue-recycle-scroller__item-view"><article>Changed card</article></div>']) {
+      for (const prefix of ['', card]) {
+        html = prefix + incompatible;
+        const partial = await observePage(page, 'ABC123', 0);
+        assert.equal(partial.status, 'PARTIAL_LAYOUT', html);
+        assert.equal(partial.messages.length, prefix ? 1 : 0);
+        assert.equal(validateWindow(partial, 'ABC123', 1), 'INVALID_ENVELOPE');
+      }
+    }
+    html = '<div role="status">No messages</div>';
+    assert.equal((await observePage(page, 'ABC123', 0)).status, 'NO_OBSERVATIONS_COVERAGE_UNKNOWN');
+    html += '<article>Incompatible fabricated record</article>';
+    assert.equal((await observePage(page, 'ABC123', 0)).status, 'PARTIAL_LAYOUT');
+    html = `<div class="vue-recycle-scroller__item-wrapper">${card}</div>`;
+    assert.equal((await observePage(page, 'ABC123', 0)).status, 'OBSERVED');
     html = card.replace('ABC123', 'no aircraft address');
     assert.equal((await observePage(page, 'ABC123', 0)).status, 'PARTIAL_LAYOUT');
     html = card.replace('<dt>Registration</dt>', '<dt>Registration</dt><dd>N-OTHER</dd><dt>Registration</dt>');

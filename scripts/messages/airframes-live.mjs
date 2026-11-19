@@ -15,7 +15,31 @@ export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes
   let unsupported = false;
   let overflow = false;
   let bytes = 0;
-  for (const card of scroller.querySelectorAll(selector)) {
+  const recognizedCards = new Set(scroller.querySelectorAll(selector));
+  // Account for every node outside recognized cards, including text-only drift
+  // and incompatible siblings. A known card must not hide an unknown record.
+  const pending = [...scroller.childNodes];
+  while (pending.length) {
+    const node = pending.pop();
+    if (node.nodeType === 8) continue; // DOM comments are not records.
+    if (node.nodeType === 3) {
+      if (node.textContent.trim()) unsupported = true;
+      continue;
+    }
+    if (recognizedCards.has(node)) continue;
+    if (node.nodeType !== 1) { unsupported = true; continue; }
+    if (node.matches('[role="status"]') && node.innerText.trim() === 'No messages'
+      && recognizedCards.size === 0) continue;
+    if (node.matches('.vue-recycle-scroller__resize-observer') && !node.innerText.trim()) continue;
+    const structuralDiv = node.tagName === 'DIV' && !node.className
+      && (node.querySelector(selector) || !node.childNodes.length);
+    if (!structuralDiv && !node.matches('.vue-recycle-scroller__item-wrapper, .vue-recycle-scroller__item-view')) {
+      unsupported = true;
+      continue;
+    }
+    pending.push(...node.childNodes);
+  }
+  for (const card of recognizedCards) {
     if (!card.getClientRects().length) continue;
     cards++;
     const links = [...card.querySelectorAll('a[href]')].filter(link => link.origin === location.origin && link.getClientRects().length);
@@ -64,12 +88,6 @@ export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes
     if (messages.size === maxCards || bytes + size > maxWindowBytes) { overflow = true; break; }
     bytes += size;
     messages.set(message.messagePath, message);
-  }
-  if (cards === 0 && scroller.children.length > 0) {
-    const empty = scroller.querySelector('[role=\"status\"]');
-    const wrapper = scroller.querySelector('.vue-recycle-scroller__item-wrapper');
-    const emptyWrapper = wrapper && wrapper.children.length === 0 && !scroller.textContent.trim();
-    if (!emptyWrapper && (!empty || empty.innerText.trim() !== 'No messages')) unsupported = true;
   }
   return { messages: [...messages.values()], cards, unsupported, overflow };
 }

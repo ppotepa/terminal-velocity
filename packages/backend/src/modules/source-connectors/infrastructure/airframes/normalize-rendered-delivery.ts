@@ -18,7 +18,7 @@ export function normalizeRenderedDelivery(delivery: PageDelivery,
     ['providerPublishedAt', 'PROVIDER']]) {
     const at = evidence[key!];
     if (at !== undefined) times[key!] = { at, basis,
-      precision: /\.\d{3}Z$/.test(at) ? 'MILLISECOND' : 'SECOND',
+      precision: /\.\d{1,3}Z$/.test(at) ? 'MILLISECOND' : 'SECOND',
       uncertaintyMs: /^\d+$/.test(evidence['uncertaintyMs'] ?? '') ? Number(evidence['uncertaintyMs']) : undefined };
   }
   const raw = { schemaVersion: EXTRACTED_RECORD_VERSION,

@@ -5,7 +5,13 @@
 - Owner: implementation agent assigned by coordinator.
 - Branch: feature/epic4-issue-10; baseline 4761d31 (merge PR #60 for #9).
 - Dependency: #9 engineering merged and verified at 4761d31; external source acceptance remains open.
-- Last update: 2026-11-19 19:09 UTC.
+- Last update: 2026-11-19 19:14 UTC.
+- Review fixes: implementation prepared locally; owner implementation agent, same branch,
+  dependency #9 unchanged. Validate the complete rendered scroller layout and
+  fractional timestamp precision; add browser and normalization regressions,
+  rerun local checks and hand exact-SHA CI back to the coordinator. External
+  acceptance remains BLOCKED pending permitted versioned samples and verification
+  of the fabricated optional selectors.
 - History: 18:57 UTC — local IN PROGRESS recorded before implementation;
   19:09 UTC — engineering handoff, external acceptance remains BLOCKED.
 - Planned paths: source-connectors normalization contracts/adapters, rendered-page reader,
@@ -40,9 +46,9 @@ external acceptance remains open. This handoff records the local implementation 
 
 - [x] Canonical result includes correct provenance and declared data level —
   verified with synthetic message, reception and frame inputs.
-- [x] Unknown/invalid provider variants fail explicitly without dropped silent
+- [ ] Unknown/invalid provider variants fail explicitly without dropped silent
   records — strict synthetic versioned schema and negative regressions. Browser
-  layout behavior has an executable regression awaiting sandbox-capable CI.
+  layout behavior has expanded executable regressions awaiting sandbox-capable CI.
 - [x] All fixtures are anonymized and permitted for repository use — all are
   repository-authored synthetic data with no real-source material; fixture README
   explicitly records this distinction. No real-source permission is asserted.
@@ -79,6 +85,52 @@ The unisolated command above provides individual test counts that the default
 isolated runner does not expose here; it does not substitute for failed API,
 browser or PostgreSQL checks. No assertions or sandbox protections were weakened.
 These are local results, not coordinator CI or hosted CI evidence.
+
+### Review corrections — 2026-11-19
+
+Review baseline: `7eb83cd9673884453237726117d00fed806f7b6f`. These fixes are
+uncommitted worktree changes; exact-SHA CI must run after the coordinator commits
+them. The earlier coordinator-supplied CI results concern the baseline and do not
+verify this patch.
+
+- The reader now accounts for all scroller nodes outside recognized cards. Unknown
+  text or elements produce `PARTIAL_LAYOUT`, including alongside valid cards or an
+  empty-state label. Valid records remain available in the transient preview, but
+  the normalization window validator rejects the partial window. Browser fixtures
+  cover text-only drift, mixed records, changed item layouts, empty status and
+  empty wrapper success, and a valid card inside the supported wrapper.
+- One-, two- and three-digit fractional UTC timestamps map to the contract's
+  `MILLISECOND` category, with ISO padding and declared uncertainty preserved.
+  Tests exercise all three source clocks, canonical observation time, serialization
+  and rejection of unsupported four-digit fractions. Whole seconds remain `SECOND`.
+- The real `crawl ICAO24` browser acquisition path remains in place. No live
+  acquisition was performed; no real content was retained. No SQL, migration or
+  startup changes are included in this correction.
+
+All commands below used the existing Node 24.22.3 binary via
+`PATH="$PWD/tmp/node24/bin:$PATH"`. This patch's local results supersede the older
+table for review verification:
+
+| Command | Actual result |
+|---|---|
+| `npm ci --offline --ignore-scripts --no-audit --no-fund` | PASS, 21 packages, exit 0; sandbox `fchown` warnings |
+| `node packages/backend/tests/source-normalization.test.mjs` | PASS, 14 tests, 0 failed/skipped |
+| `npm run check` | FAIL at API tests: 2/6 API files pass, 4 fail; typecheck, boundary check, architecture file and all 10 backend files pass |
+| `node --test --test-isolation=none packages/backend/tests/*.test.mjs scripts/architecture/*.test.mjs scripts/messages/page-budget.test.mjs` | PASS, 146 tests, 0 failed/skipped |
+| `npm run test:messages` | PASS, 3/3 test files |
+| `node --test --test-isolation=none scripts/messages/page-budget.test.mjs packages/backend/tests/airframes-transport.test.mjs packages/backend/tests/source-normalization.test.mjs` | PASS, 39 tests, 0 failed/skipped |
+| `npm run test:browser` | FAIL, 0/2 files pass; browser launch unavailable |
+| `node scripts/messages/airframes-live.test.mjs` | 1/5 tests passes; 4 fail during Chromium startup with `shutdown: Operation not permitted`; new rendered regressions could not execute |
+| `npm run demo` | PASS, exit 0 |
+| `npm run smoke` | FAIL, `listen EPERM 127.0.0.1` |
+| `npm run test:postgres:local` | BLOCKED before tests: `initdb must run as an unprivileged user` |
+| `git diff --check` | PASS |
+
+The coordinator must rerun exact-SHA checks, including browser E2E, under the
+trusted unprivileged CI worker. No passing browser or exact-SHA CI result for this
+patch is claimed. Real-provider acceptance remains **BLOCKED** until the owner
+supplies permitted, versioned source samples and verifies the fabricated optional
+selectors against them. Merge and final issue acceptance remain coordinator-owned.
 
 ### Coordinator actions and remaining uncertainty
 
