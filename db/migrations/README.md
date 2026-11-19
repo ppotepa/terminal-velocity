@@ -1,10 +1,10 @@
 # PostgreSQL migrations and test isolation
 
-These migrations implement the Stage 2 storage slice. The larger DDL under `docs/architecture/persistence` remains a design reference. It is not executed by the application.
+These migrations implement the Stage 2 storage slice and private Stage 3 delivery metadata. The larger DDL under `docs/architecture/persistence` remains a design reference. It is not executed by the application.
 
 ## Ownership and application permissions
 
-Each schema has its own `NOLOGIN` owner: `tv_ingestion_owner`, `tv_correlation_owner`, `tv_delivery_owner`, and `tv_availability_owner`. The `tv_runtime` permission role also has `NOLOGIN`. A separately provisioned application login inherits that role; it must not be a member of any owner role. Migrations reject unexpected privileged role attributes and inherited memberships when accepting existing roles.
+Each schema has its own `NOLOGIN` owner: `tv_ingestion_owner`, `tv_correlation_owner`, `tv_delivery_owner`, `tv_availability_owner`, and `tv_source_ingestion_owner`. The `tv_runtime` permission role also has `NOLOGIN`. A separately provisioned application login inherits that role; it must not be a member of any owner role. Migrations reject unexpected privileged role attributes and inherited memberships when accepting existing roles.
 
 The runtime can insert and read immutable messages, decision history, and outbox events. It can update the current decision head, delivery state, and availability contributions. Only `fanout_completed_at` is updateable on an outbox event. Runtime grants do not include DDL or deletion. All tables are addressed through qualified schema names.
 
@@ -57,3 +57,14 @@ GitHub Actions uses an ephemeral `postgres:18.7` service and runs the integratio
 The suite exercises independent-process first-write contention, revision CAS, atomic decision/outbox writes, SQL rollback and capability lifetime, late-committing outbox records, `SKIP LOCKED` queue claims, lease token fencing, recovery, bounded retries, consumer-specific inbox deduplication, atomic projection rollback, contribution correction and tombstones, runtime grants, and migration drift. Application integration tests also restart the actual API process and read persisted state.
 
 The implemented projection serves one fixed synthetic public scope. This schema does not implement multi-tenant authorization, real receiver ingestion, a broker, or the complete architecture catalog.
+
+
+## Migration 002 and the S3-04 storage contract
+
+`002_source_deliveries.sql` creates the private `source_ingestion` schema. A scoped delivery key consists of the configured source, provider, account, source epoch and opaque external ID. The synthetic adapter supplies stable keys. A later provider adapter must establish the same guarantee before using its IDs. An insert collision raises PostgreSQL `23505`. S3-04 owns classifying replays and conflicts under concurrency.
+
+The delivery row records a digest, level, schema/decoder/capability versions, receipt and optional observation clock evidence, retrieval and ingestion times, and disposition with a quarantine reason when applicable. Provenance contains a parser version and a page URL stripped of credentials, query and fragment (credential-bearing URLs are rejected). Callers supply a public-safe page path. `METADATA_ONLY` excludes raw pages, decoded text and frame bytes. Source/time and partial quarantine indexes support bounded scans. Issue #6 still gates retaining real provider data.
+
+`postgresSourceDeliveryStore(executor)` inserts the delivery and optional provider direction/bearer or receiver ID/frequency/signal facts in one SQL statement. A lookup by scoped key returns those facts. Composite foreign keys enforce each detail table's data level. S3-04 can supply a transaction-bound executor and append a source outbox event in that transaction. The outbox has a separate event ID, a delivery-scoped stream revision, a reference-only payload and a fanout marker. Stage 2 consumer deliveries still reference the correlation outbox. S3-07 owns the consumer bridge.
+
+Rollback of the application can leave the additive schema in place. Preserve migration history and use a follow-up migration for any schema changes.

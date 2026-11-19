@@ -22,3 +22,6 @@ export {
 } from '../domain/source-observation.ts';
 export { sourceObservationContractParser, type SourceParser } from '../ports/source-parser.ts';
 export { type SourceTransport, type SourceTransportError } from '../ports/source-transport.ts';
+export type {
+  DeliveryDisposition, SourceDeliveryKey, SourceDeliveryOrigin, SourceDeliveryStore, StoredSourceDelivery,
+} from '../ports/source-delivery-store.ts';
