@@ -45,3 +45,27 @@ test('private dry-run renders the synthetic shell and reports counts without acc
   assert.equal((await acquire('dry-run', '123456')).inspected, 0);
   await assert.rejects(acquire('dry-run', '*'), /scope/);
 });
+
+test('leaving the live path between samples discards the window before reading off-scope cards', async () => {
+  const browser = await chromium.launch({ chromiumSandbox: true, executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium-headless-shell' });
+  try {
+    const page = await browser.newPage();
+    await page.route(liveUrl, route => route.fulfill({ contentType: 'text/html', body: `
+      <div class="messages-scroller"><div class="vue-recycle-scroller__item-view"><div class="mb-4 border">
+        <a href="/airframes/fixture">ABC123</a><a href="/messages/one">Details</a>
+        <div class="bg-inner">Synthetic message</div></div></div></div>
+      <script>
+        const scroller = document.querySelector('.messages-scroller');
+        const query = scroller.querySelectorAll.bind(scroller);
+        window.samplePaths = [];
+        scroller.querySelectorAll = selector => {
+          samplePaths.push(location.pathname);
+          queueMicrotask(() => history.pushState(null, '', '/messages/history'));
+          return query(selector);
+        };
+      </script>` }));
+    const result = await observePage(page, 'ABC123', 1500);
+    assert.deepEqual(result, { status: 'HTTP_FAILURE', httpStatus: 403 });
+    assert.deepEqual(await page.evaluate(() => window.samplePaths), ['/messages/live']);
+  } finally { await browser.close(); }
+});

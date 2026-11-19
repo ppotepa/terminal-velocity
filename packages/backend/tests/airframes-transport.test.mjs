@@ -7,7 +7,7 @@ import { pageUrl } from '../src/modules/source-connectors/infrastructure/airfram
 const icao = 'ABC123';
 const row = { icao, messagePath: '/messages/fixture', text: 'Synthetic', station: null };
 const page = (rows = [row]) => ({ status: 200, body: { source: pageUrl, icao, status: 'OBSERVED', messages: rows } });
-const preview = async () => 'PREVIEWED';
+const accept = async () => ({ ok: true, value: { outcome: 'CREATED' } });
 
 function setup(read) {
   let now = 1000;
@@ -34,22 +34,22 @@ test('429 and unavailable responses respect quota, date/seconds Retry-After and 
   for (const retryAfter of ['5', 'Thu, 01 Jan 1970 00:00:06 GMT']) {
     const { connection, starts } = setup(n => n === 1 ? { status: 429, retryAfter }
       : n === 2 ? { status: 503 } : page());
-    assert.equal(await connection.start(preview), 'COMPLETE');
+    assert.equal(await connection.start(accept), 'COMPLETE');
     assert.deepEqual(starts, [1000, 6000, 9000]);
   }
   const { connection, starts } = setup(() => ({ status: 429, retryAfter: '60' }));
-  assert.equal(await connection.start(preview), 'RATE_LIMITED');
-  assert.equal(await connection.start(preview), 'RATE_LIMITED');
+  assert.equal(await connection.start(accept), 'RATE_LIMITED');
+  assert.equal(await connection.start(accept), 'RATE_LIMITED');
   assert.deepEqual(starts, [1000]);
 });
 
 test('repeated disconnects stop after three attempts and permanent responses do not retry', async () => {
   const { connection, starts } = setup(() => { throw Error('unavailable'); });
-  assert.equal(await connection.start(preview), 'TEMPORARY_FAILURE');
+  assert.equal(await connection.start(accept), 'TEMPORARY_FAILURE');
   assert.deepEqual(starts, [1000, 2500, 5500]);
   for (const status of [302, 401, 403, 404]) {
     const run = setup(() => ({ status }));
-    assert.equal(await run.connection.start(preview), 'PERMANENT_FAILURE');
+    assert.equal(await run.connection.start(accept), 'PERMANENT_FAILURE');
     assert.equal(run.starts.length, 1);
   }
 });
@@ -88,7 +88,7 @@ test('stop drains pending acceptance and suppresses the next delivery; concurren
   assert.equal(connection.health().accepted, 1);
   assert.equal(connection.health().state, 'DISCONNECTED');
   assert.equal(calls, 1);
-  assert.equal(await connection.start(preview), 'COMPLETE');
+  assert.equal(await connection.start(accept), 'COMPLETE');
   assert.deepEqual(starts, [1000, 2000]);
 });
 
@@ -104,6 +104,15 @@ test('cancelled reads ignore late responses and pre-aborted runs open no page', 
   await stop;
   assert.equal(await connection.start(assert.fail, outer.signal), 'STOPPED');
   assert.equal(starts.length, 1);
+});
+
+test('a preview result from a durable callback fails the batch before the next delivery', async () => {
+  const transport = createProviderConnector('crawl', icao, { kind: 'SYNTHETIC_PAGE',
+    read: async () => page([row, { ...row, messagePath: '/messages/second' }]) });
+  let calls = 0;
+  assert.equal(await transport.start(async () => { calls++; return 'PREVIEWED'; }), 'ACCEPTANCE_FAILED');
+  assert.equal(calls, 1);
+  assert.equal(transport.health().accepted, 0);
 });
 
 test('uncertain commits retry the identical delivery; permanent acceptance failures stop', async () => {
@@ -150,7 +159,7 @@ test('on-demand preview hands transient cards to its caller without calling dura
   const cards = [];
   const transport = createProviderConnector('crawl', icao, { kind: 'ON_DEMAND_PREVIEW',
     read: async () => page(), inspect: envelope => cards.push(envelope.raw) });
-  assert.equal(await transport.start(assert.fail), 'COMPLETE');
+  assert.equal(await transport.start(), 'COMPLETE');
   assert.deepEqual(cards, [row]);
   assert.equal(transport.health().accepted, 0);
 });
@@ -162,7 +171,7 @@ for (const status of ['PARTIAL_LAYOUT', 'TRUNCATED']) test(`${status} validates 
     response.body.status = status;
     const transport = createProviderConnector('crawl', icao, { kind: 'ON_DEMAND_PREVIEW',
       read: async () => response, inspect: envelope => cards.push(envelope.raw) });
-    assert.equal(await transport.start(assert.fail), expected);
+    assert.equal(await transport.start(), expected);
     assert.deepEqual(cards, expected === 'COMPLETE' ? [row] : []);
     assert.equal(transport.health().accepted, 0);
   }

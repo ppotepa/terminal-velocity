@@ -21,7 +21,7 @@ export {
   type ReceiverReceptionObservation, type FrameObservation, type AddressHints, type SourceParseError,
 } from '../domain/source-observation.ts';
 export { sourceObservationContractParser, type SourceParser } from '../ports/source-parser.ts';
-export { type SourceTransport, type SourceTransportError, type SourceDeliveryEnvelope, type SourceDeliveryReader, type ConnectionOutcome, type ProviderConnectionHealth } from '../ports/source-transport.ts';
+export { type SourcePreview, type SourceTransport, type SourceTransportError, type SourceDeliveryEnvelope, type SourceDeliveryReader, type ConnectionOutcome, type ProviderConnectionHealth } from '../ports/source-transport.ts';
 export type {
   DeliveryDisposition, SourceDeliveryKey, SourceDeliveryOrigin, SourceDeliveryStore, StoredSourceDelivery,
 } from '../ports/source-delivery-store.ts';

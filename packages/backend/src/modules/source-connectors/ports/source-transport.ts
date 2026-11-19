@@ -20,10 +20,14 @@ export interface SourceDeliveryEnvelope<Raw> {
 
 /** A private observation window. Only a committed acceptance result counts as acknowledged. */
 export interface SourceTransport<Raw> {
-  start(onDelivery: (raw: Raw) => Promise<AcceptanceResult | 'PREVIEWED'>,
+  start(onDelivery: (raw: Raw) => Promise<AcceptanceResult>,
     signal?: AbortSignal): Promise<ConnectionOutcome>;
   stop(): Promise<void>;
   health(): ProviderConnectionHealth;
+}
+
+export interface SourcePreview extends Pick<SourceTransport<never>, 'stop' | 'health'> {
+  start(signal?: AbortSignal): Promise<ConnectionOutcome>;
 }
 
 export type ConnectionOutcome = 'COMPLETE' | 'STOPPED' | 'API_UNAVAILABLE' | 'RIGHTS_BLOCKED'

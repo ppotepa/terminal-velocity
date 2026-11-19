@@ -1,3 +1,5 @@
+import { openSocket } from './socket-peer.mjs';
+
 // These budgets cover the page's own traffic for one anonymous browser window.
 const maxRequests = 96, maxInFlight = 16, maxSocketMessages = 256;
 const bootstrapTypes = new Set(['Document', 'Fetch', 'XHR', 'Script', 'Preflight']);
@@ -9,7 +11,7 @@ function firstParty(url, protocol) {
     && !/(^|[./_-])(analytics|telemetry|stats|tracking|plausible|matomo|umami)([./_-]|$)/i.test(url.hostname + url.pathname);
 }
 
-export async function boundPage(context, page, liveUrl, cancel, syntheticShell) {
+export async function boundPage(context, page, liveUrl, cancel, syntheticShell, connect = openSocket) {
   let requests = 0, totalBytes = 0, navigationStarted = false, closed = false;
   const active = new Map();
   let streamedDocumentId;
@@ -131,7 +133,14 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
       return route.close();
     }
     socket = route;
-    server = route.connectToServer();
+    try {
+      server = connect(route, new URL(liveUrl).origin, maxResponseBytes, failure => {
+        if (!closed) cancel(failure);
+      });
+    } catch {
+      cancel({ status: 503 });
+      return route.close();
+    }
     function forward(destination, message) {
       const size = Buffer.byteLength(message);
       if (closed) return;
@@ -144,6 +153,8 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
     const disconnected = () => { if (!closed) cancel({ status: 503 }); };
     route.onClose(disconnected);
     server.onClose(disconnected);
+    // Playwright opens the page side after the routing callback settles.
+    return server.ready;
   });
   return async () => {
     closed = true;

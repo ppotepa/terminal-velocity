@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
+import { createProviderConnector } from '../../packages/backend/src/modules/source-connectors/composition/create-provider-connector.ts';
 import { boundPage } from './page-budget.mjs';
+import { openSocket } from './socket-peer.mjs';
+import { syntheticUpgrade } from './synthetic-upgrade.mjs';
 
 const url = 'https://app.airframes.io/messages/live';
 const limit = 8 * 1024 * 1024;
 
-async function fixture(readDocument = () => ({ data: '<html></html>', eof: true })) {
+async function fixture(readDocument = () => ({ data: '<html></html>', eof: true }),
+  connect = route => route.connectToServer()) {
   const session = new EventEmitter();
   const failures = [], decisions = [];
   let nextId = 0, open;
@@ -19,7 +23,7 @@ async function fixture(readDocument = () => ({ data: '<html></html>', eof: true 
   const dispose = await boundPage({
     routeWebSocket: async (_, callback) => { open = callback; },
     newCDPSession: async () => session,
-  }, {}, url, failure => failures.push(failure));
+  }, {}, url, failure => failures.push(failure), undefined, connect);
   function request(href, resourceType = 'Script', method = 'GET', networkId = String(++nextId)) {
     session.emit('Fetch.requestPaused', { request: { url: href, method }, resourceType, networkId, requestId: String(nextId) });
     return { decision: decisions.at(-1), finish: () => session.emit('Network.loadingFinished', { requestId: networkId }) };
@@ -164,4 +168,43 @@ test('a chunked document over the decoded response limit never reaches the rende
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(failures, [{ status: 413 }]);
   assert.deepEqual(decisions, []);
+});
+
+for (const status of [429, 403]) {
+  test(`socket upgrade HTTP ${status} is reported with its original cooldown before close`, async t => {
+    const urls = syntheticUpgrade(t, { status });
+    const target = 'wss://ws.airframes.io/fixture';
+    const windows = [];
+    const transport = createProviderConnector('crawl', 'ABC123', { kind: 'ON_DEMAND_PREVIEW', inspect: assert.fail,
+      async read() {
+        const window = await fixture(undefined, openSocket);
+        windows.push(window);
+        await window.open({ ...peer(), url: () => target, protocols: () => [] });
+        await window.dispose();
+        return window.failures[0];
+      },
+    });
+    assert.equal(await transport.start(), status === 429 ? 'RATE_LIMITED' : 'PERMANENT_FAILURE');
+    assert.deepEqual(urls, [target]);
+    assert.equal(windows.length, 1);
+    assert.deepEqual(windows[0].failures[0], { status, retryAfter: '60' });
+  });
+}
+
+test('a successful anonymous upgrade exchanges a text frame and shuts down both peers', async t => {
+  const closed = Promise.withResolvers();
+  const urls = syntheticUpgrade(t, {
+    onMessage(peer, message) { assert.equal(message, 'ready'); peer.send('fixture'); },
+    onClose: closed.resolve,
+  });
+  const target = 'wss://ws.airframes.io/fixture';
+  const socket = openSocket({ url: () => target, protocols: () => [] }, new URL(url).origin, limit, assert.fail);
+  const reply = Promise.withResolvers();
+  socket.onMessage(reply.resolve);
+  await socket.ready;
+  socket.send('ready');
+  assert.equal(await reply.promise, 'fixture');
+  await socket.close();
+  await closed.promise;
+  assert.deepEqual(urls, [target]);
 });

@@ -7,7 +7,9 @@ export const liveUrl = pageUrl;
 const cardSelector = '.vue-recycle-scroller__item-view .mb-4.border';
 
 /** Runs inside the rendered page. Return plain data only for the selected aircraft. */
-export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes, maxWindowBytes, envelopeOverhead }) {
+export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes, maxWindowBytes, envelopeOverhead, liveUrl }) {
+  const scope = new URL(liveUrl);
+  if (location.origin !== scope.origin || location.pathname !== scope.pathname) return null;
   const messages = new Map();
   let cards = 0;
   let unsupported = false;
@@ -44,48 +46,69 @@ export function readCards(scroller, { icao, selector, maxCards, maxEnvelopeBytes
 export async function observePage(page, icao, windowMs = 10000, expiresAt = Infinity) {
   if (!/^[A-F0-9]{6}$/.test(icao) || !Number.isSafeInteger(windowMs) || windowMs < 0 || windowMs > 10000)
     throw new Error('Invalid observation window or aircraft scope');
-  const remaining = limit => Math.max(1, Math.min(limit, expiresAt - Date.now()));
-  const response = await page.goto(liveUrl, { waitUntil: 'domcontentloaded', timeout: remaining(20000) });
-  const current = new URL(page.url());
   const expected = new URL(liveUrl);
-  if (current.origin !== expected.origin || current.pathname !== expected.pathname)
-    throw new Error('Unexpected live page');
-  if (!response || response.status() !== 200) return { status: 'HTTP_FAILURE',
-    httpStatus: response?.status() ?? 503, retryAfter: await response?.headerValue('retry-after') };
-  const scroller = page.locator('.messages-scroller');
-  await scroller.waitFor({ state: 'attached', timeout: remaining(10000) });
-  // The site can unmount the live list when its search form is submitted.
-  // Match inside the rendered live list without navigating into archive search.
-  const messages = new Map();
-  let sawCards = false;
-  let unsupported = false;
-  let overflow = false;
-  let bytes = 0;
-  // Reserve the wrapper once per card, including room for the retrieval timestamp.
-  const envelopeOverhead = Buffer.byteLength(JSON.stringify({ source: liveUrl, raw: null,
-    retrievedAt: Number.MAX_SAFE_INTEGER })) - 4; // JSON null is replaced by the serialized card.
-  const deadline = Math.min(Date.now() + windowMs, expiresAt);
-  do {
-    const sample = await scroller.evaluate(readCards, { icao, selector: cardSelector, maxCards, maxEnvelopeBytes, maxWindowBytes, envelopeOverhead }, { timeout: remaining(3000) });
-    sawCards ||= sample.cards > 0;
-    unsupported ||= sample.unsupported;
-    overflow ||= sample.overflow;
-    for (const message of sample.messages) {
-      const previous = messages.get(message.messagePath);
-      bytes += Buffer.byteLength(JSON.stringify(message));
-      bytes += previous ? -Buffer.byteLength(JSON.stringify(previous)) : envelopeOverhead;
-      if (bytes > maxWindowBytes || (!previous && messages.size === maxCards)) {
-        overflow = true;
-        break;
+  const inScope = href => {
+    const url = new URL(href);
+    return url.origin === expected.origin && url.pathname === expected.pathname;
+  };
+  const denied = { status: 'HTTP_FAILURE', httpStatus: 403 };
+  let leftScope = false;
+  const onNavigate = frame => {
+    if (frame === page.mainFrame() && !inScope(frame.url())) leftScope = true;
+  };
+  page.on('framenavigated', onNavigate);
+  try {
+    return await sampleWindow();
+  } catch (error) {
+    if (leftScope) return denied;
+    throw error;
+  } finally {
+    page.off('framenavigated', onNavigate);
+  }
+
+  async function sampleWindow() {
+    const remaining = limit => Math.max(1, Math.min(limit, expiresAt - Date.now()));
+    const response = await page.goto(liveUrl, { waitUntil: 'domcontentloaded', timeout: remaining(20000) });
+    if (leftScope || !inScope(page.url())) return denied;
+    if (!response || response.status() !== 200) return { status: 'HTTP_FAILURE',
+      httpStatus: response?.status() ?? 503, retryAfter: await response?.headerValue('retry-after') };
+    const scroller = page.locator('.messages-scroller');
+    await scroller.waitFor({ state: 'attached', timeout: remaining(10000) });
+    // The site can unmount the live list when its search form is submitted.
+    // Match inside the rendered live list without navigating into archive search.
+    const messages = new Map();
+    let sawCards = false;
+    let unsupported = false;
+    let overflow = false;
+    let bytes = 0;
+    // Reserve the wrapper once per card, including room for the retrieval timestamp.
+    const envelopeOverhead = Buffer.byteLength(JSON.stringify({ source: liveUrl, raw: null,
+      retrievedAt: Number.MAX_SAFE_INTEGER })) - 4; // JSON null is replaced by the serialized card.
+    const deadline = Math.min(Date.now() + windowMs, expiresAt);
+    do {
+      const sample = await scroller.evaluate(readCards, { icao, selector: cardSelector, maxCards, maxEnvelopeBytes, maxWindowBytes, envelopeOverhead, liveUrl }, { timeout: remaining(3000) });
+      if (!sample || leftScope) return denied;
+      sawCards ||= sample.cards > 0;
+      unsupported ||= sample.unsupported;
+      overflow ||= sample.overflow;
+      for (const message of sample.messages) {
+        const previous = messages.get(message.messagePath);
+        bytes += Buffer.byteLength(JSON.stringify(message));
+        bytes += previous ? -Buffer.byteLength(JSON.stringify(previous)) : envelopeOverhead;
+        if (bytes > maxWindowBytes || (!previous && messages.size === maxCards)) {
+          overflow = true;
+          break;
+        }
+        messages.set(message.messagePath, message);
       }
-      messages.set(message.messagePath, message);
-    }
-    if (overflow || messages.size === maxCards || Date.now() >= deadline) break;
-    await page.waitForTimeout(Math.min(500, deadline - Date.now()));
-  } while (Date.now() < deadline);
-  const status = overflow ? 'TRUNCATED' : unsupported ? 'PARTIAL_LAYOUT' : messages.size ? 'OBSERVED'
-    : sawCards ? 'NO_CONFIRMED_MATCH' : 'NO_OBSERVATIONS_COVERAGE_UNKNOWN';
-  return { status, source: liveUrl, icao, messages: [...messages.values()] };
+      if (overflow || messages.size === maxCards || Date.now() >= deadline) break;
+      await page.waitForTimeout(Math.min(500, deadline - Date.now()));
+    } while (Date.now() < deadline);
+    if (leftScope || !inScope(page.url())) return denied;
+    const status = overflow ? 'TRUNCATED' : unsupported ? 'PARTIAL_LAYOUT' : messages.size ? 'OBSERVED'
+      : sawCards ? 'NO_CONFIRMED_MATCH' : 'NO_OBSERVATIONS_COVERAGE_UNKNOWN';
+    return { status, source: liveUrl, icao, messages: [...messages.values()] };
+  }
 }
 
 async function readBrowserWindow(icao, signal, synthetic) {
@@ -131,23 +154,22 @@ export async function acquire(strategy, address, signal) {
     throw new Error('Invalid acquisition scope');
   const synthetic = strategy === 'dry-run';
   const messages = [];
-  let observed;
+  let observed, inspected = 0;
   const connection = createProviderConnector(strategy === 'api' ? 'api' : 'crawl', address?.toUpperCase() ?? '', {
-    kind: synthetic ? 'SYNTHETIC_PAGE' : 'ON_DEMAND_PREVIEW',
-    inspect(delivery) { messages.push(delivery.raw); },
+    kind: 'ON_DEMAND_PREVIEW',
+    inspect(delivery) {
+      inspected++;
+      if (!synthetic) messages.push(delivery.raw);
+    },
     async read(icao, signal) {
       const response = await readBrowserWindow(icao, signal, synthetic);
       observed = response.body?.status;
       return response;
     },
   });
-  let inspected = 0;
-  const outcome = await connection.start(async () => {
-    inspected++;
-    return 'PREVIEWED';
-  }, signal);
+  const outcome = await connection.start(signal);
   const status = !synthetic && outcome === 'COMPLETE' ? observed : outcome;
-  const summary = { status, inspected: synthetic ? inspected : messages.length, ...connection.health() };
+  const summary = { status, inspected, ...connection.health() };
   if (synthetic) return summary;
   if (strategy === 'api') return { ...summary, messages };
   return { ...summary, source: liveUrl, icao: address.toUpperCase(), messages };

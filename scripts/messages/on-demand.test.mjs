@@ -6,6 +6,7 @@ import { createSecureServer } from 'node:http2';
 import test from 'node:test';
 import { promisify } from 'node:util';
 import { chromium } from 'playwright-core';
+import { syntheticUpgrade } from './synthetic-upgrade.mjs';
 import { liveUrl } from './airframes-live.mjs';
 
 const bootstrap = 'https://api.airframes.io/stream/visitor-token';
@@ -68,9 +69,23 @@ async function http2Document(t) {
 
 // Replace only the upstream peer and HTTP responses. Chromium still performs
 // navigation, redirects, cross-origin fetch, socket events and DOM rendering.
-async function crawl(t, { denied, redirect, partial, disconnect, stop, burst, documentServer } = {}) {
-  const requested = [], blocked = [], sockets = [], closed = [], output = [];
+async function crawl(t, { denied, redirect, partial, disconnect, stop, burst, documentServer, upgradeStatus } = {}) {
+  const requested = [], blocked = [], closed = [], output = [];
   const documentResponses = [], pageLogs = [], browsers = [];
+  const sockets = syntheticUpgrade(t, {
+    status: upgradeStatus,
+    onClose: () => closed.push(stream),
+    onMessage(peer, message) {
+      if (message !== 'ready') return;
+      if (stop) { process.emit('SIGINT'); return; }
+      if (disconnect && sockets.length === 1) { peer.send('disconnect'); return; }
+      if (burst) {
+        peer.send(Array.from({ length: 26 }, (_, i) => card('ABC123', String(i))).join(''));
+        return;
+      }
+      peer.send(card('ABC123', 'selected') + card('DEF456', 'other') + (partial ? card('ABC123', 'live') : ''));
+    },
+  });
   const launch = chromium.launch.bind(chromium);
   t.mock.method(chromium, 'launch', async options => {
     const browser = await launch({ ...options, args: documentServer?.args });
@@ -111,29 +126,6 @@ async function crawl(t, { denied, redirect, partial, disconnect, stop, burst, do
         };
         return session;
       };
-      const routeWebSocket = context.routeWebSocket.bind(context);
-      context.routeWebSocket = (pattern, handler) => routeWebSocket(pattern, route => {
-        route.connectToServer = () => {
-          sockets.push(route.url());
-          let receive;
-          return {
-            onMessage(handler) { receive = handler; },
-            onClose() {},
-            close: async () => { closed.push(route.url()); },
-            send(message) {
-              if (message !== 'ready') return;
-              if (stop) { process.emit('SIGINT'); return; }
-              if (disconnect && sockets.length === 1) { receive('disconnect'); return; }
-              if (burst) {
-                receive(Array.from({ length: 26 }, (_, i) => card('ABC123', String(i))).join(''));
-                return;
-              }
-              receive(card('ABC123', 'selected') + card('DEF456', 'other') + (partial ? card('ABC123', 'live') : ''));
-            },
-          };
-        };
-        return handler(route);
-      });
       return context;
     };
     return browser;
@@ -152,7 +144,7 @@ async function crawl(t, { denied, redirect, partial, disconnect, stop, burst, do
   }
   assert.equal(output.length, 1);
   assert.ok(!requested.includes(analytics));
-  assert.deepEqual(closed, sockets);
+  assert.deepEqual(closed, upgradeStatus ? [] : sockets);
   assert.ok(browsers.every(browser => !browser.isConnected()));
   return { result: JSON.parse(output[0]), requested, blocked, sockets, code, documentResponses, pageLogs };
 }
@@ -235,3 +227,14 @@ test('cancelling the CLI closes the active socket without another page attempt',
   assert.deepEqual(result.messages, []);
   assert.deepEqual(sockets, [stream]);
 });
+
+for (const [upgradeStatus, expected] of [[429, 'RATE_LIMITED'], [403, 'PERMANENT_FAILURE']]) {
+  test(`HTTP ${upgradeStatus} during socket upgrade ends the window before another bootstrap`, async t => {
+    const { result, requested, sockets } = await crawl(t, { upgradeStatus });
+    assert.equal(result.status, expected);
+    assert.deepEqual(requested.filter(url => url === bootstrap), [bootstrap]);
+    assert.deepEqual(sockets, [stream]);
+    assert.deepEqual(result.messages, []);
+    assert.equal(result.accepted, 0);
+  });
+}
