@@ -4,6 +4,8 @@ The documents in this directory preserve decisions from the design stage. Refere
 
 **Current implementation scope:** [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md). **Working API:** [API.md](../API.md).
 
+Stage 2 implements a durable synthetic flow. Its operational contract is in [POSTGRES.md](../POSTGRES.md), and its executable SQL is under [db/migrations](../../db/migrations). These current artifacts take precedence over historical DDL and proposed event-envelope names for the implemented slice.
+
 - [Architecture and rationale](ARCHITECTURE_V2.md)
 - [Responsibility catalog](docs/MODULE_CATALOG.md)
 - [Architectural decisions](docs/DECISIONS.md)

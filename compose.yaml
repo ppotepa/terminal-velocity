@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:18.7
+    environment:
+      POSTGRES_USER: tv_local_admin
+      POSTGRES_PASSWORD: ${TV_LOCAL_ADMIN_PASSWORD:-synthetic-local-admin-only}
+      POSTGRES_DB: terminal_velocity_dev
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tv_local_admin -d terminal_velocity_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres_data:

@@ -30,4 +30,14 @@ const options = {
 };
 console.log('Created:', await request('/api/v1/demo/messages', options));
 console.log('Replay:', await request('/api/v1/demo/messages', options));
-console.log('Aircraft:', await request(`/api/v1/aircraft/${aircraft.aircraftId}`));
+// PostgreSQL commits ingestion before its independently retried availability projection.
+let updated;
+const deadline = Date.now() + 5_000;
+do {
+  updated = await request(`/api/v1/aircraft/${aircraft.aircraftId}`);
+  if (updated.availability.lastMessageAt !== null && updated.availability.lastMessageAt >= message.observedAt) break;
+  await new Promise(resolve => setTimeout(resolve, 100));
+} while (Date.now() < deadline);
+console.log('Aircraft:', updated);
+if (updated.availability.lastMessageAt === null || updated.availability.lastMessageAt < message.observedAt)
+  console.log('The message was accepted; its availability projection is still pending.');

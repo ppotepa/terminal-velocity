@@ -13,3 +13,5 @@ export { emptyAvailability, type AvailabilityState } from '../application/availa
 export { updateAvailability } from '../application/update-availability.ts';
 export { expireAvailability, type ExpiryCommand } from '../application/expire-availability.ts';
 export { availabilityView } from '../application/availability-view.ts';
+export type { ContributionWriter } from '../ports/contribution-writer.ts';
+export type { AvailabilityReader } from '../ports/availability-reader.ts';

@@ -4,13 +4,19 @@ Each stage should produce a runnable application slice and a PR with behavioral 
 
 ## Stage 1 — local demonstration backend
 
+**Status: complete.** The memory-backed demonstration remains available.
+
 Repository foundation, npm workspaces, strict TypeScript, AST import checks, and CI configuration. The existing Message→Aircraft correlation and reversible availability statuses work through a small HTTP API. Position and catalog fixtures are synthetic. Message ingestion is idempotent during the lifetime of one process. Reusing an ID with different facts is a conflict, not an implicit history correction.
 
 ## Stage 2 — durable storage for one flow
 
+**Status: implemented for the fixed synthetic message flow.** See [POSTGRES.md](POSTGRES.md) for startup, migrations, delivery behavior, and integration tests. The flow is message facts → decision/history/outbox → consumer inbox/availability, with PostgreSQL mode available through the existing HTTP API.
+
 A PostgreSQL adapter behind the transaction port, decision history, an outbox, and a consumer-specific inbox. Integration tests on real PostgreSQL cover concurrent first writes, rollback on outbox failure, leasing, crash recovery, and atomic deduplication. Turn the DDL design into real migrations with separate schema ownership roles. This stage makes durability an application property.
 
 ## Stage 3 — one real connector
+
+**Status: next.** Source selection must establish actual access and permitted usage before integration work begins. The durable Stage 2 adapters are the foundation; they do not establish rights to publish real radio messages.
 
 Select a source for which access and permitted usage are established. The adapter stores source deliveries, receptions, and message facts separately. It preserves provenance, timestamp uncertainty, bearer, and decoder version. It must not invent RF frames when a provider supplies only decoded messages. Add contract tests using anonymized source examples, retries, backoff, quarantine, and bounded backfill.
 
@@ -28,4 +34,4 @@ Message→FlightSession correlation independent of Message→Aircraft, reassembl
 
 ## Public deployment readiness
 
-Replace the explicit demo mode with durable storage and access-control ports, enforce resource limits, handle source failures, establish publication rights, and add integration tests. Limitations of the in-memory demonstrator must not be presented as production guarantees.
+Build on the durable Stage 2 flow with access-control ports, source-specific resource limits and failure handling, publication rights, retention, operational monitoring, and recovery procedures. The fixed synthetic scope must be replaced before real public data is served. Limitations of the in-memory demonstrator must not be presented as production guarantees.

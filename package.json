@@ -18,10 +18,15 @@
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "check": "npm run typecheck && npm run check:boundaries && npm test",
     "example": "node examples/send-demo-message.mjs",
-    "smoke": "node scripts/smoke-api.mjs"
+    "smoke": "node scripts/smoke-api.mjs",
+    "db:migrate": "node scripts/postgres/migrate.mjs",
+    "db:local-runtime": "node scripts/postgres/provision-local-runtime.mjs",
+    "test:integration": "node scripts/postgres/run-integration.mjs",
+    "test:postgres:local": "node scripts/postgres/run-local.mjs"
   },
   "devDependencies": {
     "@types/node": "24.0.0",
+    "@types/pg": "8.23.1",
     "typescript": "5.8.3"
   }
 }

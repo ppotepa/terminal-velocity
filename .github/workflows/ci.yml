@@ -14,7 +14,21 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18.7
+        env:
+          POSTGRES_USER: tv_test_admin
+          POSTGRES_PASSWORD: synthetic-integration-only
+          POSTGRES_DB: tv_test_bootstrap
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U tv_test_admin -d tv_test_bootstrap"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -29,6 +43,10 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Check types, architecture and behavior
         run: npm run check
+      - name: Verify durable transactions against real PostgreSQL
+        run: npm run test:integration
+        env:
+          TEST_DATABASE_URL: postgresql://tv_test_admin:synthetic-integration-only@127.0.0.1:${{ job.services.postgres.ports[5432] }}/tv_test_bootstrap
       - name: Run domain example
         run: npm run demo
       - name: Smoke-test executable and example client
