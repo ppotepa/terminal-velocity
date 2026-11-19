@@ -1,0 +1,89 @@
+import test, { before, after, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:net';
+import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
+import { createTestPools, resetTestData, uniqueId } from '../../../../packages/backend/tests/integration/helpers/database.mjs';
+
+const root = fileURLToPath(new URL('../../../../', import.meta.url));
+let pools;
+before(() => { pools = createTestPools(); });
+beforeEach(() => resetTestData(pools.admin));
+after(() => pools.close());
+
+async function launch(t) {
+  const reservation = createServer().listen(0, '127.0.0.1');
+  await once(reservation, 'listening');
+  const port = reservation.address().port;
+  await new Promise(resolve => reservation.close(resolve));
+  const child = spawn(process.execPath, ['apps/api/src/main.ts'], { cwd: root,
+    env: { ...process.env, PORT: String(port), STORAGE_DRIVER: 'postgres', DATABASE_URL: process.env.TEST_RUNTIME_DATABASE_URL },
+    stdio: ['ignore', 'pipe', 'pipe'] });
+  const exited = once(child, 'exit');
+  let diagnostics = '';
+  child.stderr.on('data', data => { diagnostics += data.toString(); });
+  t.after(async () => { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await exited; } });
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('PostgreSQL API did not become ready.')), 10_000);
+    let output = '';
+    child.once('error', error => { clearTimeout(timeout); reject(error); });
+    child.once('exit', () => { clearTimeout(timeout); reject(new Error(`API exited before readiness: ${diagnostics}`)); });
+    child.stdout.on('data', chunk => { output += chunk.toString(); if (output.includes('Terminal Velocity API:')) { clearTimeout(timeout); resolve(); } });
+  });
+  return {
+    base: `http://127.0.0.1:${port}`,
+    async stop(signal = 'SIGTERM') {
+      child.kill(signal);
+      const timeout = setTimeout(() => child.kill('SIGKILL'), 7_000);
+      const [code, actualSignal] = await exited;
+      clearTimeout(timeout);
+      if (signal === 'SIGTERM') { assert.equal(code, 0, diagnostics); assert.equal(actualSignal, null, diagnostics); }
+      else assert.equal(actualSignal, signal);
+    },
+  };
+}
+async function request(base, path, message) {
+  const response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(7_000),
+    ...(message ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(message) } : {}) });
+  return { status: response.status, body: await response.json() };
+}
+
+test('actual PostgreSQL API keeps messages, idempotency and availability after a killed process restarts', { timeout: 35_000 }, async t => {
+  const first = await launch(t);
+  assert.deepEqual(await request(first.base, '/healthz'), { status: 200, body: { data: { status: 'ok', mode: 'demo', storage: 'postgres' } } });
+  const message = { messageId: uniqueId('msg'), observedAt: new Date(Date.now() - 1_000).toISOString(),
+    bearer: 'VDL2', text: 'Synthetic restart verification', icao24: 'D00001' };
+  const created = await request(first.base, '/api/v1/demo/messages', message);
+  assert.equal(created.status, 201);
+  const deadline = Date.now() + 10_000;
+  let aircraft;
+  do {
+    aircraft = await request(first.base, '/api/v1/aircraft/ac_demo-001');
+    if (aircraft.body.data?.availability.lastMessageAt === message.observedAt) break;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  } while (Date.now() < deadline);
+  assert.equal(aircraft.body.data.availability.lastMessageAt, message.observedAt);
+  assert.equal(aircraft.body.data.availability.freshness, 'RECENT');
+  await first.stop('SIGKILL');
+
+  const second = await launch(t);
+  const restored = await request(second.base, `/api/v1/messages/${message.messageId}`);
+  assert.equal(restored.status, 200);
+  assert.deepEqual(restored.body.data, created.body.data.message);
+  const replay = await request(second.base, '/api/v1/demo/messages', message);
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.data.created, false);
+  const conflict = await request(second.base, '/api/v1/demo/messages', { ...message, text: 'Different immutable facts' });
+  assert.equal(conflict.status, 409);
+  assert.equal(conflict.body.error.code, 'MESSAGE_CONFLICT');
+  const status = await request(second.base, '/api/v1/aircraft/ac_demo-001');
+  assert.equal(status.body.data.availability.lastMessageAt, message.observedAt);
+  await second.stop();
+  const counts = await pools.admin.query(`SELECT
+    (SELECT count(*)::int FROM message_ingestion.messages) AS messages,
+    (SELECT count(*)::int FROM correlation.aircraft_link_revisions) AS decisions,
+    (SELECT count(*)::int FROM correlation.outbox) AS events,
+    (SELECT count(*)::int FROM event_delivery.consumer_inbox) AS receipts`);
+  assert.deepEqual(counts.rows[0], { messages: 1, decisions: 1, events: 1, receipts: 1 });
+});

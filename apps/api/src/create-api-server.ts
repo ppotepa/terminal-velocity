@@ -2,9 +2,11 @@ import { createServer, type Server } from 'node:http';
 import { createDemoTracker, type DemoTracker } from '@airframes/backend/demo';
 import { sendProblem } from './http/send-problem.ts';
 import { handleRequest } from './routing/handle-request.ts';
+import type { ReadApiHealth } from './http/api-health.ts';
 
 /** Creates an unbound HTTP server. The executable binds it exclusively to loopback. */
-export function createApiServer(tracker: DemoTracker = createDemoTracker()): Server {
+export function createApiServer(tracker: DemoTracker = createDemoTracker(),
+  readHealth: ReadApiHealth = async () => ({ status: 'ok', mode: 'demo', storage: 'memory' })): Server {
   return createServer({
     maxHeaderSize: 8 * 1024,
     requestTimeout: 15_000,
@@ -14,7 +16,7 @@ export function createApiServer(tracker: DemoTracker = createDemoTracker()): Ser
     // A disconnected client can emit a late stream error after the body reader has finished.
     // The connection is already unusable; do not turn that transport failure into a process crash.
     request.on('error', () => {});
-    void handleRequest(tracker, request, response).catch((error: unknown) => {
+    void handleRequest(tracker, request, response, readHealth).catch((error: unknown) => {
       request.resume();
       sendProblem(response, error);
     });

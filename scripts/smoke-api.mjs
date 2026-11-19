@@ -12,7 +12,7 @@ await once(reservation, 'listening');
 const port = reservation.address().port;
 await new Promise((resolve, reject) => reservation.close(error => error ? reject(error) : resolve()));
 
-const environment = { ...process.env, PORT: String(port) };
+const environment = { ...process.env, PORT: String(port), STORAGE_DRIVER: 'memory' };
 const api = spawn(process.execPath, ['apps/api/src/main.ts'], {
   cwd: root, env: environment, stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -29,7 +29,7 @@ try {
     api.once('error', error => { clearTimeout(timeout); reject(error); });
     api.stdout.on('data', chunk => {
       output += chunk.toString();
-      if (output.includes('Airframes demo API:')) {
+      if (output.includes('Terminal Velocity API:')) {
         clearTimeout(timeout);
         api.off('exit', onExit);
         resolve();

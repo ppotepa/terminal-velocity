@@ -5,16 +5,20 @@ import { readJsonBody } from '../http/read-json-body.ts';
 import { sendApiResult } from '../http/send-api-result.ts';
 import { sendJson } from '../http/send-json.ts';
 import { matchRoute } from './match-route.ts';
+import type { ReadApiHealth } from '../http/api-health.ts';
 
-export async function handleRequest(tracker: DemoTracker, request: IncomingMessage, response: ServerResponse): Promise<void> {
+export async function handleRequest(tracker: DemoTracker, request: IncomingMessage, response: ServerResponse,
+  readHealth: ReadApiHealth): Promise<void> {
   const route = matchRoute(request.url ?? '/');
   if (request.method !== route.method) {
     throw new HttpProblem(405, 'METHOD_NOT_ALLOWED', `Use ${route.method} for this endpoint.`, { Allow: route.method });
   }
   switch (route.name) {
-    case 'health':
-      sendJson(response, 200, { data: { status: 'ok', mode: 'demo', storage: 'memory' } });
+    case 'health': {
+      const health = await readHealth();
+      sendJson(response, health.status === 'ok' ? 200 : 503, { data: health });
       return;
+    }
     case 'aircraft-list':
       sendApiResult(response, await tracker.listAircraft());
       return;
