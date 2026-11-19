@@ -16,7 +16,7 @@ A PostgreSQL adapter behind the transaction port, decision history, an outbox, a
 
 ## Stage 3 — one real connector
 
-**Status: in progress — S3-01 source-observation contracts implemented on a feature branch.** Source selection must establish actual access and permitted usage before integration work begins. The durable Stage 2 adapters are the foundation; they do not establish rights to publish real radio messages.
+**Status: engineering in progress; real-source acceptance blocked.** Synthetic source contracts, private processing and bounded replay exist, but no authorized retained Airframes sample has been validated end to end. The durable Stage 2 adapters do not establish rights to collect, retain or publish real radio messages. See the [issue #13 source validation runbook](SOURCE_INTEGRATION_RUNBOOK.md).
 
 Select a source for which access and permitted usage are established. The adapter stores source deliveries, receptions, and message facts separately. It preserves provenance, timestamp uncertainty, bearer, and decoder version. It must not invent RF frames when a provider supplies only decoded messages. Add contract tests using anonymized source examples, retries, backoff, quarantine, and bounded backfill.
 
