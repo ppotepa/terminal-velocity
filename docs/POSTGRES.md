@@ -36,6 +36,7 @@ The named Compose volume preserves data when the container stops. The API never 
 | `message_ingestion` | `tv_ingestion_owner` | Immutable canonical synthetic message facts |
 | `correlation` | `tv_correlation_owner` | Decision history, current heads, and producer outbox |
 | `event_delivery` | `tv_delivery_owner` | Delivery attempts, fenced leases, quarantine, and consumer inboxes |
+| `source_ingestion` | `tv_source_ingestion_owner` | Private delivery metadata, optional provider/reception facts and a source-owned outbox |
 | `availability` | `tv_availability_owner` | Versioned contributions and retraction tombstones |
 
 Owner roles and the `tv_runtime` permission role are `NOLOGIN`. The separately provisioned runtime login inherits the explicit table/column grants assigned to `tv_runtime`. It does not own the application schemas or receive permission to create or alter objects in them, and it cannot update immutable messages, decision history, or outbox payloads. In this one-process stage, the same runtime role has the narrow grants needed by both producer and consumer adapters. Separate production process identities and tenant authorization are later work.

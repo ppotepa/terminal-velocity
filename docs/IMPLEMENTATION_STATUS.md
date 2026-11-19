@@ -1,6 +1,6 @@
 # Terminal Velocity — implementation status, Stage 2
 
-Date: November 19, 2026. Code version: `0.1.0`. The application offers a durable PostgreSQL mode for one complete synthetic message flow, alongside the original memory demonstration. Stage 3 source-observation contracts are implemented on a feature branch; no provider connector or real source is present.
+Date: November 19, 2026. Code version: `0.1.0`. The application offers a durable PostgreSQL mode for one complete synthetic message flow, alongside the original memory demonstration. Stage 3 includes source-observation contracts, on-demand website lookup, and private delivery metadata storage exercised with synthetic inputs.
 
 ## Implemented
 
@@ -60,7 +60,7 @@ Memory remains the default. It stages a single `DemoState` swap under a mutex, i
 
 Aircraft positions and identities remain synthetic fixtures. Coverage is `UNKNOWN`; real feed health is `DISCONNECTED`. Messages are decoded text examples, not captured RF frames. No real Airframes/ADS-B connector, moving map frontend, flight sessions, reassembly, entitlement enforcement, or public deployment has been added.
 
-The architecture v2 catalog still describes 89 intended responsibilities rather than 89 completed services. Stage 3 currently has only the provider-neutral S3-01 contracts; there is no selected or authorized real source, transport, provider fixture, or source persistence. Its source contracts do not grant publication rights. The historical DDL and target event envelope remain design documents; the implemented schema is under `db/migrations`, and the current event is `correlation.aircraft-decision-revised.v1`.
+The architecture v2 catalog still describes 89 intended responsibilities rather than 89 completed services. Stage 3 has a separate on-demand lookup and durable metadata store. Real-source retention and a permitted provider fixture remain gated by issue #6. Its source contracts do not grant publication rights. The historical DDL and target event envelope remain design documents; the implemented schema is under `db/migrations`, and the current event is `correlation.aircraft-decision-revised.v1`.
 
 See [POSTGRES.md](POSTGRES.md) for setup and operational behavior, [API.md](API.md) for the HTTP contract, and [ROADMAP.md](ROADMAP.md) for Stage 3: one real connector with established access and permitted usage.
 
@@ -84,3 +84,7 @@ The local sequence covers every step in the repository CI workflow. The database
 ## Stage 3 source decision — S3-02
 
 The selected source is the rendered Airframes Live Messages website. The on-demand CLI reads matching rendered cards for one ICAO24. The API strategy reports unavailable. The crawler is separate from durable ingest and the future map UI. Issue #6 remains blocked pending evidence for the intended website collection, retention and use of a redacted sample. The application FAQ covers general hobby use. See the [source decision](adr/0001-first-message-source.md) for the website evidence and exact outstanding questions.
+
+## Stage 3 delivery storage — S3-03
+
+Migration 002 adds restricted source deliveries, provider-message facts, receiver receptions and an independent source outbox. The typed SQL store records and reads metadata from synthetic observations, with separate clocks for observation, receipt, retrieval and ingestion. Raw payload and decoded text are excluded. The lookup CLI does not write to this store. See the [migration contract](../db/migrations/README.md#migration-002-and-the-s3-04-storage-contract).
