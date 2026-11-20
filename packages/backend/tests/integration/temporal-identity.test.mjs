@@ -430,10 +430,10 @@ test('position backfill commits bounded pages and resumes without duplicate jobs
 
 test('populated registry uses the alias and time index for owner lookup', async () => {
   await pools.admin.query(`INSERT INTO fleet_identity.aircraft (aircraft_id)
-    SELECT 'ac_plan_' || n FROM generate_series(1,3000) AS n`);
+    SELECT 'ac_plan-' || n FROM generate_series(1,3000) AS n`);
   await pools.admin.query(`INSERT INTO fleet_identity.assertions
     (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
-    SELECT 'ac_plan_' || n,'ICAO24',upper(lpad(to_hex(n),6,'0')),0,'synthetic','plan',n
+    SELECT 'ac_plan-' || n,'ICAO24',upper(lpad(to_hex(n),6,'0')),0,'synthetic','plan',n
     FROM generate_series(1,3000) AS n`);
   await pools.admin.query('ANALYZE fleet_identity.assertions');
   let actualLookup;
@@ -442,7 +442,7 @@ test('populated registry uses the alias and time index for owner lookup', async 
     return pools.runtime.query(sql, parameters);
   } });
   const snapshot = await reader.find([hex('000BB8')], NOW);
-  assert.equal(snapshot.assertions[0].aircraftId, 'ac_plan_3000');
+  assert.equal(snapshot.assertions[0].aircraftId, 'ac_plan-3000');
   const plan = (await pools.admin.query(`EXPLAIN (FORMAT JSON) ${actualLookup.sql}`,
     actualLookup.parameters)).rows[0]['QUERY PLAN'];
   assert.match(JSON.stringify(plan), /assertions_alias_time/);
