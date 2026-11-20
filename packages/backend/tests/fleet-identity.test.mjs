@@ -45,6 +45,14 @@ test('overlapping claims and competing strong identifiers cannot confirm identit
   { status: 'CONFLICTED', candidateIds: ['ac_b', 'ac_c'], revision: 4 });
 });
 
+test('a second simultaneous ICAO24 vetoes a position match until its validity ends', () => {
+  const assertions = [claim('ac_a', hex('A0B1C2'), 0), claim('ac_a', hex('D00002'), 10, 20)];
+  assert.deepEqual(resolveIdentityAt([hex('A0B1C2')], 10, assertions, 2),
+    { status: 'CONFLICTED', candidateIds: ['ac_a'], revision: 2 });
+  assert.equal(resolveIdentityAt([hex('A0B1C2')], 9, assertions, 2).status, 'MATCHED');
+  assert.equal(resolveIdentityAt([hex('A0B1C2')], 20, assertions, 2).status, 'MATCHED');
+});
+
 test('registry candidate adapter preserves partial snapshots and correlation veto', async () => {
   const assertions = [claim('ac_a', hex('A0B1C2'), 0), claim('ac_b', hex('A0B1C2'), 0)];
   const input = { messageId: 'msg_synthetic', effectiveAt: 50, identifiers: [hex('A0B1C2')], callsign: null };

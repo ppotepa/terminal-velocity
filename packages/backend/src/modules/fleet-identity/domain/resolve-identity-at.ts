@@ -20,6 +20,19 @@ export function resolveIdentityAt(identifiers: readonly StrongIdentifier[], obse
     .map(assertion => assertion.aircraftId))).filter(set => set.size > 0);
   if (sets.length === 0) return { status: 'UNMATCHED', revision };
   const candidateIds = [...new Set(sets.flatMap(set => [...set]))].sort() as AircraftId[];
+  // Correlation vetoes a candidate with simultaneous distinct values of one
+  // identifier kind. Position links must apply the same rule to the full catalog.
+  for (const aircraftId of candidateIds) {
+    const activeByKind = new Map<StrongIdentifier['kind'], Set<string>>();
+    for (const assertion of assertions) {
+      if (assertion.aircraftId !== aircraftId || assertion.validFrom > observedAt
+        || (assertion.validUntil !== null && observedAt >= assertion.validUntil)) continue;
+      const values = activeByKind.get(assertion.identifier.kind) ?? new Set<string>();
+      values.add(assertion.identifier.value);
+      if (values.size > 1) return { status: 'CONFLICTED', candidateIds, revision };
+      activeByKind.set(assertion.identifier.kind, values);
+    }
+  }
   if (sets.some(set => set.size > 1)) return { status: 'AMBIGUOUS', candidateIds, revision };
   if (candidateIds.length > 1) return { status: 'CONFLICTED', candidateIds, revision };
   return { status: 'MATCHED', aircraftId: candidateIds[0]!, revision };

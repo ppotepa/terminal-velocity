@@ -54,15 +54,15 @@ test('temporal registry transfers aliases and retains historical position facts 
   assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM tracking.position_observations`)).rows[0].n, '1');
   assert.deepEqual((await pools.runtime.query(`SELECT aircraft_id FROM fleet_identity.position_link_revisions
     ORDER BY revision`)).rows.map(row => row.aircraft_id), ['ac_a', 'ac_b']);
-  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.replay_requests`)).rows[0].n, '4');
+  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.replay_requests`)).rows[0].n, '5');
   assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.assertions`)).rows[0].n, '3');
   const history = await reader.history('ac_a');
   assert.equal(history.length, 1);
   assert.equal(history[0].assertionId, prior.assertionId);
   assert.ok(history[0].supersededAt);
   const requests = await postgresReplayRequestReader(pools.runtime).list(0, 10);
-  assert.equal(requests.length, 4);
-  assert.deepEqual(requests.slice(-2).map(request => request.validUntil), [boundary, null]);
+  assert.equal(requests.length, 5);
+  assert.deepEqual(requests.slice(-3).map(request => request.validUntil), [boundary, null, null]);
 });
 
 test('overlapping owners and competing identifiers remain ambiguous or conflicted', async () => {
@@ -166,6 +166,46 @@ test('permitted synthetic message resolves through registry at observation time 
   assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM correlation.outbox
     WHERE stream_key=$1`, [message.message_id])).rows[0].n, '2');
   assert.equal((await pipeline.readPrivateStatus('ac_old')).freshness, 'NONE');
+});
+
+test('adding a second ICAO24 replays the first alias for message status and position links', async () => {
+  const commit = postgresIdentityCommitter(pools.runtime);
+  await commit.createAircraft('ac_a');
+  await commit.append(claim('ac_a', hex('A0B1C2'), 0));
+  const raw = fixture();
+  raw.aircraft = { icao24: 'A0B1C2' };
+  const pipeline = createSyntheticProviderPipeline(pools.runtime, undefined, () => NOW);
+  assert.ok((await accept(pipeline, raw)).ok);
+  const observedAt = Date.parse(raw.sourceObservedAt.at);
+  assert.ok((await postgresPositionHistoryWriter(pools.runtime).append(position('alias-conflict', observedAt))).ok);
+  await pipeline.drain();
+  const messageId = (await pools.runtime.query('SELECT message_id FROM source_ingestion.message_revisions')).rows[0].message_id;
+  const positionId = 'epoch:synthetic-1:alias-conflict';
+  assert.equal((await pools.runtime.query(`SELECT r.decision->>'status' AS status FROM correlation.aircraft_link_heads h
+    JOIN correlation.aircraft_link_revisions r USING (message_id,revision) WHERE h.message_id=$1`,
+  [messageId])).rows[0].status, 'MATCHED');
+  assert.equal((await pools.runtime.query(`SELECT r.status FROM fleet_identity.position_link_heads h
+    JOIN fleet_identity.position_link_revisions r USING (source_id,source_observation_id,revision)
+    WHERE h.source_observation_id=$1`, [positionId])).rows[0].status, 'MATCHED');
+
+  await commit.append(claim('ac_a', hex('D00002'), 0));
+  const replay = (await pools.runtime.query(`SELECT normalized_alias FROM fleet_identity.replay_requests
+    WHERE assertion_id=(SELECT max(assertion_id) FROM fleet_identity.assertions)
+    ORDER BY request_id`)).rows.map(row => row.normalized_alias);
+  assert.deepEqual(replay.sort(), ['A0B1C2', 'D00002']);
+  await pipeline.drain();
+  const decisions = (await pools.runtime.query(`SELECT revision,decision->>'status' AS status
+    FROM correlation.aircraft_link_revisions WHERE message_id=$1 ORDER BY revision`, [messageId])).rows;
+  assert.deepEqual(decisions.map(row => row.status), ['MATCHED', 'CONFLICTED']);
+  assert.equal((await pools.runtime.query(`SELECT revision FROM correlation.aircraft_link_heads
+    WHERE message_id=$1`, [messageId])).rows[0].revision, '2');
+  assert.equal((await pipeline.readPrivateStatus('ac_a')).freshness, 'NONE');
+  const links = (await pools.runtime.query(`SELECT revision,status,aircraft_id FROM fleet_identity.position_link_revisions
+    WHERE source_observation_id=$1 ORDER BY revision`, [positionId])).rows;
+  assert.deepEqual(links.map(row => row.status), ['MATCHED', 'CONFLICTED']);
+  assert.equal(links[1].aircraft_id, null);
+  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM tracking.position_observations
+    WHERE source_observation_id=$1`, [positionId])).rows[0].n, '1');
 });
 
 test('bounded replay resumes open-ended ranges and competing position owners without rewriting prior links', async () => {
