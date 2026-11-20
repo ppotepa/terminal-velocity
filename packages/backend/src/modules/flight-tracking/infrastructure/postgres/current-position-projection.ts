@@ -43,7 +43,7 @@ async function refreshAircraft(sql: SqlExecutor, aircraftId: string): Promise<vo
     SELECT source_id,source_observation_id FROM tracking.current_position_candidates
     WHERE aircraft_id=$1 ORDER BY observed_at_ms DESC,nic DESC NULLS LAST,
       nac_p DESC NULLS LAST,containment_radius_m ASC NULLS LAST,
-      measurement_rank DESC,source_priority DESC,source_id,observation_id LIMIT 1`, [aircraftId]);
+      measurement_rank DESC,source_priority DESC,source_id COLLATE "C",observation_id LIMIT 1`, [aircraftId]);
   const best = selected.rows[0] ?? null;
   const previous = await sql.query<{ revision: string; source_id: string | null;
     source_observation_id: string | null }>(`SELECT revision,source_id,source_observation_id
@@ -70,7 +70,7 @@ export async function applyPositionLinkProjection(sql: SqlExecutor, sourceId: st
     JOIN fleet_identity.position_link_revisions r
       USING (source_id,source_observation_id,revision)
     JOIN tracking.position_observations p USING (source_id,source_observation_id)
-    WHERE h.source_id=$1 AND h.source_observation_id=$2`, [sourceId, sourceObservationId]);
+    WHERE h.source_id=$1 AND h.source_observation_id=$2 FOR SHARE OF h`, [sourceId, sourceObservationId]);
   const head = current.rows[0];
   if (!head) throw new Error('Position link head is missing.');
   if (Number(head.revision) !== linkRevision) return 'SUPERSEDED';
@@ -129,7 +129,7 @@ export function createCurrentPositionRebuilder(pool: SqlPool, priority: Priority
         JOIN fleet_identity.position_link_revisions r USING (source_id,source_observation_id,revision)
         WHERE r.status='MATCHED' AND r.aircraft_id=$1
           AND p.observed_at_ms >= $2 AND p.observed_at_ms < $3
-        ORDER BY p.observed_at_ms,p.source_id,p.source_observation_id LIMIT 501`,
+        ORDER BY p.observed_at_ms,p.source_id,p.source_observation_id LIMIT 501 FOR SHARE OF h`,
       [aircraftId, from, until]);
       if (facts.rows.length > 500) throw new RangeError('Current-position rebuild range exceeds 500 facts.');
       const priorRows = await sql.query(`SELECT 1 FROM tracking.current_position_candidates

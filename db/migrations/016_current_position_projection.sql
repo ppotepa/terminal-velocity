@@ -42,7 +42,7 @@ CREATE TABLE tracking.current_position_candidates (
 CREATE INDEX current_position_candidates_best ON tracking.current_position_candidates
   (aircraft_id, observed_at_ms DESC, nic DESC NULLS LAST, nac_p DESC NULLS LAST,
    containment_radius_m ASC NULLS LAST, measurement_rank DESC, source_priority DESC,
-   source_id, observation_id);
+   source_id COLLATE "C", observation_id);
 
 CREATE TABLE tracking.current_position_heads (
   aircraft_id text PRIMARY KEY,

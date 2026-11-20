@@ -145,15 +145,21 @@ decisions. Immutable tracking facts and link history are unchanged.
 
 Candidates are indexed by aircraft and deterministic rank: observation time,
 reported NIC/NACp, smaller containment radius, ADS-B/MLAT/other measurement kind,
-configured source priority, source ID and immutable observation UUID. Arrival time
-does not enter that rank. An unresolved link removes its candidate, allowing the
-next eligible fact to become current. A missing candidate is an explicit unknown
+configured source priority, source ID and immutable observation UUID. Source ID
+uses the `C` collation so the database and pure comparator agree. Arrival time
+does not enter that rank. The default source priority is zero; changing configured
+priorities requires bounded rebuild of affected aircraft. An unresolved link
+removes its candidate, allowing the next eligible fact to become current. A
+missing candidate is an explicit unknown
 head, not a fabricated coordinate. Freshness is calculated by the read port from
 observation time and is independent of message availability.
 
 The trigger covers new links. Existing link heads are queued through bounded,
 durable keyset backfill; the application must run the backfill before relying on a
-complete projection after upgrade. Single-aircraft repair reads at most 500
+complete projection after upgrade. Run `npm run db:backfill-current-position`
+with the restricted runtime `DATABASE_URL`, then `npm run db:project-current-position`
+until the queue reports empty; either command exits 2 if its bounded work budget
+is exhausted and can safely be repeated. Single-aircraft repair reads at most 500
 versioned links within a window of at most one day and aborts without partial
 changes when that limit is exceeded. These tables contain private derived position
 data. No real source data or public map endpoint is authorized by the migration.
