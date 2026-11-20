@@ -9,7 +9,7 @@ try {
   const config = readApiConfig(process.env);
   const storage = readStorageConfig(process.env);
   runtime = await createApiRuntime(storage);
-  const server = createApiServer(runtime.tracker, runtime.readHealth);
+  const server = createApiServer(runtime.tracker, runtime.readHealth, runtime.mapReader);
   const detach = attachGracefulShutdown(server, 5_000, runtime.close);
   server.once('error', () => {
     detach();

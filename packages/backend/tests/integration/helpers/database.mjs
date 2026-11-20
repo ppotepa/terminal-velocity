@@ -36,6 +36,7 @@ export async function resetTestData(admin) {
   if (!/^tv_test_[a-f0-9]{16}$/.test(expected ?? '') || result.rows[0]?.name !== expected)
     throw new Error('Refusing fixture cleanup outside the exact database created by the test runner.');
   await admin.query(`TRUNCATE
+    tracking.map_aircraft_positions, tracking.map_demo_message_status,
     tracking.current_position_inbox, tracking.current_position_jobs,
     tracking.current_position_heads, tracking.current_position_candidates,
     fleet_identity.replay_expansions,
@@ -54,6 +55,7 @@ export async function resetTestData(admin) {
   await admin.query(`UPDATE tracking.current_position_backfill_progress
     SET last_source_id=NULL,last_source_observation_id=NULL,completed_at=NULL WHERE singleton`);
   await admin.query('UPDATE tracking.current_position_state SET revision=0 WHERE singleton');
+  await admin.query('UPDATE tracking.map_state SET revision=0 WHERE singleton');
   await admin.query(`UPDATE fleet_identity.position_backfill_progress
     SET last_source_id=NULL,last_source_observation_id=NULL,completed_at=NULL WHERE singleton`);
 }
