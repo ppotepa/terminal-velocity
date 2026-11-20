@@ -39,6 +39,7 @@ alert_event=$(curl -fsS "$base/alert-events?limit=10")
 printf '%s' "$alert_event" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert any(x["condition"] == "country_entered" and "FR" in x["evidence"] for x in d["items"])'
 alert_event_id=$(printf '%s' "$alert_event" | python3 -c 'import json,sys; print(next(x["id"] for x in json.load(sys.stdin)["items"] if x["condition"] == "country_entered"))')
 curl -fsS -X POST "$base/alert-events/$alert_event_id/acknowledge" >/dev/null
+curl -fsS "$base/alert-events?limit=10" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert all(x["id"] != sys.argv[1] for x in d["items"])' "$alert_event_id"
 kill "$stream_pid" >/dev/null 2>&1 || true
 wait "$stream_pid" 2>/dev/null || true
 stream_pid=0
@@ -50,4 +51,4 @@ curl -fsS -X DELETE "$base/watch-rules/$rule_id" -H 'If-Match: W/"1"' >/dev/null
 rule_id=''
 curl -fsS -X DELETE "$base/alert-rules/$alert_rule_id" -H 'If-Match: W/"1"' >/dev/null
 alert_rule_id=''
-printf '%s\n' 'Local smoke passed: health, active WatchRule acquisition, persisted synthetic position/track, matched decoded message reads, alert rule CRUD/history reads, SSE updates, decoder preview, and stale-cursor recovery.'
+printf '%s\n' 'Local smoke passed: health, active WatchRule acquisition, persisted synthetic position/track, matched decoded message reads, acknowledged alert dismissal after reload, SSE updates, decoder preview, and stale-cursor recovery.'
