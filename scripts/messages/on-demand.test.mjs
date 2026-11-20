@@ -68,10 +68,10 @@ async function loopbackProvider(t, { upgradeStatus, denied, redirect, partial, d
       header.writeUInt16BE(body.length, 2);
       socket.write(Buffer.concat([header, body]));
     };
-    // Normal fixture frames can follow the handshake immediately. Waiting for
-    // an unrelated client 'ready' frame made the rendered-card test timing vary.
-    if (onReady || disconnect) socket.once('data', sendFixture);
-    else setImmediate(sendFixture);
+    // The synthetic page sends ready after its socket opens. Wait for that
+    // frame so the browser-side relay has installed its message handlers
+    // before this fixture sends a rendered card.
+    socket.once('data', sendFixture);
     socket.on('end', () => socket.end());
   });
   server.on('stream', (response, headers) => {
