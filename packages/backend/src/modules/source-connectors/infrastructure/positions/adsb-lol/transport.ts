@@ -107,16 +107,16 @@ async function readBoundedJson(
       if (!value) return err('response body chunk is empty');
       size += value.byteLength;
       if (size > maximumBytes) {
-        await reader.cancel().catch(() => undefined);
+        cancelReader(reader);
         return err('response body exceeds the configured byte limit');
       }
       chunks.push(value);
     }
   } catch {
-    await reader.cancel().catch(() => undefined);
+    cancelReader(reader);
     return err('response body could not be read');
   } finally {
-    if (signal.aborted) await reader.cancel().catch(() => undefined);
+    if (signal.aborted) cancelReader(reader);
     reader.releaseLock();
   }
   const bytes = new Uint8Array(size);
@@ -130,6 +130,15 @@ async function readBoundedJson(
     return ok(JSON.parse(text) as unknown);
   } catch {
     return err('response body is not valid UTF-8 JSON');
+  }
+}
+
+function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
+  // A source may never settle cancel(); cleanup must not extend a request timeout or stop.
+  try {
+    void reader.cancel().catch(() => undefined);
+  } catch {
+    // Cancellation is best effort after a failed, oversized, or aborted read.
   }
 }
 

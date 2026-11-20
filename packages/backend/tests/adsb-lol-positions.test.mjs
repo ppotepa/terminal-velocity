@@ -54,6 +54,38 @@ function transport(response, options = {}) {
   });
 }
 
+function stalledBodyResponse() {
+  let cancelCalls = 0;
+  const response = new Response(new ReadableStream({
+    pull: () => new Promise(() => undefined),
+    cancel: () => {
+      cancelCalls += 1;
+      return new Promise(() => undefined);
+    },
+  }), { headers: { 'content-type': 'application/json' } });
+  return { response, cancelCalls: () => cancelCalls };
+}
+
+async function settlesWithin(promise, milliseconds = 250) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Operation did not settle after cancellation')), milliseconds);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function waitForBodyRead(response) {
+  await settlesWithin((async () => {
+    while (!response.body.locked) await new Promise(resolve => setTimeout(resolve, 0));
+  })());
+}
+
 test('synthetic provider fixture maps ADS-B, MLAT, source age, optional fields and incomplete coverage', () => {
   const parsed = snapshot();
   assert.equal(parsed.ok, true);
@@ -248,6 +280,44 @@ test('transport distinguishes timeout and caller cancellation', async () => {
     pull: () => new Promise(() => undefined),
   }), { headers: { 'content-type': 'application/json' } }), { timeoutMs: 5 });
   assert.deepEqual((await timedOutBody.fetchNext()).error, { code: 'TIMEOUT', retryAfterMs: 60_000 });
+});
+
+test('a stalled response cancellation cannot block timeout, caller abort, or poller stop', async () => {
+  const timeoutBody = stalledBodyResponse();
+  assert.deepEqual((await settlesWithin(transport(timeoutBody.response, { timeoutMs: 5 }).fetchNext())).error,
+    { code: 'TIMEOUT', retryAfterMs: 60_000 });
+  assert.equal(timeoutBody.cancelCalls(), 1);
+
+  const callerBody = stalledBodyResponse();
+  const caller = new AbortController();
+  const callerResult = transport(callerBody.response).fetchNext(caller.signal);
+  await waitForBodyRead(callerBody.response);
+  caller.abort();
+  assert.deepEqual((await settlesWithin(callerResult)).error, { code: 'ABORTED' });
+  assert.equal(callerBody.cancelCalls(), 1);
+
+  const pollerBody = stalledBodyResponse();
+  const poller = createAdsbLolPositionPoller(transport(pollerBody.response));
+  const loop = poller.start(() => undefined);
+  await waitForBodyRead(pollerBody.response);
+  await settlesWithin(poller.stop());
+  await settlesWithin(loop);
+  assert.equal(pollerBody.cancelCalls(), 1);
+  assert.equal(poller.health().status, 'STOPPED');
+});
+
+test('an oversized streamed body returns an error even when cancellation never settles', async () => {
+  let cancelCalls = 0;
+  const response = new Response(new ReadableStream({
+    start(controller) { controller.enqueue(new TextEncoder().encode('123456')); },
+    cancel() {
+      cancelCalls += 1;
+      return new Promise(() => undefined);
+    },
+  }), { headers: { 'content-type': 'application/json' } });
+  assert.deepEqual((await settlesWithin(transport(response, { maximumResponseBytes: 5 }).fetchNext())).error,
+    { code: 'INVALID_RESPONSE', field: 'body' });
+  assert.equal(cancelCalls, 1);
 });
 
 test('poller honors Retry-After, applies capped backoff and emits snapshots and errors', async () => {

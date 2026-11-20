@@ -311,3 +311,25 @@ provider suite, all 17 backend test files, `npm run test:messages`, and
 test, and `npm run test:browser` also could not bind synthetic loopback servers:
 direct execution showed `listen EPERM` on `127.0.0.1`. These are authoring-shell
 results, not a passing exact-head isolated CI run.
+
+### S4-02 response cancellation review fix (2026-11-20)
+
+The coordinator supplied a passing isolated CI record for exact head
+`1296a052764e718a8a9d70158fd32b2a83376adb`. Review then found that a
+response stream with an unsettled `cancel()` promise could hold a timed-out
+fetch or `poller.stop()` open. The transport now initiates reader cancellation
+without waiting for the source to settle it. An offline regression uses a
+stream whose cancellation never settles and checks timeout, caller abort, and
+poller stop. This edit follows the tested head and needs a new exact-SHA CI run.
+
+In the authoring shell, Node 24.22.3 passed offline `npm ci`, type checking,
+architecture boundaries, all 17 backend test files, `npm run test:messages`,
+and the focused provider suite. `npm run check` reached the private preview
+test but could not bind loopback (`listen EPERM` on `127.0.0.1`); the browser
+suite also failed in this shell. These are not exact-SHA CI results. No live
+provider request was made for this fix. The historical aggregate-only provider
+smoke predates both this edit and head `1296a052`; it does not establish live
+acceptance for either. The issue body still says `BACKLOG` despite PR #57;
+the coordinator must reconcile its body and status label and record the next
+exact-head CI result. No migration or durable data changed. Rollback is a code
+revert, and any in-memory preview is discarded on shutdown.
