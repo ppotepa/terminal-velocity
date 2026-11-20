@@ -124,13 +124,48 @@ test('map markers and list selection persist across reload with observed gaps at
   assert.equal(new URL(page.url()).searchParams.get('aircraft'), 'ac_demo-001');
   await page.getByText(/Observed track: 4 points in 2 segments/).waitFor();
   assert.ok(await page.getByText(/Gaps are shown as separate lines/).isVisible());
+  const beforePan = requests.at(-1).searchParams.get('bbox');
+  const mapBox = await page.locator('.tv-map-canvas').boundingBox();
+  assert.ok(mapBox);
+  await page.mouse.move(mapBox.x + mapBox.width / 2, mapBox.y + mapBox.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(mapBox.x + mapBox.width / 2 + 90,
+    mapBox.y + mapBox.height / 2 + 30, { steps: 6 });
+  await page.mouse.up();
+  const panDeadline = Date.now() + 3_000;
+  while (Date.now() < panDeadline && !requests.some(url => url.searchParams.get('bbox') !== beforePan))
+    await new Promise(resolve => setTimeout(resolve, 30));
+  assert.ok(requests.some(url => url.searchParams.get('bbox') !== beforePan));
+  await page.locator('.tv-aircraft-marker').first().waitFor();
+  assert.equal(await page.locator('.tv-aircraft-marker').count(), 1);
+  assert.equal(new URL(page.url()).searchParams.get('aircraft'), 'ac_demo-001');
   await page.reload();
-  await page.getByText('Selected ac_demo-001').waitFor();
+  await page.getByText('Selected ac_demo-001', { exact: true }).waitFor();
+  await page.locator('.tv-aircraft-marker').first().waitFor();
   assert.equal(await page.locator('.tv-aircraft-marker').count(), 1);
   await page.setViewportSize({ width: 390, height: 844 });
-  assert.ok(await page.getByRole('button', { name: /ac_demo-001.*No recent message/ }).last().isVisible());
+  await page.waitForTimeout(400);
+  await page.locator('.tv-map-list__item').first().waitFor();
+  assert.ok(await page.locator('.tv-map-list__item').first().isVisible());
+  assert.equal(await page.locator('.tv-map-list__item').first().getAttribute('aria-pressed'), 'true');
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390));
   assert.ok(requests.every(url => url.searchParams.has('bbox')));
+});
+
+test('the aircraft list remains usable when WebGL cannot create a map', async t => {
+  const { page, base } = await setup(t);
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function(type, ...args) {
+      if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') return null;
+      return original.call(this, type, ...args);
+    };
+  });
+  await page.goto(base);
+  await page.getByText('1 aircraft position in this viewport').waitFor();
+  assert.ok(await page.getByRole('alert').first().isVisible());
+  await page.locator('.tv-map-list__item').first().click();
+  assert.equal(new URL(page.url()).searchParams.get('aircraft'), 'ac_demo-001');
 });
 
 test('a late viewport response cannot replace a newer filter result', async t => {
@@ -176,7 +211,7 @@ test('keyboard focus, named controls, URL selection and empty/error states work'
   await page.getByRole('link', { name: 'Flights' }).click();
   await page.getByText('This view is not available yet').waitFor();
   await page.getByRole('link', { name: 'Map' }).click();
-  await page.getByText('Selected ac_demo-001').waitFor();
+  await page.getByText('Selected ac_demo-001', { exact: true }).waitFor();
   setFailure(true);
   await position.selectOption('STALE');
   await page.getByRole('alert').getByText('Viewport unavailable').waitFor();
