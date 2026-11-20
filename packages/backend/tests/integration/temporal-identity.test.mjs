@@ -10,8 +10,10 @@ import { postgresPositionLinker } from '../../src/modules/fleet-identity/infrast
 import { postgresReplayRequestReader } from '../../src/modules/fleet-identity/infrastructure/postgres/postgres-replay-request-reader.ts';
 import { postgresPositionHistoryWriter } from '../../src/modules/flight-tracking/infrastructure/postgres/append-position.ts';
 import { createSyntheticProviderPipeline } from '../../src/modules/source-connectors/composition/create-synthetic-provider-pipeline.ts';
+import { createRegistryReplayDelivery } from '../../src/modules/source-connectors/composition/create-permitted-replay-delivery.ts';
 import { createIdentityReplayWorker } from '../../src/modules/source-connectors/composition/create-identity-replay-worker.ts';
-import { fixture, accept, NOW } from './helpers/provider-fixture.mjs';
+import { fixture, accept, context, scope, origin, NOW } from './helpers/provider-fixture.mjs';
+import { backfillPositionLinks } from '../../../../scripts/postgres/backfill-position-links.mjs';
 
 const pools = createTestPools();
 beforeEach(() => resetTestData(pools.admin));
@@ -179,8 +181,11 @@ test('permitted synthetic message resolves through registry at observation time 
   const observed = Date.parse(raw.sourceObservedAt.at);
   const first = await commit.append(claim('ac_old', hex('D00001'), 0));
   await commit.append(claim('ac_old', tail('DEMO-001'), 0));
-  const pipeline = createSyntheticProviderPipeline(pools.runtime, undefined, () => NOW);
-  assert.ok((await accept(pipeline, raw)).ok);
+  const { delivery, pipeline } = createRegistryReplayDelivery(pools.runtime,
+    { ...scope, retentionAllowed: true, purpose: 'PRIVATE_PROCESSING',
+      evidenceReference: 'repository-synthetic-fixtures-only' }, scope,
+    context, () => origin, () => NOW);
+  assert.ok((await delivery.accept(raw)).ok);
   await pipeline.drain();
   const message = (await pools.runtime.query('SELECT message_id,canonical FROM source_ingestion.message_revisions')).rows[0];
   const original = JSON.stringify(message.canonical);
@@ -378,4 +383,67 @@ test('correction replay receives work while new position jobs remain pending', a
     WHERE phase <> 'DONE'`)).rows[0].n, '0');
   assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.position_link_jobs
     WHERE completed_at IS NULL`)).rows[0].n, '0');
+});
+
+test('position backfill commits bounded pages and resumes without duplicate jobs', async () => {
+  await pools.admin.query('ALTER TABLE tracking.position_observations DISABLE TRIGGER enqueue_position_link');
+  try {
+    const writer = postgresPositionHistoryWriter(pools.runtime);
+    for (let i = 0; i < 3; i++) assert.ok((await writer.append(position(`legacy-${i}`, NOW + i))).ok);
+  } finally {
+    await pools.admin.query('ALTER TABLE tracking.position_observations ENABLE TRIGGER enqueue_position_link');
+  }
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.position_link_jobs')).rows[0].n, '0');
+  assert.deepEqual(await backfillPositionLinks(pools.admin, { batchSize: 1, maxBatches: 1 }),
+    { queued: 1, complete: false });
+  assert.equal((await pools.admin.query(`SELECT last_source_observation_id FROM fleet_identity.position_backfill_progress`))
+    .rows[0].last_source_observation_id, 'epoch:synthetic-1:legacy-0');
+  await pools.admin.query(`CREATE FUNCTION fleet_identity.reject_synthetic_backfill() RETURNS trigger
+    LANGUAGE plpgsql AS $$ BEGIN
+      IF NEW.source_observation_id = 'epoch:synthetic-1:legacy-1' THEN
+        RAISE EXCEPTION 'synthetic backfill failure';
+      END IF;
+      RETURN NEW;
+    END $$`);
+  await pools.admin.query(`CREATE TRIGGER reject_synthetic_backfill BEFORE INSERT
+    ON fleet_identity.position_link_jobs FOR EACH ROW
+    EXECUTE FUNCTION fleet_identity.reject_synthetic_backfill()`);
+  try {
+    await assert.rejects(backfillPositionLinks(pools.admin, { batchSize: 1, maxBatches: 1 }),
+      /synthetic backfill failure/);
+    assert.equal((await pools.admin.query(`SELECT last_source_observation_id
+      FROM fleet_identity.position_backfill_progress`)).rows[0].last_source_observation_id,
+    'epoch:synthetic-1:legacy-0');
+  } finally {
+    await pools.admin.query('DROP TRIGGER reject_synthetic_backfill ON fleet_identity.position_link_jobs');
+    await pools.admin.query('DROP FUNCTION fleet_identity.reject_synthetic_backfill()');
+  }
+  assert.deepEqual(await backfillPositionLinks(pools.admin, { batchSize: 1 }),
+    { queued: 2, complete: true });
+  assert.deepEqual(await backfillPositionLinks(pools.admin, { batchSize: 1 }),
+    { queued: 0, complete: true });
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.position_link_jobs')).rows[0].n, '3');
+  const work = createIdentityReplayWorker(pools.runtime);
+  while (await work(1)) { /* All pre-existing facts receive a decision. */ }
+  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.position_link_heads`)).rows[0].n, '3');
+});
+
+test('populated registry uses the alias and time index for owner lookup', async () => {
+  await pools.admin.query(`INSERT INTO fleet_identity.aircraft (aircraft_id)
+    SELECT 'ac_plan_' || n FROM generate_series(1,3000) AS n`);
+  await pools.admin.query(`INSERT INTO fleet_identity.assertions
+    (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
+    SELECT 'ac_plan_' || n,'ICAO24',upper(lpad(to_hex(n),6,'0')),0,'synthetic','plan',n
+    FROM generate_series(1,3000) AS n`);
+  await pools.admin.query('ANALYZE fleet_identity.assertions');
+  let actualLookup;
+  const reader = postgresIdentityReader({ query(sql, parameters) {
+    actualLookup = { sql, parameters };
+    return pools.runtime.query(sql, parameters);
+  } });
+  const snapshot = await reader.find([hex('000BB8')], NOW);
+  assert.equal(snapshot.assertions[0].aircraftId, 'ac_plan_3000');
+  const plan = (await pools.admin.query(`EXPLAIN (FORMAT JSON) ${actualLookup.sql}`,
+    actualLookup.parameters)).rows[0]['QUERY PLAN'];
+  assert.match(JSON.stringify(plan), /assertions_alias_time/);
 });

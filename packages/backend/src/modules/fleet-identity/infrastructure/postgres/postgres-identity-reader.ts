@@ -22,21 +22,26 @@ export function postgresIdentityReader(pool: SqlExecutor): IdentityReader {
   }
   return { async find(identifiers: readonly StrongIdentifier[], observedAt: number) {
     if (!Number.isSafeInteger(observedAt) || observedAt < 0) throw new RangeError('Invalid observation time.');
-    const keys = identifiers.map(item => `${item.kind}:${item.value}`);
+    const aliasPredicate = identifiers.length ? identifiers.map((_, index) =>
+      `(a.kind=$${index * 2 + 1} AND a.normalized_alias=$${index * 2 + 2})`).join(' OR ') : 'false';
+    const observedParameter = identifiers.length * 2 + 1;
     const result = await pool.query<AssertionRow>(`
-      WITH current_assertions AS (
-        SELECT a.*, s.recorded_at AS superseded_at
-        FROM fleet_identity.assertions a LEFT JOIN fleet_identity.assertions s ON s.supersedes_id=a.assertion_id
-        WHERE s.assertion_id IS NULL
-      ), owners AS (
-        SELECT DISTINCT aircraft_id FROM current_assertions
-        WHERE kind || ':' || normalized_alias = ANY($1::text[])
-          AND valid_from_ms <= $2 AND (valid_until_ms IS NULL OR $2 < valid_until_ms)
+      WITH owners AS (
+        SELECT DISTINCT a.aircraft_id FROM fleet_identity.assertions a
+        WHERE (${aliasPredicate})
+          AND a.valid_from_ms <= $${observedParameter}
+          AND (a.valid_until_ms IS NULL OR $${observedParameter} < a.valid_until_ms)
+          AND NOT EXISTS (SELECT 1 FROM fleet_identity.assertions successor
+            WHERE successor.supersedes_id=a.assertion_id)
       )
       SELECT a.*, state.revision AS registry_revision FROM fleet_identity.registry_state state
-      LEFT JOIN LATERAL (SELECT * FROM current_assertions
-        WHERE aircraft_id IN (SELECT aircraft_id FROM owners)
-        ORDER BY assertion_id LIMIT 1001) a ON true WHERE state.singleton`, [keys, observedAt]);
+      LEFT JOIN LATERAL (SELECT assertion.*, successor.recorded_at AS superseded_at
+        FROM fleet_identity.assertions assertion
+        LEFT JOIN fleet_identity.assertions successor ON successor.supersedes_id=assertion.assertion_id
+        WHERE successor.assertion_id IS NULL
+          AND assertion.aircraft_id IN (SELECT aircraft_id FROM owners)
+        ORDER BY assertion.assertion_id LIMIT 1001) a ON true WHERE state.singleton`,
+    [...identifiers.flatMap(item => [item.kind, item.value]), observedAt]);
     const revision = Number(result.rows[0]?.registry_revision);
     if (!Number.isSafeInteger(revision)) throw new Error('Invalid registry revision.');
     const nonempty = result.rows.filter(row => row.assertion_id !== null);

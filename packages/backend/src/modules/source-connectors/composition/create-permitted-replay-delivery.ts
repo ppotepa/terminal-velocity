@@ -9,7 +9,7 @@ import { createPermittedProviderPipeline } from './create-permitted-provider-pip
 
 /** Replay uses the same retained-input, import and private projection path as ingestion.
  * Collection authorization remains the runner's per-fetch/per-receipt responsibility. */
-export function createPermittedReplayDelivery(pool: SqlPool, directory: CandidateDirectory,
+export function createPermittedReplayDelivery(pool: SqlPool, directory: CandidateDirectory | undefined,
   permission: RetentionPermission, scope: VerifiedSourceScope,
   context: (raw: unknown) => NormalizationContext, origin: () => SourceDeliveryOrigin,
   now: () => number = Date.now) {
@@ -35,4 +35,11 @@ export function createPermittedReplayDelivery(pool: SqlPool, directory: Candidat
     },
   };
   return { delivery, pipeline };
+}
+
+/** Registry-backed replay composition. The caller still supplies a verified retention grant. */
+export function createRegistryReplayDelivery(pool: SqlPool, permission: RetentionPermission,
+  scope: VerifiedSourceScope, context: (raw: unknown) => NormalizationContext,
+  origin: () => SourceDeliveryOrigin, now: () => number = Date.now) {
+  return createPermittedReplayDelivery(pool, undefined, permission, scope, context, origin, now);
 }

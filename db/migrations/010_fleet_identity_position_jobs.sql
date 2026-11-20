@@ -34,13 +34,16 @@ $$;
 CREATE TRIGGER enqueue_position_link AFTER INSERT ON tracking.position_observations
   FOR EACH ROW EXECUTE FUNCTION fleet_identity.enqueue_position_link();
 
--- Existing facts predate the trigger and still need their first decision.
-INSERT INTO fleet_identity.position_link_jobs (source_id, source_observation_id)
-  SELECT p.source_id, p.source_observation_id
-  FROM tracking.position_observations p
-  LEFT JOIN fleet_identity.position_link_heads h
-    USING (source_id, source_observation_id)
-  WHERE h.source_id IS NULL;
+-- Existing facts are queued by the explicit, bounded position backfill command.
+-- Its cursor is committed with each batch and survives process restarts.
+CREATE TABLE fleet_identity.position_backfill_progress (
+  singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+  last_source_id text,
+  last_source_observation_id text,
+  completed_at timestamptz,
+  CHECK ((last_source_id IS NULL) = (last_source_observation_id IS NULL))
+);
+INSERT INTO fleet_identity.position_backfill_progress (singleton) VALUES (true);
 
 GRANT SELECT ON fleet_identity.position_link_jobs TO tv_runtime;
 GRANT UPDATE (completed_at) ON fleet_identity.position_link_jobs TO tv_runtime;

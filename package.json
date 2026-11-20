@@ -20,6 +20,7 @@
     "example": "node examples/send-demo-message.mjs",
     "smoke": "node scripts/smoke-api.mjs",
     "db:migrate": "node scripts/postgres/migrate.mjs",
+    "db:backfill-position-links": "node scripts/postgres/backfill-position-links.mjs",
     "db:local-runtime": "node scripts/postgres/provision-local-runtime.mjs",
     "test:integration": "node scripts/postgres/run-integration.mjs",
     "test:postgres:local": "node scripts/postgres/run-local.mjs",
