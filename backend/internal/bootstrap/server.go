@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	transport "github.com/ppotepa/terminal-velocity/backend/internal/transport/http"
 )
 
 // Pinger is the small MongoDB dependency needed by readiness.
@@ -19,11 +21,9 @@ type healthResponse struct {
 	Dependencies map[string]string `json:"dependencies"`
 }
 
-// NewHTTPServer constructs the initial API server. It deliberately contains only
-// the health endpoint; feature handlers are composed as their issues are completed.
-func NewHTTPServer(address, version string, mongo Pinger) *http.Server {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+// NewHTTPServer builds the local API server around the composed feature handlers.
+func NewHTTPServer(address, version string, mongo Pinger, endpoints ...transport.Endpoints) *http.Server {
+	health := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -46,9 +46,13 @@ func NewHTTPServer(address, version string, mongo Pinger) *http.Server {
 			Dependencies: map[string]string{"mongo": dependency},
 		})
 	})
+	var configured transport.Endpoints
+	if len(endpoints) > 0 {
+		configured = endpoints[0]
+	}
 	return &http.Server{
 		Addr:              address,
-		Handler:           mux,
+		Handler:           transport.Router(health, configured),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}

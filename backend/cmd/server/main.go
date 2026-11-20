@@ -46,7 +46,13 @@ func run() error {
 		}
 	}()
 
-	server := bootstrap.NewHTTPServer(cfg.HTTPAddr, cfg.Version, db)
+	composeCtx, cancelCompose := context.WithTimeout(rootCtx, 20*time.Second)
+	endpoints, err := bootstrap.Compose(composeCtx, db.Database())
+	cancelCompose()
+	if err != nil {
+		return errors.New("application composition failed; check MongoDB indexes and configuration")
+	}
+	server := bootstrap.NewHTTPServer(cfg.HTTPAddr, cfg.Version, db, endpoints)
 	serveErr := make(chan error, 1)
 	go func() {
 		log.Printf("server listening on %s", cfg.HTTPAddr)
