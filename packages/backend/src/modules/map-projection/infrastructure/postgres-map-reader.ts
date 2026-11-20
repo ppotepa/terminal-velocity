@@ -20,10 +20,11 @@ const mapSql = `WITH spatial AS (
     p.measurement_kind,p.timestamp_precision,p.timestamp_uncertainty_ms
   FROM tracking.map_aircraft_positions p
   WHERE p.aircraft_id COLLATE "C" > $5
-    AND (CASE WHEN $1::float8 <= $3::float8
-      THEN p.position <@ box(point($1,$2),point($3,$4))
-      ELSE p.position <@ box(point($1,$2),point(180,$4))
-        OR p.position <@ box(point(-180,$2),point($3,$4)) END)
+    AND (($1::float8 <= $3::float8
+      AND p.position <@ box(point($1,$2),point($3,$4)))
+      OR ($1::float8 > $3::float8
+        AND (p.position <@ box(point($1,$2),point(180,$4))
+          OR p.position <@ box(point(-180,$2),point($3,$4)))))
 ), ranked AS (
   SELECT spatial.*,m.last_message_at_ms,
     CASE WHEN spatial.timestamp_uncertainty_ms IS NULL OR spatial.timestamp_precision='UNKNOWN'

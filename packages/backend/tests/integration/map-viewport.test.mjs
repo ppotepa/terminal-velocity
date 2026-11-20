@@ -123,7 +123,9 @@ test('a confirmed current-position head updates the denormalized map row in its 
     await client.query('BEGIN');
     await client.query('SET LOCAL enable_seqscan=off');
     const plan = await client.query(`EXPLAIN SELECT aircraft_id FROM tracking.map_aircraft_positions
-      WHERE position <@ box(point(20,51),point(22,53))`);
+      WHERE ((20::float8 <= 22::float8 AND position <@ box(point(20,51),point(22,53)))
+        OR (20::float8 > 22::float8 AND (position <@ box(point(20,51),point(180,53))
+          OR position <@ box(point(-180,51),point(22,53)))))`);
     assert.match(plan.rows.map(row => row['QUERY PLAN']).join('\n'), /map_aircraft_positions_gist/);
     await client.query('ROLLBACK');
   } finally { client.release(); }
