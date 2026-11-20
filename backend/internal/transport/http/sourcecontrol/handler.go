@@ -76,7 +76,7 @@ func (h Health) Validate() error {
 		return errors.New("source health ID is required")
 	}
 	switch h.Status {
-	case "ok", "degraded", "inactive", "synthetic", "error":
+	case "ok", "degraded", "inactive", "not_configured", "blocked", "synthetic", "error":
 	default:
 		return errors.New("unsupported source status")
 	}
