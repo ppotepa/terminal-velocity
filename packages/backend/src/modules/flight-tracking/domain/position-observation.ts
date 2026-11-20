@@ -47,6 +47,8 @@ export interface PositionObservation {
   readonly schemaVersion: typeof POSITION_OBSERVATION_SCHEMA_VERSION;
   readonly sourceId: PositionSourceId;
   readonly sourceObservationId: SourceObservationId;
+  /** Opaque source-scoped delivery reference, when the source exposes one. */
+  readonly sourceDeliveryRef?: string;
   readonly observedAt: UtcTimestamp;
   readonly observedAtBasis: PositionObservedAtBasis;
   /** Present together only when observedAt was derived from a source-declared age. */
@@ -138,10 +140,21 @@ function parseIdentifierHints(input: unknown): Result<PositionIdentifierHints, P
 export function parsePositionObservation(
   input: unknown, identityDecision?: PositionIdentityDecision,
 ): Result<PositionObservation, PositionParseError> {
+  return validatePositionObservation(input, identityDecision, false);
+}
+
+/** Revalidates a fact already read from the private immutable position table. Never use for a new receipt. */
+export function parseStoredPositionObservation(input: unknown): Result<PositionObservation, PositionParseError> {
+  return validatePositionObservation(input, undefined, true);
+}
+
+function validatePositionObservation(
+  input: unknown, identityDecision: PositionIdentityDecision | undefined, storedFact: boolean,
+): Result<PositionObservation, PositionParseError> {
   const record = plainRecord(input);
   if (!record) return err({ code: 'INVALID_INPUT', field: 'object' });
   const allowed = [
-    'schemaVersion', 'sourceId', 'sourceObservationId', 'observedAt', 'observedAtBasis',
+    'schemaVersion', 'sourceId', 'sourceObservationId', 'sourceDeliveryRef', 'observedAt', 'observedAtBasis',
     'sourceTimeReferenceAt', 'sourceAgeSeconds', 'ingestedAt', 'timestampPrecision',
     'timestampUncertaintyMs', 'measurementKind', 'latitude', 'longitude', 'identifierHints', 'quality',
     'groundSpeedKnots', 'trackDegrees', 'trackKind', 'altitudes', 'measurementDetail', 'confirmedAircraftId', 'identityEvidence',
@@ -159,6 +172,9 @@ export function parsePositionObservation(
   if (!sourceId.ok) return sourceId;
   const observationId = sourceObservationId(record['sourceObservationId']);
   if (!observationId.ok) return observationId;
+  if (Object.hasOwn(record, 'sourceDeliveryRef') &&
+    (typeof record['sourceDeliveryRef'] !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(record['sourceDeliveryRef'])))
+    return err({ code: 'INVALID_INPUT', field: 'sourceDeliveryRef' });
 
   const observedAt = utcTimestamp(record['observedAt'], 'observedAt');
   if (!observedAt.ok) return observedAt;
@@ -208,6 +224,7 @@ export function parsePositionObservation(
     schemaVersion: typeof POSITION_OBSERVATION_SCHEMA_VERSION;
     sourceId: PositionSourceId;
     sourceObservationId: SourceObservationId;
+    sourceDeliveryRef?: string;
     observedAt: UtcTimestamp;
     observedAtBasis: PositionObservedAtBasis;
     sourceTimeReferenceAt?: UtcTimestamp;
@@ -240,6 +257,7 @@ export function parsePositionObservation(
     latitude: latitude.value,
     longitude: longitude.value,
   };
+  if (typeof record['sourceDeliveryRef'] === 'string') output.sourceDeliveryRef = record['sourceDeliveryRef'];
 
   if (sourceTimeReferenceAt !== undefined) output.sourceTimeReferenceAt = sourceTimeReferenceAt;
   if (sourceAgeSecondsValue !== undefined) output.sourceAgeSeconds = sourceAgeSecondsValue;
@@ -265,15 +283,15 @@ export function parsePositionObservation(
       || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(evidence['resolverId'])
       || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(evidence['evidenceRef']))
       return err({ code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
-    if (identityDecision?.status !== 'CONFIRMED'
+    if (!storedFact && (identityDecision?.status !== 'CONFIRMED'
       || identityDecision.sourceId !== sourceId.value
       || identityDecision.sourceObservationId !== observationId.value
       || identityDecision.aircraftId !== confirmed.value
       || identityDecision.resolverId !== evidence['resolverId']
-      || identityDecision.evidenceRef !== evidence['evidenceRef'])
+      || identityDecision.evidenceRef !== evidence['evidenceRef']))
       return err({ code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
-    if (output.identifierHints?.icao24 !== undefined
-      && (typeof identityDecision.icao24 !== 'string'
+    if (!storedFact && output.identifierHints?.icao24 !== undefined
+      && (typeof identityDecision?.icao24 !== 'string'
         || identityDecision.icao24.toUpperCase() !== output.identifierHints.icao24))
       return err({ code: 'CONFLICTING_POSITION_IDENTIFIERS' });
     output.confirmedAircraftId = confirmed.value;

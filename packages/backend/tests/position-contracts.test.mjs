@@ -7,6 +7,8 @@ import {
   classifyPositionFreshness,
   positionFreshnessPolicy,
   positionSourceId,
+  isDurableSourceObservationId,
+  sourceObservationId,
 } from '../src/modules/flight-tracking/public/index.ts';
 import { classifyAge } from '../src/modules/message-availability/domain/classify-age.ts';
 
@@ -30,6 +32,13 @@ const confirmedDecision = (overrides = {}) => ({
   status: 'CONFIRMED', sourceId: 'src_positions-test',
   sourceObservationId: 'delivery:position-1', aircraftId: 'ac_synthetic-1',
   icao24: 'A0B1C2', resolverId: 'resolver_synthetic', evidenceRef: 'decision:1', ...overrides,
+});
+
+test('durable source identity includes an epoch and rejects snapshot preview keys', () => {
+  for (const key of ['epoch:receiver-1:measurement-a', 'epoch:receiver-2:measurement-a'])
+    assert.equal(isDurableSourceObservationId(sourceObservationId(key).value), true);
+  for (const key of ['preview:adsb-lol:v2:123:A0B1C2', 'epoch::measurement-a', 'epoch:receiver-1:'])
+    assert.equal(isDurableSourceObservationId(sourceObservationId(key).value), false);
 });
 
 test('v1 contract validates and normalizes an ADS-B observation with an aircraft address', () => {

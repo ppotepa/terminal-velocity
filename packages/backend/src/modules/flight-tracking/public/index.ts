@@ -4,7 +4,7 @@ export {
   type PositionIdentityEvidence, type PositionParseError,
 } from '../domain/position-observation.ts';
 export {
-  positionSourceId, sourceObservationId,
+  positionSourceId, sourceObservationId, isDurableSourceObservationId,
   type PositionSourceId, type SourceObservationId, type InvalidPositionIdentifier,
 } from '../domain/position-identifiers.ts';
 export {
@@ -32,3 +32,14 @@ export {
   classifyPositionFreshness, positionFreshnessPolicy,
   type PositionFreshness, type PositionFreshnessPolicy, type InvalidPositionFreshnessPolicy,
 } from '../domain/position-freshness.ts';
+export {
+  POSITION_HISTORY_MAX_PAGE_SIZE, POSITION_HISTORY_MAX_RANGE_MS,
+  positionHistoryByIcao24Query, positionHistoryWithinBoundsQuery,
+  type InvalidPositionHistoryQuery, type PositionGeoBounds, type PositionHistoryByIcao24Query,
+  type PositionHistoryCursor, type PositionHistoryQuery, type PositionHistoryWindow,
+  type PositionHistoryWithinBoundsQuery,
+} from '../domain/position-history-query.ts';
+export {
+  type PositionHistoryWriter, type PositionObservationAppendError, type PositionObservationAppendResult,
+} from '../ports/position-history-writer.ts';
+export { type PositionHistoryPage, type PositionHistoryReader } from '../ports/position-history-reader.ts';

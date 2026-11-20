@@ -26,3 +26,8 @@ export function sourceObservationId(input: string): Result<SourceObservationId, 
     ? ok(input as SourceObservationId)
     : err({ code: 'INVALID_POSITION_IDENTIFIER', field: 'sourceObservationId' });
 }
+
+/** A durable key names one source measurement within an explicit source ID epoch. */
+export function isDurableSourceObservationId(input: SourceObservationId): boolean {
+  return /^epoch:[A-Za-z0-9][A-Za-z0-9._-]{0,63}:[A-Za-z0-9][A-Za-z0-9._-]{0,180}$/u.test(input);
+}
