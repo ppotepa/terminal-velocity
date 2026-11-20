@@ -55,7 +55,14 @@ export async function resetTestData(admin) {
   await admin.query(`UPDATE tracking.current_position_backfill_progress
     SET last_source_id=NULL,last_source_observation_id=NULL,completed_at=NULL WHERE singleton`);
   await admin.query('UPDATE tracking.current_position_state SET revision=0 WHERE singleton');
-  await admin.query('UPDATE tracking.map_state SET revision=0 WHERE singleton');
+  const mapOwner = await admin.connect();
+  try {
+    await mapOwner.query('BEGIN');
+    await mapOwner.query('SET LOCAL ROLE tv_tracking_owner');
+    await mapOwner.query('UPDATE tracking.map_state SET revision=0 WHERE singleton');
+    await mapOwner.query('COMMIT');
+  } catch (error) { await mapOwner.query('ROLLBACK'); throw error; }
+  finally { mapOwner.release(); }
   await admin.query(`UPDATE fleet_identity.position_backfill_progress
     SET last_source_id=NULL,last_source_observation_id=NULL,completed_at=NULL WHERE singleton`);
 }

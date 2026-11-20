@@ -113,6 +113,8 @@ test('a confirmed current-position head updates the denormalized map row in its 
   assert.equal(page.data[0].position.freshness, 'CURRENT');
   assert.equal(page.data[0].messages.freshness, 'NONE');
   assert.ok(page.checkpoint > 0);
+  await assert.rejects(pools.runtime.query('UPDATE tracking.map_state SET revision=0 WHERE singleton'),
+    { code: '42501' });
   const indexes = await pools.admin.query(`SELECT indexname FROM pg_indexes
     WHERE schemaname='tracking' AND tablename='map_aircraft_positions'`);
   assert.ok(indexes.rows.some(row => row.indexname === 'map_aircraft_positions_gist'));

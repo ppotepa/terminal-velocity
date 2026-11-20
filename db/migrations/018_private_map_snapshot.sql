@@ -109,7 +109,6 @@ GRANT EXECUTE ON FUNCTION tracking.refresh_map_position() TO tv_runtime;
 GRANT EXECUTE ON FUNCTION tracking.on_demo_contribution_change() TO tv_availability_owner;
 GRANT SELECT ON tracking.map_state,tracking.map_aircraft_positions,
   tracking.map_demo_message_status TO tv_runtime;
-GRANT UPDATE (revision) ON tracking.map_state TO tv_runtime;
 RESET ROLE;
 
 GRANT TRIGGER ON tracking.current_position_heads TO tv_tracking_owner;

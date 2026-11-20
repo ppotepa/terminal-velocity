@@ -21,7 +21,7 @@ Storage selection is a process setting: `STORAGE_DRIVER=memory` (default) or `ST
 
 `GET /api/v1/internal/map/aircraft?bbox=west,south,east,north&limit=500` reads only coordinates with a confirmed current-position head. The bbox includes its edges. Longitude may cross the antimeridian when `west > east`; latitude must ascend. A viewport may span at most 90° longitude and 60° latitude. The response has at most 500 markers; `limit` accepts 1–500 and defaults to 500. The caller follows `nextCursor` by repeating the same bbox and filters with `cursor=<value>`. A position or synthetic message change rejects a prior PostgreSQL cursor with HTTP 409 `STALE_MAP_CURSOR`; restart at the first page. Cursors are opaque and bound to the bbox and filters.
 
-Optional exact filters are `positionStatus=CURRENT|STALE|UNKNOWN`, `messageStatus=RECENT|STALE|NONE`, and `protocol=VHF_ACARS|VDL2|HFDL|SATCOM`. A protocol filter requires a synthetic demo contribution in that protocol and calculates message freshness from its last observation. Unknown or repeated parameters, malformed coordinates, oversized areas/limits and mismatched cursors return HTTP 400 `INVALID_MAP_QUERY`.
+Optional exact filters are `positionStatus=CURRENT|STALE|UNKNOWN`, `messageStatus=RECENT|STALE|NONE`, and `protocol=VHF_ACARS|VDL2|HFDL|SATCOM`. Position freshness uses a 60-second window with observation precision and clock uncertainty; an indeterminate age is `UNKNOWN`. A protocol filter requires a synthetic demo contribution in that protocol and calculates message freshness from its last observation. Unknown or repeated parameters, malformed coordinates, oversized areas/limits and mismatched cursors return HTTP 400 `INVALID_MAP_QUERY`.
 
 ```json
 {
