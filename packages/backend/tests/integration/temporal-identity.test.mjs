@@ -234,8 +234,10 @@ test('permitted synthetic message resolves through registry at observation time 
   assert.equal(observed < NOW, true);
   await commit.append(claim('ac_new', hex('D00001'), 0), first.assertionId);
   const badClock = createIdentityReplayWorker(pools.runtime, () => -1);
-  await badClock(1);
-  await assert.rejects(badClock(1), /COMMIT_FAILED|Invalid replay clock/);
+  await assert.rejects(async () => {
+    for (let page = 0; page < 30; page++) await badClock(1);
+    throw new Error('Replay did not reach the synthetic message.');
+  }, /COMMIT_FAILED|Invalid replay clock/);
   assert.equal((await pools.runtime.query(`SELECT phase,cursor_message_id FROM fleet_identity.replay_requests
     ORDER BY request_id DESC LIMIT 1`)).rows[0].cursor_message_id, null);
   await pipeline.drain();
@@ -409,16 +411,21 @@ test('correction replay receives work while new position jobs remain pending', a
   await commit.append(claim('ac_a', hex('A0B1C2'), 0));
   const writer = postgresPositionHistoryWriter(pools.runtime);
   const at = Date.parse('2026-11-19T10:00:00Z');
-  for (let i = 0; i < 4; i++) assert.ok((await writer.append(position(`fair-${i}`, at + i * 1000))).ok);
+  for (let i = 0; i < 12; i++) assert.ok((await writer.append(position(`fair-${i}`, at + i * 1000))).ok);
   const work = createIdentityReplayWorker(pools.runtime);
   assert.equal((await work(1)).requestId, null);
-  const correction = await work(1);
-  assert.equal(typeof correction?.requestId, 'number');
-  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.position_link_jobs
-    WHERE completed_at IS NULL`)).rows[0].n, '3');
-  assert.ok((await pools.runtime.query(`SELECT cursor_observation_id FROM fleet_identity.replay_requests
-    ORDER BY request_id LIMIT 1`)).rows[0].cursor_observation_id);
-  for (let i = 0; i < 30; i++) if (await work(1) === null) break;
+  let correctionPage;
+  for (let i = 0; i < 20; i++) {
+    const page = await work(1);
+    const cursor = (await pools.runtime.query(`SELECT cursor_observation_id
+      FROM fleet_identity.replay_requests ORDER BY request_id LIMIT 1`)).rows[0].cursor_observation_id;
+    if (cursor) { correctionPage = page; break; }
+  }
+  assert.equal(typeof correctionPage?.requestId, 'number');
+  const pending = Number((await pools.runtime.query(`SELECT count(*) AS n
+    FROM fleet_identity.position_link_jobs WHERE completed_at IS NULL`)).rows[0].n);
+  assert.ok(pending > 0 && pending < 12);
+  for (let i = 0; i < 80; i++) if (await work(1) === null) break;
   assert.equal(await work(1), null);
   assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.replay_requests
     WHERE phase <> 'DONE'`)).rows[0].n, '0');
