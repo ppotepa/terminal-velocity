@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { Pool } from 'pg';
 import { createTestPools, resetTestData } from './helpers/database.mjs';
 import { icao24, registration, decideAircraftMatch } from '../../src/modules/aircraft-correlation/public/index.ts';
-import { createResolveAircraft, createRegistryCandidateDirectory } from '../../src/modules/fleet-identity/public/index.ts';
+import { createResolveAircraft, createRegistryCandidateDirectory, expandReplayAliases } from '../../src/modules/fleet-identity/public/index.ts';
+import { runSqlTransaction } from '../../src/modules/database-transactions/public/index.ts';
 import { postgresIdentityReader } from '../../src/modules/fleet-identity/infrastructure/postgres/postgres-identity-reader.ts';
 import { postgresIdentityCommitter } from '../../src/modules/fleet-identity/infrastructure/postgres/postgres-identity-committer.ts';
 import { postgresPositionLinker } from '../../src/modules/fleet-identity/infrastructure/postgres/postgres-position-linker.ts';
@@ -18,6 +19,13 @@ import { backfillPositionLinks } from '../../../../scripts/postgres/backfill-pos
 const pools = createTestPools();
 beforeEach(() => resetTestData(pools.admin));
 after(() => pools.close());
+async function expandAll(limit = 10) {
+  let pages = 0;
+  while (await runSqlTransaction(pools.runtime, sql => expandReplayAliases(sql, limit))) {
+    if (++pages > 1000) throw new Error('Replay expansion did not complete.');
+  }
+  return pages;
+}
 const hex = value => ({ kind: 'ICAO24', value: icao24(value).value });
 const tail = value => ({ kind: 'REGISTRATION', value: registration(value).value });
 const claim = (aircraftId, identifier, from, until = null) => ({
@@ -56,6 +64,7 @@ test('temporal registry transfers aliases and retains historical position facts 
   assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM tracking.position_observations`)).rows[0].n, '1');
   assert.deepEqual((await pools.runtime.query(`SELECT aircraft_id FROM fleet_identity.position_link_revisions
     ORDER BY revision`)).rows.map(row => row.aircraft_id), ['ac_a', 'ac_b']);
+  await expandAll();
   assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.replay_requests`)).rows[0].n, '5');
   assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.assertions`)).rows[0].n, '3');
   const history = await reader.history('ac_a');
@@ -142,6 +151,35 @@ test('concurrent corrections have one successor and failed transactions leave no
   assert.equal((await pools.runtime.query('SELECT revision FROM fleet_identity.registry_state')).rows[0].revision, '2');
   for (const table of ['assertions', 'position_link_revisions'])
     await assert.rejects(() => pools.runtime.query(`UPDATE fleet_identity.${table} SET revision=revision`), error => error.code === '42501');
+});
+
+test('large registry append stays bounded and expansion resumes after a failed page', async () => {
+  await pools.runtime.query("INSERT INTO fleet_identity.aircraft (aircraft_id) VALUES ('ac_large')");
+  await pools.runtime.query(`INSERT INTO fleet_identity.assertions
+    (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
+    SELECT 'ac_large','REGISTRATION','N'||lpad(n::text,5,'0'),0,'synthetic','test',n
+    FROM generate_series(1,250) n`);
+  await pools.runtime.query('UPDATE fleet_identity.registry_state SET revision=250 WHERE singleton');
+  const commit = postgresIdentityCommitter(pools.runtime);
+  const assertion = await commit.append(claim('ac_large', hex('A0B1C2'), 0));
+  assert.equal(assertion.revision, 251);
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.replay_requests')).rows[0].n, '1');
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.replay_expansions')).rows[0].n, '1');
+  await assert.rejects(() => runSqlTransaction(pools.runtime, async sql => {
+    const page = await expandReplayAliases(sql, 25);
+    assert.equal(page.processed, 25);
+    throw new Error('Synthetic expansion rollback');
+  }), /Synthetic expansion rollback/);
+  assert.equal((await pools.runtime.query('SELECT cursor_assertion_id FROM fleet_identity.replay_expansions')).rows[0].cursor_assertion_id, '0');
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.replay_requests')).rows[0].n, '1');
+  const first = await runSqlTransaction(pools.runtime, sql => expandReplayAliases(sql, 25));
+  assert.equal(first.processed, 25);
+  assert.equal(first.complete, false);
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.replay_requests')).rows[0].n, '26');
+  assert.equal(await expandAll(25), 10);
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.replay_requests')).rows[0].n, '251');
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.assertions')).rows[0].n, '251');
+  assert.ok((await pools.runtime.query('SELECT completed_at FROM fleet_identity.replay_expansions')).rows[0].completed_at);
 });
 
 test('unmatched position remains replayable after a later claim', async () => {
@@ -234,6 +272,9 @@ test('adding a second ICAO24 replays the first alias for message status and posi
     WHERE h.source_observation_id=$1`, [positionId])).rows[0].status, 'MATCHED');
 
   await commit.append(claim('ac_a', hex('D00002'), 0));
+  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.replay_requests
+    WHERE assertion_id=(SELECT max(assertion_id) FROM fleet_identity.assertions)`)).rows[0].n, '1');
+  await expandAll();
   const replay = (await pools.runtime.query(`SELECT normalized_alias FROM fleet_identity.replay_requests
     WHERE assertion_id=(SELECT max(assertion_id) FROM fleet_identity.assertions)
     ORDER BY request_id`)).rows.map(row => row.normalized_alias);

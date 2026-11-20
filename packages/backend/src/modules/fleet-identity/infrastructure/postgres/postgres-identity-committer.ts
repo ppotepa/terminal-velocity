@@ -42,33 +42,17 @@ export function postgresIdentityCommitter(pool: SqlPool): IdentityCommitter {
           kind: checked.value.identifier.kind,
           normalized_alias: checked.value.identifier.value, valid_from_ms: String(checked.value.validFrom),
           valid_until_ms: checked.value.validUntil === null ? null : String(checked.value.validUntil) }];
-        const replayRanges = new Map<string, { kind: string; normalized_alias: string;
-          valid_from_ms: string; valid_until_ms: string | null }>();
-        const addRange = (range: { kind: string; normalized_alias: string;
-          valid_from_ms: string; valid_until_ms: string | null }) => {
-          replayRanges.set(JSON.stringify([range.kind, range.normalized_alias,
-            range.valid_from_ms, range.valid_until_ms]), range);
-        };
         for (const affected of changed) {
           if (!affected) continue;
-          addRange(affected);
-          // A changed claim can invalidate decisions made from another active alias
-          // of either aircraft, even when the observation never mentions this alias.
-          const siblings = await sql.query<{ kind: string; normalized_alias: string;
-            valid_from_ms: string; valid_until_ms: string | null }>(`
-            SELECT a.kind,a.normalized_alias,a.valid_from_ms,a.valid_until_ms
-            FROM fleet_identity.assertions a WHERE a.aircraft_id=$1
-              AND NOT EXISTS (SELECT 1 FROM fleet_identity.assertions s WHERE s.supersedes_id=a.assertion_id)
-              AND a.valid_from_ms < COALESCE($3::bigint, 9223372036854775807)
-              AND COALESCE(a.valid_until_ms, 9223372036854775807) > $2`,
-          [affected.aircraft_id, affected.valid_from_ms, affected.valid_until_ms]);
-          for (const sibling of siblings.rows) addRange(sibling);
-        }
-        for (const affected of replayRanges.values()) {
           await sql.query(`INSERT INTO fleet_identity.replay_requests
             (assertion_id,kind,normalized_alias,valid_from_ms,valid_until_ms) VALUES ($1,$2,$3,$4,$5)`,
           [row.assertion_id, affected.kind, affected.normalized_alias,
             affected.valid_from_ms, affected.valid_until_ms]);
+          // Persist a bounded task rather than loading every sibling in this
+          // transaction. The worker resumes expansion from cursor_assertion_id.
+          await sql.query(`INSERT INTO fleet_identity.replay_expansions
+            (assertion_id,aircraft_id,valid_from_ms,valid_until_ms) VALUES ($1,$2,$3,$4)`,
+          [row.assertion_id, affected.aircraft_id, affected.valid_from_ms, affected.valid_until_ms]);
         }
         const assertion: IdentityAssertion = { assertionId: Number(row.assertion_id),
           aircraftId: checked.value.aircraftId, identifier: checked.value.identifier,

@@ -21,8 +21,7 @@ import { readProviderImportReceipt } from '../infrastructure/postgres/read-provi
 import { readSourceEvent, type AcceptedSourceEvent } from '../infrastructure/postgres/read-source-event.ts';
 import { routeSourceEvents, SOURCE_IMPORT_CONSUMER, PRIVATE_AVAILABILITY_CONSUMER } from '../infrastructure/postgres/source-event-router.ts';
 import { projectPrivateDecision, readPrivateAvailability } from '../infrastructure/postgres/private-availability.ts';
-import { createRegistryCandidateDirectory } from '../../fleet-identity/public/index.ts';
-import { postgresIdentityReader } from '../../fleet-identity/infrastructure/postgres/postgres-identity-reader.ts';
+import { createRegistryCandidateDirectory, createPostgresRegistryReader } from '../../fleet-identity/public/index.ts';
 import { createIdentityReplayWorker } from './create-identity-replay-worker.ts';
 
 import { permitsRetention, type RetentionPermission } from '../domain/retention-permission.ts';
@@ -47,7 +46,7 @@ export function createPermittedProviderPipeline(pool: SqlPool, directory: Candid
       if (!directory) await sql.query('SELECT revision FROM fleet_identity.registry_state WHERE singleton FOR SHARE');
       result = await importProviderMessage({ ...event, now: now() },
         postgresProviderMessageCommit(sql, event.messageId, event.sourceDeliveryId, decisions(sql), event.canonical),
-        directory ?? createRegistryCandidateDirectory(postgresIdentityReader(sql)), events);
+        directory ?? createRegistryCandidateDirectory(createPostgresRegistryReader(sql)), events);
     });
     if (outcome === 'DUPLICATE' && source) result = await readProviderImportReceipt(pool, source.sourceDeliveryId);
     return { outcome, result };

@@ -138,6 +138,14 @@ test('application cannot deep-import another module even through a dynamic liter
   assert.ok(codes(result).includes('CROSS_MODULE_DEEP_IMPORT'));
 });
 
+test('composition consumes fleet identity only through its public entry', async t => {
+  const result = await fixture(t, {
+    [`${module}composition/wire.ts`]: "import { read } from '../../fleet-identity/infrastructure/read.ts';",
+    [`${backend}modules/fleet-identity/infrastructure/read.ts`]: 'export const read = () => 1;',
+  });
+  assert.ok(codes(result).includes('CROSS_MODULE_DEEP_IMPORT'));
+});
+
 test('reports a missing target, including an import type expression', async t => {
   const result = await fixture(t, {
     [`${module}domain/rule.ts`]: "type Missing = import('./missing.ts').Value;",

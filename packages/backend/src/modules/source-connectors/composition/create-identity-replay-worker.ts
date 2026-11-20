@@ -7,9 +7,8 @@ import { createCorrelateMessage, icao24, registration, type StrongIdentifier } f
 import { createPostgresDecisionReader } from '../../aircraft-correlation/infrastructure/postgres/create-postgres-decision-reader.ts';
 import { createPostgresDecisionWriteSet } from '../../aircraft-correlation/infrastructure/postgres/create-postgres-decision-write-set.ts';
 import { runDecisionWork } from '../../aircraft-correlation/infrastructure/postgres/run-decision-work.ts';
-import { createRegistryCandidateDirectory } from '../../fleet-identity/public/index.ts';
-import { postgresIdentityReader } from '../../fleet-identity/infrastructure/postgres/postgres-identity-reader.ts';
-import { reevaluatePositionOnConnection } from '../../fleet-identity/infrastructure/postgres/postgres-position-linker.ts';
+import { createRegistryCandidateDirectory, createPostgresRegistryReader,
+  reevaluatePositionOnConnection, expandReplayAliases } from '../../fleet-identity/public/index.ts';
 
 interface RequestRow {
   [key: string]: unknown;
@@ -42,8 +41,17 @@ export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Da
       let request: Awaited<ReturnType<typeof selectRequest>>;
       if (turn === 'JOBS') {
         job = await selectJob();
-        if (!job) request = await selectRequest();
+        if (!job) {
+          const expansion = await expandReplayAliases(sql, limit);
+          if (expansion) return expansion;
+          request = await selectRequest();
+        }
       } else {
+        const expansion = await expandReplayAliases(sql, limit);
+        if (expansion) {
+          await sql.query("UPDATE fleet_identity.replay_scheduler SET next_kind='JOBS' WHERE singleton");
+          return expansion;
+        }
         request = await selectRequest();
         if (!request) job = await selectJob();
       }
@@ -89,7 +97,7 @@ export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Da
         ORDER BY observed_at_ms,message_id LIMIT $7`,
         [['aircraftHints', request.kind === 'ICAO24' ? 'icao24' : 'registration'],
           request.normalized_alias, from, until, cursor, request.cursor_message_id, limit]);
-      const directory = createRegistryCandidateDirectory(postgresIdentityReader(sql));
+      const directory = createRegistryCandidateDirectory(createPostgresRegistryReader(sql));
       const transaction = { run: <T>(work: Parameters<typeof runDecisionWork<T>>[1]) =>
         runDecisionWork(createPostgresDecisionWriteSet(sql), work) };
       const correlate = createCorrelateMessage({ directory, transaction,

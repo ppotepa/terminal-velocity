@@ -6,3 +6,4 @@ export { createResolveAircraft } from '../application/resolve-aircraft.ts';
 export type { IdentityCommitter } from '../ports/identity-committer.ts';
 export type { PositionLinker, PositionLinkDecision } from '../ports/position-linker.ts';
 export type { ReplayRequestReader, IdentityReplayRequest } from '../ports/replay-request-reader.ts';
+export { createPostgresRegistryReader, reevaluatePositionOnConnection, expandReplayAliases } from '../composition/postgres-registry.ts';
