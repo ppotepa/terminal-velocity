@@ -13,7 +13,9 @@ interface AssertionRow {
 }
 
 const PAGE_SIZE = 500;
-const MAX_ACTIVE_ASSERTIONS = 2000;
+// At most two distinct values of each kind are needed to prove a catalog
+// conflict. Duplicate claims remain available through history().
+const MAX_DECISION_ASSERTIONS = 2000;
 
 export function postgresIdentityReader(pool: SqlExecutor): IdentityReader {
   function decode(row: AssertionRow): IdentityAssertion {
@@ -32,10 +34,10 @@ export function postgresIdentityReader(pool: SqlExecutor): IdentityReader {
     const assertions: IdentityAssertion[] = [];
     let cursor = 0;
     let revision: number | undefined;
-    // Read one row beyond the total budget to distinguish a complete set from
-    // a truncated one. Never expose a truncated set as a valid decision.
+    // Page bounded decision evidence, not every claim ever made for an owner.
+    // A third active value of one kind cannot change the conflict verdict.
     for (;;) {
-      const remaining = MAX_ACTIVE_ASSERTIONS - assertions.length;
+      const remaining = MAX_DECISION_ASSERTIONS - assertions.length;
       const pageLimit = Math.min(PAGE_SIZE, remaining + 1);
       const result = await pool.query<AssertionRow>(`
       WITH owners AS (
@@ -46,16 +48,26 @@ export function postgresIdentityReader(pool: SqlExecutor): IdentityReader {
           AND NOT EXISTS (SELECT 1 FROM fleet_identity.assertions successor
             WHERE successor.supersedes_id=a.assertion_id)
       )
-      SELECT a.*, state.revision AS registry_revision FROM fleet_identity.registry_state state
-      LEFT JOIN LATERAL (SELECT assertion.*, successor.recorded_at AS superseded_at
+      , representatives AS (
+        SELECT DISTINCT ON (assertion.aircraft_id,assertion.kind,assertion.normalized_alias)
+          assertion.*
         FROM fleet_identity.assertions assertion
-        LEFT JOIN fleet_identity.assertions successor ON successor.supersedes_id=assertion.assertion_id
-        WHERE successor.assertion_id IS NULL
-          AND assertion.aircraft_id IN (SELECT aircraft_id FROM owners)
-          AND assertion.assertion_id > $${observedParameter + 1}
+        WHERE assertion.aircraft_id IN (SELECT aircraft_id FROM owners)
           AND assertion.valid_from_ms <= $${observedParameter}
           AND (assertion.valid_until_ms IS NULL OR $${observedParameter} < assertion.valid_until_ms)
-        ORDER BY assertion.assertion_id LIMIT $${observedParameter + 2}) a ON true WHERE state.singleton`,
+          AND NOT EXISTS (SELECT 1 FROM fleet_identity.assertions successor
+            WHERE successor.supersedes_id=assertion.assertion_id)
+        ORDER BY assertion.aircraft_id,assertion.kind,assertion.normalized_alias,assertion.assertion_id DESC
+      ), evidence AS (
+        SELECT representatives.*,row_number() OVER
+          (PARTITION BY aircraft_id,kind ORDER BY normalized_alias) AS alias_rank
+        FROM representatives
+      )
+      SELECT a.*,NULL::timestamptz AS superseded_at,state.revision AS registry_revision
+      FROM fleet_identity.registry_state state
+      LEFT JOIN LATERAL (SELECT * FROM evidence WHERE alias_rank <= 2
+        AND assertion_id > $${observedParameter + 1}
+        ORDER BY assertion_id LIMIT $${observedParameter + 2}) a ON true WHERE state.singleton`,
       [...parameters, cursor, pageLimit]);
       const pageRevision = Number(result.rows[0]?.registry_revision);
       if (!Number.isSafeInteger(pageRevision)) throw new Error('Invalid registry revision.');

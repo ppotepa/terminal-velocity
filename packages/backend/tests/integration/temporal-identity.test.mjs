@@ -147,14 +147,14 @@ test('more than 1,000 active assertions produce a complete registry decision', a
   const reader = postgresIdentityReader(pools.runtime);
   const snapshot = await reader.find([hex('A0B1C2')], 1);
   assert.equal(snapshot.completeness, 'COMPLETE');
-  assert.equal(snapshot.assertions.length, 1201);
+  assert.equal(snapshot.assertions.length, 1);
   assert.deepEqual(await createResolveAircraft(reader)([hex('A0B1C2')], 1),
     { status: 'MATCHED', aircraftId: 'ac_populated', revision: 1201 });
   const candidates = await createRegistryCandidateDirectory(reader).find({
     messageId: 'msg_populated', effectiveAt: 1, identifiers: [hex('A0B1C2')], callsign: null });
   assert.equal(candidates.completeness, 'COMPLETE');
   assert.equal(candidates.candidates.length, 1);
-  assert.equal(candidates.candidates[0].aliases.length, 1201);
+  assert.equal(candidates.candidates[0].aliases.length, 1);
   let pages = 0;
   const changingReader = postgresIdentityReader({ async query(sql, parameters) {
     const result = await pools.runtime.query(sql, parameters);
@@ -163,12 +163,12 @@ test('more than 1,000 active assertions produce a complete registry decision', a
     return result;
   } });
   const changed = await changingReader.find([hex('A0B1C2')], 1);
-  assert.ok(pages > 1);
-  assert.equal(changed.completeness, 'PARTIAL');
-  assert.deepEqual(changed.assertions, []);
+  assert.equal(pages, 1);
+  assert.equal(changed.completeness, 'COMPLETE');
+  assert.equal(changed.revision, 1201);
 });
 
-test('populated registry stops at its total active assertion budget without a false match', async () => {
+test('duplicate active claims stay bounded and resolve completely after 2,000 assertions', async () => {
   await postgresIdentityCommitter(pools.runtime).createAircraft('ac_oversized');
   await pools.admin.query(`INSERT INTO fleet_identity.assertions
     (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
@@ -185,7 +185,7 @@ test('populated registry stops at its total active assertion budget without a fa
   } });
   const atLimit = await reader.find([hex('A0B1C2')], 1);
   assert.equal(atLimit.completeness, 'COMPLETE');
-  assert.equal(atLimit.assertions.length, 2000);
+  assert.equal(atLimit.assertions.length, 1);
   await pools.admin.query(`INSERT INTO fleet_identity.assertions
     (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
     SELECT 'ac_oversized','ICAO24','A0B1C2',0,'synthetic','test',n
@@ -194,17 +194,90 @@ test('populated registry stops at its total active assertion budget without a fa
   rowsRead = 0;
   pages = 0;
   const snapshot = await reader.find([hex('A0B1C2')], 1);
-  assert.equal(snapshot.completeness, 'PARTIAL');
-  assert.deepEqual(snapshot.assertions, []);
-  assert.equal(rowsRead, 2001);
-  assert.equal(pages, 5);
+  assert.equal(snapshot.completeness, 'COMPLETE');
+  assert.equal(snapshot.assertions.length, 1);
+  assert.equal(rowsRead, 1);
+  assert.equal(pages, 1);
   assert.deepEqual(await createResolveAircraft(reader)([hex('A0B1C2')], 1),
-    { status: 'INCOMPLETE', reason: 'LIMIT_REACHED', revision: 2501 });
+    { status: 'MATCHED', aircraftId: 'ac_oversized', revision: 2501 });
   const candidates = await createRegistryCandidateDirectory(reader).find({
     messageId: 'msg_oversized', effectiveAt: 1, identifiers: [hex('A0B1C2')], callsign: null });
-  assert.equal(candidates.completeness, 'PARTIAL');
-  assert.equal(candidates.reason, 'LIMIT_REACHED');
-  assert.deepEqual(candidates.candidates, []);
+  assert.equal(candidates.completeness, 'COMPLETE');
+  assert.equal(candidates.candidates.length, 1);
+  assert.equal(candidates.candidates[0].aliases.length, 1);
+});
+
+test('distinct active aliases retain the conflict veto with bounded evidence', async () => {
+  await postgresIdentityCommitter(pools.runtime).createAircraft('ac_many_aliases');
+  await pools.admin.query(`INSERT INTO fleet_identity.assertions
+    (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
+    SELECT 'ac_many_aliases','ICAO24',upper(lpad(to_hex(n),6,'0')),0,'synthetic','test',n
+    FROM generate_series(1,2501) AS n`);
+  await pools.admin.query('UPDATE fleet_identity.registry_state SET revision=2501 WHERE singleton');
+  const reader = postgresIdentityReader(pools.runtime);
+  const snapshot = await reader.find([hex('000001')], 1);
+  assert.equal(snapshot.completeness, 'COMPLETE');
+  assert.equal(snapshot.assertions.length, 2);
+  assert.equal((await createResolveAircraft(reader)([hex('000001')], 1)).status, 'CONFLICTED');
+  const candidates = await createRegistryCandidateDirectory(reader).find({
+    messageId: 'msg_many_aliases', effectiveAt: 1, identifiers: [hex('000001')], callsign: null });
+  assert.equal(candidates.completeness, 'COMPLETE');
+  assert.equal(decideAircraftMatch({ messageId: 'msg_many_aliases', effectiveAt: 1,
+    identifiers: [hex('000001')], callsign: null }, candidates.candidates).status, 'CONFLICTED');
+});
+
+test('an oversized owner set blocks only its replay request and resumes after correction', async () => {
+  const commit = postgresIdentityCommitter(pools.runtime);
+  await commit.createAircraft('ac_original');
+  const original = await commit.append(claim('ac_original', hex('D00001'), 0));
+  const raw = fixture();
+  raw.aircraft = { icao24: 'D00001' };
+  const pipeline = createSyntheticProviderPipeline(pools.runtime, undefined, () => NOW);
+  assert.ok((await accept(pipeline, raw)).ok);
+  await pipeline.drain();
+  await pools.admin.query(`INSERT INTO fleet_identity.aircraft (aircraft_id)
+    SELECT 'ac_bulk-'||lpad(n::text,4,'0') FROM generate_series(1,2000) n`);
+  await pools.admin.query(`INSERT INTO fleet_identity.assertions
+    (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
+    SELECT 'ac_bulk-'||lpad(n::text,4,'0'),'ICAO24','D00001',0,'synthetic','test',n+1
+    FROM generate_series(1,2000) n`);
+  await pools.admin.query('UPDATE fleet_identity.registry_state SET revision=2001 WHERE singleton');
+  await pools.admin.query(`INSERT INTO fleet_identity.replay_requests
+    (assertion_id,kind,normalized_alias,valid_from_ms,phase)
+    VALUES ($1,'ICAO24','D00001',0,'MESSAGES')`, [original.assertionId]);
+  await pools.admin.query(`INSERT INTO fleet_identity.replay_requests
+    (assertion_id,kind,normalized_alias,valid_from_ms,phase)
+    VALUES ($1,'ICAO24','FFFFFF',0,'MESSAGES')`, [original.assertionId]);
+  const requests = (await pools.runtime.query(`SELECT request_id FROM fleet_identity.replay_requests
+    WHERE phase <> 'DONE' ORDER BY request_id`)).rows.map(row => Number(row.request_id));
+  const work = createIdentityReplayWorker(pools.runtime);
+  for (let i = 0; i < 10; i++) {
+    await work(1);
+    const phases = (await pools.runtime.query(`SELECT phase FROM fleet_identity.replay_requests
+      ORDER BY request_id`)).rows.map(row => row.phase);
+    if (phases[0] === 'BLOCKED' && phases[1] === 'DONE') break;
+  }
+  const blocked = (await pools.runtime.query(`SELECT phase,blocked_revision,cursor_message_id
+    FROM fleet_identity.replay_requests WHERE request_id=$1`, [requests[0]])).rows[0];
+  assert.equal(blocked.phase, 'BLOCKED');
+  assert.equal(blocked.blocked_revision, '2001');
+  assert.equal(blocked.cursor_message_id, null);
+  assert.equal((await pools.runtime.query(`SELECT phase FROM fleet_identity.replay_requests
+    WHERE request_id=$1`, [requests[1]])).rows[0].phase, 'DONE');
+  await pools.admin.query(`INSERT INTO fleet_identity.assertions
+    (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision,supersedes_id)
+    SELECT aircraft_id,kind,normalized_alias,$1,source_id,issuer,revision+2000,assertion_id
+    FROM fleet_identity.assertions WHERE aircraft_id LIKE 'ac_bulk-%' AND supersedes_id IS NULL`,
+  [NOW + 1]);
+  await pools.admin.query('UPDATE fleet_identity.registry_state SET revision=4001 WHERE singleton');
+  for (let i = 0; i < 10; i++) {
+    await work(1);
+    if ((await pools.runtime.query(`SELECT phase FROM fleet_identity.replay_requests
+      WHERE request_id=$1`, [requests[0]])).rows[0].phase === 'DONE') break;
+  }
+  assert.equal((await pools.runtime.query(`SELECT phase FROM fleet_identity.replay_requests
+    WHERE request_id=$1`, [requests[0]])).rows[0].phase, 'DONE');
+  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.assertions`)).rows[0].n, '4001');
 });
 
 test('registry resolution rejects an unowned registration that contradicts the ICAO owner', async () => {

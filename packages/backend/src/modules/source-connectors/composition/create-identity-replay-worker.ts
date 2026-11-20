@@ -13,7 +13,7 @@ import { createRegistryCandidateDirectory, createPostgresRegistryReader,
 interface RequestRow {
   [key: string]: unknown;
   request_id: string; kind: 'ICAO24' | 'REGISTRATION'; normalized_alias: string;
-  valid_from_ms: string; valid_until_ms: string | null; phase: 'POSITIONS' | 'MESSAGES';
+  valid_from_ms: string; valid_until_ms: string | null; phase: 'POSITIONS' | 'MESSAGES' | 'BLOCKED';
   cursor_time_ms: string | null; cursor_source_id: string | null;
   cursor_observation_id: string | null; cursor_message_id: string | null;
 }
@@ -48,7 +48,10 @@ export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Da
         WHERE completed_at IS NULL ORDER BY job_id FOR UPDATE SKIP LOCKED LIMIT 1`)).rows[0];
       const selectRequest = async () => (await sql.query<RequestRow>(`SELECT request_id,kind,normalized_alias,valid_from_ms,
         valid_until_ms,phase,cursor_time_ms,cursor_source_id,cursor_observation_id,cursor_message_id
-        FROM fleet_identity.replay_requests WHERE phase <> 'DONE' ORDER BY request_id
+        FROM fleet_identity.replay_requests WHERE phase IN ('POSITIONS','MESSAGES')
+          OR (phase='BLOCKED' AND blocked_revision <
+            (SELECT revision FROM fleet_identity.registry_state WHERE singleton))
+        ORDER BY request_id
         FOR UPDATE SKIP LOCKED LIMIT 1`)).rows[0];
       let job: Awaited<ReturnType<typeof selectJob>>;
       let request: Awaited<ReturnType<typeof selectRequest>>;
@@ -78,6 +81,10 @@ export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Da
         return { requestId: null, processed: 1, complete: true };
       }
       if (!request) throw new Error('Identity replay request is missing.');
+      if (request.phase === 'BLOCKED') {
+        await sql.query(`UPDATE fleet_identity.replay_requests
+          SET phase='MESSAGES',blocked_revision=NULL WHERE request_id=$1`, [request.request_id]);
+      }
       const from = Number(request.valid_from_ms);
       const until = request.valid_until_ms === null ? null : Number(request.valid_until_ms);
       const cursor = request.cursor_time_ms === null ? null : Number(request.cursor_time_ms);
@@ -125,7 +132,12 @@ export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Da
         const previous = await createPostgresDecisionReader(sql).readCurrent(id.value);
         const snapshot = await directory.find({ messageId: id.value, effectiveAt: observedAt.value,
           identifiers, callsign: hints.callsign ?? null });
-        if (snapshot.completeness !== 'COMPLETE') throw new Error('CANDIDATE_SET_INCOMPLETE');
+        if (snapshot.completeness !== 'COMPLETE') {
+          await sql.query(`UPDATE fleet_identity.replay_requests
+            SET phase='BLOCKED',blocked_revision=$2 WHERE request_id=$1`,
+          [request.request_id, snapshot.revision]);
+          return { requestId: Number(request.request_id), processed: 0, complete: false };
+        }
         if (previous?.directoryRevision === snapshot.revision) continue;
         const result = await correlate({ messageId: id.value, effectiveAt: observedAt.value,
           identifiers, callsign: hints.callsign ?? null }, previous?.revision ?? null);
