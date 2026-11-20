@@ -1,5 +1,11 @@
 # PostgreSQL migrations and test isolation
 
+## Migration 008: temporal aircraft identity
+
+`fleet_identity.aircraft` holds stable internal IDs. Assertions record normalized ICAO24 or registration, source, issuer, half-open validity interval, recording time, global revision, and optional predecessor. Corrections append successors; old rows remain evidence. Overlapping owner claims remain ambiguous, while disagreeing identifiers remain conflicted. Readers use observation time and report completeness explicitly. Correlation consumes complete candidate snapshots through its existing port.
+
+Each assertion append atomically advances the registry revision and writes replay requests for the new and corrected validity ranges. The private replay contract scans ICAO24 position hints in bounded, keyset pages and appends position-link revisions. Observation facts and prior link revisions remain immutable. A caller must drain replay requests and re-evaluate affected message decisions through the correlation public interface; this issue adds no automatic worker or live feed. Registration-only requests apply to message correlation because positions have no registration hint index. The migration is additive and has no destructive down migration.
+
 These migrations implement the durable synthetic Stage 2 message flow, private Stage 3 delivery metadata, and private append-only Stage 4 position history. The larger DDL under `docs/architecture/persistence` remains a design reference. It is not executed by the application.
 
 ## Ownership and application permissions
@@ -56,7 +62,7 @@ GitHub Actions uses an ephemeral `postgres:18.7` service and runs the integratio
 
 The suite exercises independent-process first-write contention, revision CAS, atomic decision/outbox writes, SQL rollback and capability lifetime, late-committing outbox records, `SKIP LOCKED` queue claims, lease token fencing, recovery, bounded retries, consumer-specific inbox deduplication, atomic projection rollback, contribution correction and tombstones, runtime grants, and migration drift. Application integration tests also restart the actual API process and read persisted state.
 
-The position table in migration 007 uses PostgreSQL's built-in `point` value with a GiST index; no PostGIS extension is required. Position history is keyed by `(source_id, source_observation_id)` and stores the canonical JSON fact so omitted, null, and zero optional fields remain distinct. Its generated ICAO24 hint is only a search hint; the temporal identity registry is added later. The history adapter can insert synthetic test observations, but S4-03 does not connect the live adsb.lol source to durable storage. ADR #0002 keeps real position-row retention gated on issue #46.
+The position table in migration 007 uses PostgreSQL's built-in `point` value with a GiST index; no PostGIS extension is required. Position history is keyed by `(source_id, source_observation_id)` and stores the canonical JSON fact so omitted, null, and zero optional fields remain distinct. Its generated ICAO24 hint remains a search hint; migration 008 links facts through separately versioned decisions. The history adapter can insert synthetic test observations, but S4-03 does not connect the live adsb.lol source to durable storage. ADR #0002 keeps real position-row retention gated on issue #46.
 
 The implemented message projection serves one fixed synthetic public scope. This schema does not implement multi-tenant authorization, real receiver ingestion, a broker, or the complete architecture catalog.
 The implemented projection serves one fixed synthetic public scope. This schema does not implement multi-tenant authorization, real receiver ingestion, a broker, or the complete architecture catalog.

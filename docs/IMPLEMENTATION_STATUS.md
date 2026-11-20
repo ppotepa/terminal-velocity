@@ -1,5 +1,11 @@
 # Terminal Velocity — implementation status, Stage 2
 
+### S4-04 temporal fleet identity (issue #17, local authoring)
+
+The private fleet identity context provides stable internal aircraft rows, time-qualified ICAO24 and registration assertions, explicit ambiguous, conflicted, and incomplete resolution, a complete candidate directory adapter for message correlation, and versioned position links separate from immutable observation facts. Migration 008 adds append-only assertion and link history plus replay requests. A bounded ICAO24 replay method re-evaluates historical positions after alias corrections. Message replay remains a caller responsibility through correlation's existing interface; this change adds no automatic replay worker, live provider, public map, or flight-session recognition. The on-demand rendered Airframes lookup remains separate.
+
+Local verification and coordinator exact-SHA PostgreSQL evidence belong in the #17 handoff. This code does not assert provider rights or external acceptance. Migration 008 is additive; rolling back application code leaves assertion and link history in place.
+
 Date: November 19, 2026. Code version: `0.1.0`. The application offers a durable PostgreSQL mode for one complete synthetic message flow, alongside the original memory demonstration. Stage 3 includes source-observation contracts, on-demand website lookup, and private delivery metadata storage exercised with synthetic inputs.
 
 ## Implemented
