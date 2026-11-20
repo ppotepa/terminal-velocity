@@ -12,6 +12,7 @@ import {
   positionObservedAtBasis, positionTimePrecision, sourceAgeSeconds, timestampUncertainty, utcTimestamp,
   type PositionObservedAtBasis, type PositionTimePrecision, type UtcTimestamp,
 } from './position-time.ts';
+import { positionQuality, type PositionQuality } from './position-quality.ts';
 
 export const POSITION_OBSERVATION_SCHEMA_VERSION = 1 as const;
 
@@ -59,9 +60,8 @@ export interface PositionObservation {
   readonly latitude: LatitudeDegrees;
   readonly longitude: LongitudeDegrees;
   readonly identifierHints?: PositionIdentifierHints;
-  /** An aircraft ID confirmed by an upstream identity decision, never inferred from a source-local track. */
+  readonly quality?: PositionQuality;
   readonly confirmedAircraftId?: AircraftId;
-  /** Required with confirmedAircraftId; checked against a separately supplied trusted decision. */
   readonly identityEvidence?: PositionIdentityEvidence;
   /** Absent means the provider omitted the field; null means it explicitly reported it unavailable. */
   readonly groundSpeedKnots?: number | null;
@@ -82,6 +82,7 @@ export type PositionParseError =
   | { readonly code: 'INVALID_POSITION_MEASUREMENT'; readonly field: 'measurementKind' | 'measurementDetail' | 'altitude' | 'groundSpeedKnots' | 'trackDegrees' | 'trackKind' }
   | { readonly code: 'INVALID_POSITION_IDENTIFIER'; readonly field: 'sourceId' | 'sourceObservationId' | 'confirmedAircraftId' }
   | { readonly code: 'INVALID_IDENTIFIER_HINTS' }
+  | { readonly code: 'INVALID_POSITION_QUALITY'; readonly field: 'quality' | 'nic' | 'nacP' | 'containmentRadiusMeters' }
   | { readonly code: 'UNRESOLVED_AIRCRAFT_IDENTITY' }
   | { readonly code: 'UNSUPPORTED_CONFIRMED_IDENTITY' }
   | { readonly code: 'CONFLICTING_POSITION_IDENTIFIERS' };
@@ -142,7 +143,7 @@ export function parsePositionObservation(
   const allowed = [
     'schemaVersion', 'sourceId', 'sourceObservationId', 'observedAt', 'observedAtBasis',
     'sourceTimeReferenceAt', 'sourceAgeSeconds', 'ingestedAt', 'timestampPrecision',
-    'timestampUncertaintyMs', 'measurementKind', 'latitude', 'longitude', 'identifierHints',
+    'timestampUncertaintyMs', 'measurementKind', 'latitude', 'longitude', 'identifierHints', 'quality',
     'groundSpeedKnots', 'trackDegrees', 'trackKind', 'altitudes', 'measurementDetail', 'confirmedAircraftId', 'identityEvidence',
   ];
   if (!hasOnlyKeys(record, allowed)) return err({ code: 'INVALID_INPUT', field: 'unknown' });
@@ -218,6 +219,7 @@ export function parsePositionObservation(
     latitude: LatitudeDegrees;
     longitude: LongitudeDegrees;
     identifierHints?: PositionIdentifierHints;
+    quality?: PositionQuality;
     confirmedAircraftId?: AircraftId;
     identityEvidence?: PositionIdentityEvidence;
     groundSpeedKnots?: number | null;
@@ -246,6 +248,11 @@ export function parsePositionObservation(
     const hints = parseIdentifierHints(record['identifierHints']);
     if (!hints.ok) return hints;
     output.identifierHints = hints.value;
+  }
+  if (Object.hasOwn(record, 'quality')) {
+    const quality = positionQuality(record['quality']);
+    if (!quality.ok) return quality;
+    output.quality = quality.value;
   }
   if (Object.hasOwn(record, 'confirmedAircraftId')) {
     const value = record['confirmedAircraftId'];

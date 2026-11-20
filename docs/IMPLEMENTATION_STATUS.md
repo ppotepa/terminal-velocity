@@ -58,7 +58,7 @@ Memory remains the default. It stages a single `DemoState` swap under a mutex, i
 
 ### Shared scope
 
-Aircraft positions and identities remain synthetic fixtures. Coverage is `UNKNOWN`; real feed health is `DISCONNECTED`. Messages are decoded text examples, not captured RF frames. No real Airframes/ADS-B connector, moving map frontend, flight sessions, reassembly, entitlement enforcement, or public deployment has been added.
+Aircraft position storage, identity, projection, and UI remain unimplemented. S4-02 adds an opt-in private adsb.lol adapter, but no live result is persisted or publicly served. Messages are decoded text examples, not captured RF frames. No real Airframes message connector, moving map frontend, flight sessions, reassembly, entitlement enforcement, or public deployment has been added.
 
 The architecture v2 catalog still describes 89 intended responsibilities rather than 89 completed services. Stage 3 has a separate on-demand lookup and durable metadata store. Real-source retention and a permitted provider fixture remain gated by issue #6. Its source contracts do not grant publication rights. The historical DDL and target event envelope remain design documents; the implemented schema is under `db/migrations`, and the current event is `correlation.aircraft-decision-revised.v1`.
 
@@ -240,3 +240,100 @@ later source-reference-time correction, Node 24.22.3 passed offline `npm ci`,
 the focused position-contract suite, type checking, architecture checks, and
 all backend tests. `npm run check` could not complete its API tests because this shell
 denies loopback binds (`listen EPERM` on 127.0.0.1).
+
+## Stage 4 private position source — S4-02
+
+The `feature/s4-02-adsblol-position-source` branch adds an adsb.lol v2 point/radius parser and bounded HTTPS transport over the S4-01 observation contract. It maps age-derived timestamps, ADS-B/MLAT/other source types, coordinates, tagged altitude and track, optional measurements, ICAO ID hints, and source quality. Rows with only source-local IDs are counted as unresolved and omitted from canonical output. Snapshot coverage is explicitly sampled with unknown completeness. The transport has an 8-second timeout, 1 MB response limit, 50 NM radius cap, and a process-shared budget of one request per 10 minutes and 200 per rolling 24 hours. Its explicit poller honors `Retry-After`, uses capped exponential backoff, exposes separate transport health, and stops cleanly on abort. Creation alone never polls.
+
+The source decision in [`adr/0002-position-source.md`](adr/0002-position-source.md) permits private/local use under ODbL 1.0 only. The explicit `positions:preview` command now composes the live adapter with a loopback-only, in-memory JSON preview; the demo API still does not start it. The live transport validates its query at construction and always uses the process-shared quota policy. An explicit fixture factory supplies an isolated budget for offline tests. The parser rejects out-of-query-area rows, and deliberately favors `SURFACE` over simultaneous numeric geometric altitude under schema v1. The fixture is synthetic; no database migration, public API/UI wiring, or persistent storage was added. Public use/deployment remains NO-GO pending Stage 5 publication controls and issue #46 licensing review.
+
+The review follow-up routes positioned rows through the S4-01 `acceptPositionObservation` boundary with explicit reviewed source capabilities. Provider types or time bases outside that configuration reject the snapshot. Synthetic regression tests cover this boundary and malformed unit-bearing speed, track, altitude, and quality fields. These offline checks do not establish current provider access or rights acceptance for the reviewed commit; an authorized live check remains an external acceptance gate.
+
+For this follow-up, Node 24.22.3 `npm ci --offline --ignore-scripts --no-audit --no-fund`, typechecking, the architecture boundary check, and all 17 backend test files passed. `npm run check` stopped in the private-preview suite because this shell rejects loopback `listen` with `EPERM` on `127.0.0.1`; the two tests that require a server failed for that reason. The preview's two argument-only tests passed. Exact-commit coordinator CI must run the full suite in its permitted isolated environment. No live provider request or rights recheck was performed in this follow-up.
+
+Local verification used Node.js **24.22.3** and Debian PostgreSQL **17.12**:
+
+| Command | Result |
+|---|---|
+| `npm ci --ignore-scripts --no-audit --no-fund` | PASS; 20 locked packages installed |
+| `PATH=/root/work/toolchains/node-24.22.3:$PATH npm run check` | PASS; 191 source files / 637 AST dependencies, 28/28 architecture tests, 100/100 backend tests, 30/30 API tests (158 total) |
+| `PATH=/root/work/toolchains/node-24.22.3:$PATH npm run test:postgres:local` | PASS; 37/37 integration tests on isolated PostgreSQL 17.12 with durability enabled; temporary cluster removed |
+| `PATH=/root/work/toolchains/node-24.22.3:$PATH npm run demo` | PASS; durable-domain example completed |
+| `PATH=/root/work/toolchains/node-24.22.3:$PATH npm run smoke` | PASS; loopback API startup, health, replay, and clean SIGTERM shutdown |
+| Bounded private adsb.lol smoke | PASS; 1 NM query returned zero positions; 10 NM query parsed 7 canonical observations; only aggregate counts were printed and no response rows were retained |
+| `git diff --check` | PASS |
+
+S4-02 has no SQL change, so PostgreSQL was run as repository regression verification only. The ephemeral cluster bound to loopback and was removed by the harness; the system PostgreSQL service remains inactive. Manual source checks were two outbound HTTPS requests and opened no local listener. Issue #15 is IN REVIEW in [PR #57](https://github.com/ppotepa/terminal-velocity/pull/57), based on merged [S4-01 PR #56](https://github.com/ppotepa/terminal-velocity/pull/56) after reconciliation. Both GitHub Actions `verify` runs for commit `672d850` failed before any steps and provided no job logs; the exact cause is unknown. Local results are green; no remote CI pass is claimed. No deployment or public listener was started.
+
+After reconciling merged S4-01, offline `npm ci` and the focused backend position tests passed. `npm run typecheck` and architecture boundaries passed. The full `npm run check` passed backend tests but API loopback tests could not bind in this shell (`listen EPERM`); coordinator CI must establish the exact-SHA result. No new live provider request was made in this handoff.
+
+### S4-02 review follow-up (2026-11-20)
+
+The review follow-up adds the explicit private preview entry point and offline
+loopback test, constrains live transport construction and quota handling, adds
+out-of-query-area and reconnect cases, and records the ground/geometric altitude
+precedence. `npm ci --offline --ignore-scripts --no-audit --no-fund`, Node 24
+`npm run typecheck`, `npm run check:boundaries`, and the focused provider suite
+passed in this authoring checkout. `npm run check` reaches the new preview test,
+but this shell rejects `listen(127.0.0.1)` with `EPERM`; the test is not marked
+passing here. Coordinator isolated CI must run the exact head in an environment
+that permits loopback. No live provider call, deployment, SQL migration, or
+public listener was made for this follow-up. The private preview test uses only
+the synthetic provider fixture. Rollback is a code revert; no database rollback
+is needed. The source-rights decision remains repository-owner evidence, not
+independent confirmation by this follow-up.
+
+The subsequent review found that a message-crawler change associated CDP socket
+events by URL. Multiple sockets can share that URL, so the change was removed
+from the S4-02 diff; both crawler files again match merged S4-01. Node 24
+offline `npm ci`, `npm run test:messages`, and the focused provider and position
+contract tests passed after the removal. `npm run test:browser` could
+not run to completion in this authoring shell because its synthetic loopback
+server receives `listen EPERM` on `127.0.0.1`. The coordinator supplied a
+passing isolated CI result for the corrected exact head
+`e8e0d7ee27c81825a48d9af30173ffa3279871ab`. No new live provider request or independent
+source-rights approval was obtained for this correction. The earlier
+aggregate-only source smoke remains historical evidence, not a live acceptance
+result for the corrected head.
+
+The subsequent quota review removes the fixture factory's fetch-function input,
+uses the real process clock for every live quota decision, and caps caller-supplied
+timeout and response size at 8 seconds and 1 MB. The passing isolated CI result
+above predates these edits; coordinator CI must verify their exact commit. No
+live provider check was performed for this follow-up. There is no migration or
+durable data change; rollback is a code revert and an in-memory preview is lost
+on shutdown.
+
+The supplied #15 issue body still labels its current status `BACKLOG` while
+also recording PR #57 in review. The coordinator owns reconciling that issue
+body and its status label; this checkout update does not change GitHub state.
+
+For this quota follow-up, Node 24.22.3 passed offline `npm ci`, type checking,
+architecture boundaries (232 source files, 832 dependencies), the focused
+provider suite, all 17 backend test files, `npm run test:messages`, and
+`git diff --check`. `npm run check` stopped at the private preview's loopback
+test, and `npm run test:browser` also could not bind synthetic loopback servers:
+direct execution showed `listen EPERM` on `127.0.0.1`. These are authoring-shell
+results, not a passing exact-head isolated CI run.
+
+### S4-02 response cancellation review fix (2026-11-20)
+
+The coordinator supplied a passing isolated CI record for exact head
+`1296a052764e718a8a9d70158fd32b2a83376adb`. Review then found that a
+response stream with an unsettled `cancel()` promise could hold a timed-out
+fetch or `poller.stop()` open. The transport now initiates reader cancellation
+without waiting for the source to settle it. An offline regression uses a
+stream whose cancellation never settles and checks timeout, caller abort, and
+poller stop. This edit follows the tested head and needs a new exact-SHA CI run.
+
+In the authoring shell, Node 24.22.3 passed offline `npm ci`, type checking,
+architecture boundaries, all 17 backend test files, `npm run test:messages`,
+and the focused provider suite. `npm run check` reached the private preview
+test but could not bind loopback (`listen EPERM` on `127.0.0.1`); the browser
+suite also failed in this shell. These are not exact-SHA CI results. No live
+provider request was made for this fix. The historical aggregate-only provider
+smoke predates both this edit and head `1296a052`; it does not establish live
+acceptance for either. The issue body still says `BACKLOG` despite PR #57;
+the coordinator must reconcile its body and status label and record the next
+exact-head CI result. No migration or durable data changed. Rollback is a code
+revert, and any in-memory preview is discarded on shutdown.

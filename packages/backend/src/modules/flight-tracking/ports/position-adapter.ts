@@ -13,14 +13,19 @@ export interface PositionAdapterContext {
   readonly identityDecision?: PositionIdentityDecision;
 }
 
-export interface PositionAdapter<TRaw> {
+export interface PositionParseContext {
+  readonly sourceId: PositionSourceId;
+  readonly ingestedAt: string;
+}
+
+export interface PositionAdapter<TRaw, TContext extends PositionParseContext = PositionParseContext> {
   /** Provider-specific parsing must preserve the provider's own observation ID and timestamp evidence. */
-  parse(raw: TRaw, context: PositionAdapterContext): Result<PositionObservation, PositionParseError>;
+  parse(raw: TRaw, context: TContext): Result<PositionObservation, PositionParseError>;
 }
 
 /** Revalidates adapter output so an adapter cannot bypass the canonical or configured source boundary. */
-export function acceptPositionObservation<TRaw>(
-  adapter: PositionAdapter<TRaw>, raw: TRaw, context: PositionAdapterContext,
+export function acceptPositionObservation<TRaw, TContext extends PositionAdapterContext>(
+  adapter: PositionAdapter<TRaw, TContext>, raw: TRaw, context: TContext,
 ): Result<PositionObservation, PositionParseError | PositionCapabilityError> {
   if (context.sourceId !== context.capabilities.sourceId)
     return err({ code: 'UNSUPPORTED_POSITION_CAPABILITY', field: 'sourceId' });

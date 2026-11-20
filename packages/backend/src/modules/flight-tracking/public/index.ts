@@ -20,7 +20,10 @@ export {
   POSITION_TIME_PRECISIONS, POSITION_OBSERVED_AT_BASES,
   type PositionTimePrecision, type PositionObservedAtBasis, type UtcTimestamp,
 } from '../domain/position-time.ts';
-export { acceptPositionObservation, type PositionAdapter, type PositionAdapterContext } from '../ports/position-adapter.ts';
+export {
+  positionQuality, type PositionQuality, type InvalidPositionQuality,
+} from '../domain/position-quality.ts';
+export { type PositionAdapter, type PositionParseContext, acceptPositionObservation, type PositionAdapterContext } from '../ports/position-adapter.ts';
 export {
   validatePositionCapabilities,
   type PositionSourceCapabilities, type PositionCapabilityError,

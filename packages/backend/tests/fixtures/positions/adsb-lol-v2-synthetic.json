@@ -1,0 +1,55 @@
+{
+  "fixture_kind": "synthetic",
+  "now": 1795089600000,
+  "ctime": 1795089570000,
+  "msg": "No error",
+  "ptime": 42,
+  "total": 5,
+  "future_provider_field": "ignored for forward compatibility",
+  "ac": [
+    {
+      "hex": "a0b1c2",
+      "type": "adsb_icao",
+      "flight": "TV123   ",
+      "lat": 52.52,
+      "lon": 13.405,
+      "seen_pos": 1.25,
+      "alt_baro": "ground",
+      "gs": 0,
+      "track": 0,
+      "nic": 8,
+      "nac_p": 9,
+      "rc": 75
+    },
+    {
+      "hex": "a0b1c4",
+      "type": "mlat",
+      "lat": 52.521,
+      "lon": 13.406,
+      "seen_pos": 3600,
+      "gs": null,
+      "alt_baro": null,
+      "alt_geom": null
+    },
+    {
+      "hex": "a0b1c3",
+      "type": "adsb_icao",
+      "lat": null,
+      "lon": null
+    },
+    {
+      "hex": "a0b1c5",
+      "type": "future_source_type",
+      "lat": 52.523,
+      "lon": 13.408,
+      "seen_pos": 5
+    },
+    {
+      "hex": "~synthetic-local-1",
+      "type": "mlat",
+      "lat": 52.522,
+      "lon": 13.407,
+      "seen_pos": 2
+    }
+  ]
+}

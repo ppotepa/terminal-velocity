@@ -227,6 +227,17 @@ test('identifier hints validate ICAO24 without claiming identity resolution', ()
     { code: 'UNRESOLVED_AIRCRAFT_IDENTITY' });
 });
 
+test('position quality retains provider-reported indicators and containment radius', () => {
+  const parsed = parsePositionObservation(base({ quality: { nic: 0, nacP: 8, containmentRadiusMeters: 0 } }));
+  assert.equal(parsed.ok, true);
+  assert.deepEqual(parsed.value.quality, { nic: 0, nacP: 8, containmentRadiusMeters: 0 });
+  assert.deepEqual(parsePositionObservation(base({ quality: { nic: null, nacP: null,
+    containmentRadiusMeters: null } })).value.quality,
+  { nic: null, nacP: null, containmentRadiusMeters: null });
+  assert.equal(parsePositionObservation(base({ quality: { nic: -1 } })).ok, false);
+  assert.equal(parsePositionObservation(base({ quality: { containmentRadiusMeters: Number.NaN } })).ok, false);
+});
+
 test('unknown fields, unsupported versions, bad IDs, invalid units and invalid optional values fail explicitly', () => {
   assert.equal(parsePositionObservation(base({ schemaVersion: 2 })).error.code, 'UNSUPPORTED_VERSION');
   assert.equal(parsePositionObservation(base({ unexpected: true })).ok, false);

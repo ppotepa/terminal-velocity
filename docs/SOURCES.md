@@ -26,11 +26,14 @@ The browser adapter reads the decoded document in bounded chunks before handing 
 
 Run `npm run test:messages` for transport policy and budget checks. Run `npm run test:browser` for the offline rendered-browser suite. Its CLI fixture renders cards only after a first-party bootstrap response and a socket update. The loopback TLS suite exercises native 429, 401 and 403 upgrade refusals without Retry-After, plus a peer that drops the handshake. Each case requires exactly one bootstrap POST and one upgrade. The same fixture exercises selected-card rendering, reconnect after an accepted upgrade and SIGINT cancellation in the embedding process. The HTTP/2 regression uses OpenSSL to generate an ephemeral certificate and serves the synthetic document on loopback so Chromium processes its response headers. `npm run test:postgres:local` includes a synthetic delivery replay through the connector and #8 transaction.
 
-The adsb.lol public API is a separate candidate for **positions**, not messages.
-Its position source selection, ODbL obligations, quotas, and endpoint contract
-must be recorded in a separate Stage 4 decision before implementation. Sending
-contributor data to its ACARS/VDL2/HFDL endpoints is not an API for reading
-messages back.
+The adsb.lol public API is a **positions** source, not a message API. The
+Stage 4 position decision is recorded in
+[`docs/adr/0002-position-source.md`](adr/0002-position-source.md): private/local
+ingestion only, ODbL 1.0, no API key, and a conservative per-process request
+budget. Its point/radius API does not provide a bbox or complete receiver
+coverage. Public display and deployment are not authorized by this decision.
+Sending contributor data to its ACARS/VDL2/HFDL endpoints is not an API for
+reading messages back.
 
 Synthetic fixtures exercise the transport and provider-neutral contract. They contain fabricated data and provide no evidence of live ingestion.
 

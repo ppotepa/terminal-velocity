@@ -8,7 +8,7 @@ only fields the source actually supplies.
 ## Schema v1
 
 `@airframes/backend/flight-tracking` exports `parsePositionObservation` and the
-`PositionAdapter<TRaw>` port. The parser accepts `unknown`, rejects unknown
+`PositionAdapter<TRaw, TContext>` port. The parser accepts `unknown`, rejects unknown
 fields/accessors, returns typed failures, and creates immutable canonical
 values. It recognizes the canonical v1 shape only; it is not an ADS-B or MLAT
 provider parser.
@@ -28,6 +28,7 @@ Each observation requires:
 | `timestampUncertaintyMs` | Integer from 0 through one year in milliseconds, or `null` when clock uncertainty is unknown. Zero is an explicit zero-uncertainty claim. |
 | `measurementKind` | `ADS_B`, `MLAT`, or `OTHER`. `OTHER` requires an explicit `measurementDetail`. |
 | `latitude`, `longitude` | Finite decimal degrees. Latitude is in [-90, 90], longitude in [-180, 180]. |
+| `quality` | Optional source-reported NIC, NACp, and containment radius in meters. Values are retained as quality facts and do not establish a guarantee. |
 | `identifierHints.icao24` or `confirmedAircraftId` | An ICAO24 address or an application aircraft ID confirmed by an upstream identity decision is required. The observation ID is only a delivery identity. |
 
 `identifierHints` may also contain a callsign or source-local ID. These alone
@@ -109,7 +110,7 @@ position or a provider fixture.
 
 ## Adapter and policy boundaries
 
-`PositionAdapter<TRaw>` accepts provider-specific raw input and application
+`PositionAdapter<TRaw, TContext>` accepts provider-specific raw input and application
 ingestion time, and returns a validated observation or typed parse error. It
 must preserve a real provider observation ID, measurement method, source
 timestamp precision, and uncertainty. The contract does not define retries,
@@ -149,3 +150,34 @@ projection.
 The contract records data shape, not data rights. A provider adapter still
 requires a separate source decision, license/terms review, bounded quota policy,
 and permitted fixture. See [source selection status](SOURCES.md#source-authorization-status).
+
+## Private adsb.lol position adapter
+
+Stage 4 S4-02 adds a one-shot HTTPS transport and an opt-in poller for the
+adsb.lol point/radius endpoint. The adapter maps `seen_pos` to an age-derived
+event timestamp and reports unknown precision and uncertainty. Snapshot
+coverage is `SAMPLED` with `completeness: UNKNOWN`; absent rows do not mean
+aircraft absence. Positioned rows with only source-local identifiers are counted
+as unresolved and omitted from canonical observations. Source health reports transport connectivity separately from
+the timestamp and age of each observation.
+
+The transport constructor does not start network activity. Its caller supplies
+a validated center and radius; the adapter caps the radius at 50 NM, permits no
+more than one request every 10 minutes, and shares a 200-request rolling
+24-hour process budget by default. Response time is limited to 8 seconds and
+1 MB. The poller starts only when its caller invokes `start`, honors
+`Retry-After`, caps exponential backoff at one hour (or longer if the provider
+requests a longer delay), and aborts an in-flight request or wait on `stop`.
+These limits support a private/local preview only under
+[`adr/0002-position-source.md`](adr/0002-position-source.md); they do not
+authorize public display or deployment.
+
+The provider response fixture is synthetic and offline. S4-02 adds no database,
+map, or automatic poller wiring. The explicit private preview command is the
+composition root for this adapter:
+`npm run positions:preview -- --live --lat 52.52 --lon 13.405 --radius-nm 10`.
+It binds to `127.0.0.1` only and
+serves the latest canonical batch at `/positions` in memory. It does not start
+with the demo API or messages command. A later issue owns persistence and
+publication controls. The provider's geographic circle is checked for every
+positioned row; an out-of-query-area row rejects the snapshot.
