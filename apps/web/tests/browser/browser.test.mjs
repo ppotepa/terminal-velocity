@@ -64,7 +64,7 @@ async function setup(t) {
 test('light shell has stable desktop/tablet/mobile layout snapshots and readable typography', async t => {
   const { page, base } = await setup(t);
   await page.goto(base);
-  await page.getByText('1 aircraft positions in this viewport').waitFor();
+  await page.getByText('1 aircraft position in this viewport').waitFor();
   for (const [width, expected] of [[1440,'three'],[1024,'three'],[768,'two'],[390,'stacked']]) {
     await page.setViewportSize({ width, height: 900 });
     const layout = await page.evaluate(() => {
@@ -94,12 +94,15 @@ test('light shell has stable desktop/tablet/mobile layout snapshots and readable
     assert.equal(png.subarray(1,4).toString(), 'PNG');
     assert.ok(png.byteLength > 8_000);
   }
+  await page.goto(`${base}/?aircraft=ac_${'X'.repeat(64)}`);
+  await page.getByText('Selected ac_').waitFor();
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390));
 });
 
 test('keyboard focus, named controls, URL selection and empty/error states work', async t => {
   const { page, base, requests, setFailure } = await setup(t);
   await page.goto(base);
-  await page.getByText('1 aircraft positions in this viewport').waitFor();
+  await page.getByText('1 aircraft position in this viewport').waitFor();
   await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Skip to content');
   await page.keyboard.press('Tab');
