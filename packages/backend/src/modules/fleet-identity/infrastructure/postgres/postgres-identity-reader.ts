@@ -12,6 +12,9 @@ interface AssertionRow {
   registry_revision: string;
 }
 
+const PAGE_SIZE = 500;
+const MAX_ACTIVE_ASSERTIONS = 2000;
+
 export function postgresIdentityReader(pool: SqlExecutor): IdentityReader {
   function decode(row: AssertionRow): IdentityAssertion {
     return { assertionId: Number(row.assertion_id), aircraftId: row.aircraft_id as AircraftId,
@@ -29,9 +32,11 @@ export function postgresIdentityReader(pool: SqlExecutor): IdentityReader {
     const assertions: IdentityAssertion[] = [];
     let cursor = 0;
     let revision: number | undefined;
-    // Keyset pages bound each read while allowing a complete decision for an
-    // owner with arbitrarily many simultaneously valid historical claims.
+    // Read one row beyond the total budget to distinguish a complete set from
+    // a truncated one. Never expose a truncated set as a valid decision.
     for (;;) {
+      const remaining = MAX_ACTIVE_ASSERTIONS - assertions.length;
+      const pageLimit = Math.min(PAGE_SIZE, remaining + 1);
       const result = await pool.query<AssertionRow>(`
       WITH owners AS (
         SELECT DISTINCT a.aircraft_id FROM fleet_identity.assertions a
@@ -50,16 +55,18 @@ export function postgresIdentityReader(pool: SqlExecutor): IdentityReader {
           AND assertion.assertion_id > $${observedParameter + 1}
           AND assertion.valid_from_ms <= $${observedParameter}
           AND (assertion.valid_until_ms IS NULL OR $${observedParameter} < assertion.valid_until_ms)
-        ORDER BY assertion.assertion_id LIMIT 500) a ON true WHERE state.singleton`,
-      [...parameters, cursor]);
+        ORDER BY assertion.assertion_id LIMIT $${observedParameter + 2}) a ON true WHERE state.singleton`,
+      [...parameters, cursor, pageLimit]);
       const pageRevision = Number(result.rows[0]?.registry_revision);
       if (!Number.isSafeInteger(pageRevision)) throw new Error('Invalid registry revision.');
       if (revision !== undefined && revision !== pageRevision)
         return { revision: pageRevision, assertions: [], completeness: 'PARTIAL' };
       revision = pageRevision;
       const page = result.rows.filter(row => row.assertion_id !== null);
+      if (page.length > remaining)
+        return { revision, assertions: [], completeness: 'PARTIAL' };
       assertions.push(...page.map(decode));
-      if (page.length < 500) return { revision, assertions, completeness: 'COMPLETE' };
+      if (page.length < pageLimit) return { revision, assertions, completeness: 'COMPLETE' };
       cursor = Number(page.at(-1)!.assertion_id);
     }
   }, async history(aircraftId, afterAssertionId = 0, limit = 100) {

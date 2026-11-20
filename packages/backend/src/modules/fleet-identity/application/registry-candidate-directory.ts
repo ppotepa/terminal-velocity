@@ -5,15 +5,16 @@ import { epochMillis } from '../../../kernel/time/epoch-millis.ts';
 export function createRegistryCandidateDirectory(reader: IdentityReader): CandidateDirectory {
   return { async find(input) {
     const snapshot = await reader.find(input.identifiers, input.effectiveAt);
-    const byId = new Map<string, AircraftCandidate>();
+    const byId = new Map<string, { aircraftId: AircraftCandidate['aircraftId']; aliases: AircraftCandidate['aliases'][number][] }>();
     for (const assertion of snapshot.assertions) {
       const existing = byId.get(assertion.aircraftId);
       const from = epochMillis(assertion.validFrom);
       const until = assertion.validUntil === null ? null : epochMillis(assertion.validUntil);
       if (!from.ok || (until !== null && !until.ok)) throw new Error('Invalid stored alias validity.');
-      const aliases = [...(existing?.aliases ?? []), { identifier: assertion.identifier,
-        validFrom: from.value, validUntil: until?.value ?? null }];
-      byId.set(assertion.aircraftId, { aircraftId: assertion.aircraftId, aliases });
+      const candidate = existing ?? { aircraftId: assertion.aircraftId, aliases: [] };
+      candidate.aliases.push({ identifier: assertion.identifier,
+        validFrom: from.value, validUntil: until?.value ?? null });
+      if (!existing) byId.set(assertion.aircraftId, candidate);
     }
     return snapshot.completeness === 'COMPLETE'
       ? { revision: `fleet/${snapshot.revision}`, completeness: 'COMPLETE', candidates: [...byId.values()] }

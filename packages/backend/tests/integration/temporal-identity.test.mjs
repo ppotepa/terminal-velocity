@@ -154,6 +154,7 @@ test('more than 1,000 active assertions produce a complete registry decision', a
     messageId: 'msg_populated', effectiveAt: 1, identifiers: [hex('A0B1C2')], callsign: null });
   assert.equal(candidates.completeness, 'COMPLETE');
   assert.equal(candidates.candidates.length, 1);
+  assert.equal(candidates.candidates[0].aliases.length, 1201);
   let pages = 0;
   const changingReader = postgresIdentityReader({ async query(sql, parameters) {
     const result = await pools.runtime.query(sql, parameters);
@@ -165,6 +166,45 @@ test('more than 1,000 active assertions produce a complete registry decision', a
   assert.ok(pages > 1);
   assert.equal(changed.completeness, 'PARTIAL');
   assert.deepEqual(changed.assertions, []);
+});
+
+test('populated registry stops at its total active assertion budget without a false match', async () => {
+  await postgresIdentityCommitter(pools.runtime).createAircraft('ac_oversized');
+  await pools.admin.query(`INSERT INTO fleet_identity.assertions
+    (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
+    SELECT 'ac_oversized','ICAO24','A0B1C2',0,'synthetic','test',n
+    FROM generate_series(1,2000) AS n`);
+  await pools.admin.query('UPDATE fleet_identity.registry_state SET revision=2000 WHERE singleton');
+  let rowsRead = 0;
+  let pages = 0;
+  const reader = postgresIdentityReader({ async query(sql, parameters) {
+    const result = await pools.runtime.query(sql, parameters);
+    rowsRead += result.rows.length;
+    pages++;
+    return result;
+  } });
+  const atLimit = await reader.find([hex('A0B1C2')], 1);
+  assert.equal(atLimit.completeness, 'COMPLETE');
+  assert.equal(atLimit.assertions.length, 2000);
+  await pools.admin.query(`INSERT INTO fleet_identity.assertions
+    (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
+    SELECT 'ac_oversized','ICAO24','A0B1C2',0,'synthetic','test',n
+    FROM generate_series(2001,2501) AS n`);
+  await pools.admin.query('UPDATE fleet_identity.registry_state SET revision=2501 WHERE singleton');
+  rowsRead = 0;
+  pages = 0;
+  const snapshot = await reader.find([hex('A0B1C2')], 1);
+  assert.equal(snapshot.completeness, 'PARTIAL');
+  assert.deepEqual(snapshot.assertions, []);
+  assert.equal(rowsRead, 2001);
+  assert.equal(pages, 5);
+  assert.deepEqual(await createResolveAircraft(reader)([hex('A0B1C2')], 1),
+    { status: 'INCOMPLETE', reason: 'LIMIT_REACHED', revision: 2501 });
+  const candidates = await createRegistryCandidateDirectory(reader).find({
+    messageId: 'msg_oversized', effectiveAt: 1, identifiers: [hex('A0B1C2')], callsign: null });
+  assert.equal(candidates.completeness, 'PARTIAL');
+  assert.equal(candidates.reason, 'LIMIT_REACHED');
+  assert.deepEqual(candidates.candidates, []);
 });
 
 test('registry resolution rejects an unowned registration that contradicts the ICAO owner', async () => {
