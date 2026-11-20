@@ -40,6 +40,8 @@ export function postgresIdentityReader(pool: SqlExecutor): IdentityReader {
         LEFT JOIN fleet_identity.assertions successor ON successor.supersedes_id=assertion.assertion_id
         WHERE successor.assertion_id IS NULL
           AND assertion.aircraft_id IN (SELECT aircraft_id FROM owners)
+          AND assertion.valid_from_ms <= $${observedParameter}
+          AND (assertion.valid_until_ms IS NULL OR $${observedParameter} < assertion.valid_until_ms)
         ORDER BY assertion.assertion_id LIMIT 1001) a ON true WHERE state.singleton`,
     [...identifiers.flatMap(item => [item.kind, item.value]), observedAt]);
     const revision = Number(result.rows[0]?.registry_revision);
@@ -47,12 +49,17 @@ export function postgresIdentityReader(pool: SqlExecutor): IdentityReader {
     const nonempty = result.rows.filter(row => row.assertion_id !== null);
     const assertions = nonempty.slice(0, 1000).map(decode);
     return { revision, assertions, completeness: nonempty.length > 1000 ? 'PARTIAL' : 'COMPLETE' };
-  }, async history(aircraftId) {
+  }, async history(aircraftId, afterAssertionId = 0, limit = 100) {
+    if (!Number.isSafeInteger(afterAssertionId) || afterAssertionId < 0)
+      throw new RangeError('Invalid history cursor.');
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500)
+      throw new RangeError('History page size must be between 1 and 500.');
     const result = await pool.query<AssertionRow>(`SELECT a.*,s.recorded_at AS superseded_at,
       state.revision AS registry_revision FROM fleet_identity.assertions a
       LEFT JOIN fleet_identity.assertions s ON s.supersedes_id=a.assertion_id
       CROSS JOIN fleet_identity.registry_state state WHERE a.aircraft_id=$1 AND state.singleton
-      ORDER BY a.revision`, [aircraftId]);
+        AND a.assertion_id > $2
+      ORDER BY a.assertion_id LIMIT $3`, [aircraftId, afterAssertionId, limit]);
     return result.rows.map(decode);
   } };
 }

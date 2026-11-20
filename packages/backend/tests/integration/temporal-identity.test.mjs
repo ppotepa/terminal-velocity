@@ -12,7 +12,7 @@ import { postgresReplayRequestReader } from '../../src/modules/fleet-identity/in
 import { postgresPositionHistoryWriter } from '../../src/modules/flight-tracking/infrastructure/postgres/append-position.ts';
 import { createSyntheticProviderPipeline } from '../../src/modules/source-connectors/composition/create-synthetic-provider-pipeline.ts';
 import { createRegistryReplayDelivery } from '../../src/modules/source-connectors/composition/create-permitted-replay-delivery.ts';
-import { createIdentityReplayWorker } from '../../src/modules/source-connectors/composition/create-identity-replay-worker.ts';
+import { createIdentityReplayWorker, identityMessageReplayQuery } from '../../src/modules/source-connectors/composition/create-identity-replay-worker.ts';
 import { fixture, accept, context, scope, origin, NOW } from './helpers/provider-fixture.mjs';
 import { backfillPositionLinks } from '../../../../scripts/postgres/backfill-position-links.mjs';
 
@@ -403,6 +403,66 @@ test('insertion during replay and concurrent workers complete with a one-connect
     assert.equal((await one.query(`SELECT count(*) AS n FROM fleet_identity.position_link_jobs
       WHERE completed_at IS NULL`)).rows[0].n, '0');
   } finally { await one.end(); }
+});
+
+test('expired aliases do not exhaust the active candidate limit and history is paged', async () => {
+  await postgresIdentityCommitter(pools.runtime).createAircraft('ac_history');
+  await pools.admin.query(`INSERT INTO fleet_identity.assertions
+    (aircraft_id,kind,normalized_alias,valid_from_ms,valid_until_ms,source_id,issuer,revision)
+    SELECT 'ac_history','ICAO24',lpad(upper(to_hex(n)),6,'0'),n*1000,n*1000+500,
+      'synthetic','test',n FROM generate_series(1,1200) AS n`);
+  await pools.admin.query(`INSERT INTO fleet_identity.assertions
+    (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
+    VALUES ('ac_history','ICAO24','A0B1C2',1201000,'synthetic','test',1201)`);
+  await pools.admin.query('UPDATE fleet_identity.registry_state SET revision=1201 WHERE singleton');
+  const reader = postgresIdentityReader(pools.runtime);
+  assert.deepEqual(await createResolveAircraft(reader)([hex('A0B1C2')], 1201001),
+    { status: 'MATCHED', aircraftId: 'ac_history', revision: 1201 });
+  const first = await reader.history('ac_history', 0, 500);
+  const second = await reader.history('ac_history', first.at(-1).assertionId, 500);
+  const third = await reader.history('ac_history', second.at(-1).assertionId, 500);
+  assert.deepEqual([first.length, second.length, third.length], [500, 500, 201]);
+  assert.equal(third.at(-1).identifier.value, 'A0B1C2');
+  await assert.rejects(reader.history('ac_history', 0, 501), /History page size/);
+});
+
+test('message correction lookup uses fixed-path indexes on populated retained messages', async () => {
+  const total = 8000;
+  await pools.admin.query(`INSERT INTO source_ingestion.deliveries
+    (delivery_id,source_id,provider_id,account_scope,source_epoch,external_id,payload_sha256,
+     data_level,schema_version,capabilities_revision,received_at_ms,received_basis,
+     received_precision,received_uncertainty_ms,observed_at_ms,observed_basis,
+     observed_precision,observed_uncertainty_ms,retrieved_at_ms,ingested_at_ms,provenance,state)
+    SELECT md5('identity-plan-'||n)::uuid,'src_synthetic','synthetic','private-fixture','v1',
+      'plan-'||n,repeat('a',64),'PROVIDER_MESSAGE',1,1,1000000+n,'RECEIVED',
+      'SECOND',0,1000000+n,'OBSERVED','SECOND',0,1000000+n,1000000+n,
+      '{"pageUrl":"https://synthetic.example/plan","parserVersion":"fixture-v1"}'::jsonb,'ACCEPTED'
+    FROM generate_series(1,$1::integer) AS n`, [total]);
+  await pools.admin.query(`INSERT INTO source_ingestion.retained_inputs (delivery_id,canonical,permission)
+    SELECT md5('identity-plan-'||n)::uuid,
+      jsonb_build_object('observation',jsonb_build_object('sourceId','src_synthetic',
+        'sourceDeliveryId',jsonb_build_object('provider','synthetic','accountScope','private-fixture',
+          'sourceEpoch','v1'),'observedAt',jsonb_build_object('at',(1000000+n)::text)),
+        'aircraftHints',jsonb_build_object('icao24',CASE WHEN n=$1 THEN 'A0B1C2' ELSE 'D00001' END,
+          'registration',CASE WHEN n=$1 THEN 'N123AB' ELSE 'N999ZZ' END)),
+      '{"sourceId":"src_synthetic","provider":"synthetic","accountScope":"private-fixture",
+        "sourceEpoch":"v1","purpose":"PRIVATE_PROCESSING","retentionAllowed":true,
+        "evidenceReference":"repository-synthetic-fixtures-only"}'::jsonb
+    FROM generate_series(1,$1::integer) AS n`, [total]);
+  await pools.admin.query(`INSERT INTO source_ingestion.message_revisions
+    (message_id,revision,source_delivery_id,transformation_id,canonical)
+    SELECT 'msg_plan_'||n,1,ri.delivery_id,'provider-message/1',ri.canonical
+    FROM generate_series(1,$1::integer) AS n
+    JOIN source_ingestion.retained_inputs ri ON ri.delivery_id=md5('identity-plan-'||n)::uuid`, [total]);
+  await pools.admin.query('ANALYZE source_ingestion.message_revisions');
+  for (const [kind, alias, index] of [
+    ['ICAO24', 'A0B1C2', 'message_identity_icao24_time'],
+    ['REGISTRATION', 'N123AB', 'message_identity_registration_time'],
+  ]) {
+    const plan = (await pools.admin.query(`EXPLAIN (FORMAT JSON) ${identityMessageReplayQuery(kind)}`,
+      [alias, 1000000, null, null, null, 100])).rows[0]['QUERY PLAN'];
+    assert.match(JSON.stringify(plan), new RegExp(index));
+  }
 });
 
 test('correction replay receives work while new position jobs remain pending', async () => {

@@ -18,6 +18,19 @@ interface RequestRow {
   cursor_observation_id: string | null; cursor_message_id: string | null;
 }
 
+/** Fixed JSON paths match migration 009's expression indexes exactly. */
+export function identityMessageReplayQuery(kind: 'ICAO24' | 'REGISTRATION'): string {
+  const alias = kind === 'ICAO24' ? "canonical #>> '{aircraftHints,icao24}'"
+    : "canonical #>> '{aircraftHints,registration}'";
+  return `SELECT message_id,(canonical #>> '{observation,observedAt,at}')::bigint AS observed_at_ms,canonical
+    FROM source_ingestion.message_revisions WHERE revision=1
+      AND ${alias} = $1
+      AND (canonical #>> '{observation,observedAt,at}')::bigint >= $2
+      AND ($3::bigint IS NULL OR (canonical #>> '{observation,observedAt,at}')::bigint < $3)
+      AND ($4::bigint IS NULL OR ((canonical #>> '{observation,observedAt,at}')::bigint,message_id) > ($4,$5))
+    ORDER BY observed_at_ms,message_id LIMIT $6`;
+}
+
 /** One locked, bounded page per call. A failed page leaves its cursor unchanged for retry. */
 export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Date.now) {
   return async (limit = 100): Promise<{ requestId: number | null; processed: number; complete: boolean } | null> => {
@@ -87,16 +100,9 @@ export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Da
         return { requestId: Number(request.request_id), processed: rows.rows.length, complete: false };
       }
       const rows = await sql.query<{ message_id: string; observed_at_ms: string; canonical: {
-        aircraftHints: { icao24?: string; registration?: string; callsign?: string } } }>(`
-        SELECT message_id,(canonical #>> '{observation,observedAt,at}')::bigint AS observed_at_ms,canonical
-        FROM source_ingestion.message_revisions WHERE revision=1
-          AND canonical #>> $1::text[] = $2
-          AND (canonical #>> '{observation,observedAt,at}')::bigint >= $3
-          AND ($4::bigint IS NULL OR (canonical #>> '{observation,observedAt,at}')::bigint < $4)
-          AND ($5::bigint IS NULL OR ((canonical #>> '{observation,observedAt,at}')::bigint,message_id) > ($5,$6))
-        ORDER BY observed_at_ms,message_id LIMIT $7`,
-        [['aircraftHints', request.kind === 'ICAO24' ? 'icao24' : 'registration'],
-          request.normalized_alias, from, until, cursor, request.cursor_message_id, limit]);
+        aircraftHints: { icao24?: string; registration?: string; callsign?: string } } }>(
+        identityMessageReplayQuery(request.kind),
+        [request.normalized_alias, from, until, cursor, request.cursor_message_id, limit]);
       const directory = createRegistryCandidateDirectory(createPostgresRegistryReader(sql));
       const transaction = { run: <T>(work: Parameters<typeof runDecisionWork<T>>[1]) =>
         runDecisionWork(createPostgresDecisionWriteSet(sql), work) };

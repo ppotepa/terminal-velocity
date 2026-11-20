@@ -9,5 +9,6 @@ export interface IdentitySnapshot {
 }
 export interface IdentityReader {
   find(identifiers: readonly StrongIdentifier[], observedAt: number): Promise<IdentitySnapshot>;
-  history(aircraftId: AircraftId): Promise<readonly IdentityAssertion[]>;
+  /** Keyset page; continue with the last returned assertionId. */
+  history(aircraftId: AircraftId, afterAssertionId?: number, limit?: number): Promise<readonly IdentityAssertion[]>;
 }
