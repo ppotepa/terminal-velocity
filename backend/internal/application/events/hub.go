@@ -56,7 +56,7 @@ func NewHub(historyLimit, bufferSize int) *Hub {
 var allowedTypes = map[string]bool{
 	"position_updated": true, "flight_started": true, "flight_ended": true,
 	"message_observed": true, "message_decoded": true, "alert_triggered": true,
-	"source_status_changed": true,
+	"watchlist_changed": true, "source_status_changed": true,
 }
 
 // Publish records and broadcasts an event. Out-of-scope events are discarded.
