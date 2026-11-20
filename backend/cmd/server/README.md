@@ -1,52 +1,20 @@
 # Local server
 
-The initial Go process exposes `GET http://127.0.0.1:8080/api/health` and
-requires a reachable MongoDB instance. Its default HTTP bind is loopback only.
-MongoDB connection strings may contain credentials; the process never logs the
-URI or underlying connection error.
+The process exposes Mongo readiness at `GET http://127.0.0.1:8080/api/health` and composed API routes below `http://127.0.0.1:8080/api/v1`. Composition includes persisted WatchRule and alert rule CRUD, aircraft/flight reads, message list/detail, Mongo-backed built-in decoder settings/preview, and bounded SSE. With synthetic mode enabled, active selected WatchRules drive labeled position and message fixtures, correlation, selected decoder runs, country-entry evidence, alert state transitions, and SSE events. See the repository root [local MVP guide](../../../docs/LOCAL_MVP.md).
 
-From the repository root, start the local MongoDB service:
+From the repository root, start MongoDB:
 
 ```sh
 docker compose up -d mongo
 docker compose ps
 ```
 
-Then start the server in another terminal:
+Then from `backend/` start the server:
 
 ```sh
-cd backend
-TV_HTTP_ADDR=127.0.0.1:8080 \
-TV_MONGODB_URI=mongodb://127.0.0.1:27017 \
-TV_MONGODB_DATABASE=terminal_velocity \
-/usr/lib/go-1.25/bin/go run ./cmd/server
+/root/go/pkg/mod/golang.org/toolchain@v0.0.1-go1.26.11.linux-amd64/bin/go run ./cmd/server
 ```
 
-Or copy `.env.example` to `.env` and export its values before running the
-server:
+Set `TV_SYNTHETIC_MODE=true` before starting the process to enable deterministic, local callsign fixtures; only explicitly active WatchRules with position or message collection enabled are polled. The fixture loads the pinned country dataset from `data/geography/countries.geojson` (override with `TV_COUNTRY_GEOJSON`). The default bind address is loopback only. MongoDB data is persisted in ignored `data/mongo/`. Stop the process with Ctrl-C and MongoDB with `docker compose down`.
 
-```sh
-cp .env.example .env
-set -a
-. ./.env
-set +a
-cd backend
-/usr/lib/go-1.25/bin/go run ./cmd/server
-```
-
-The Go process reads environment variables directly; Compose uses the Mongo
-port and data path from `compose.yaml`. Mongo data is persisted at
-`data/mongo/`, which is ignored by Git. Stop the server with Ctrl-C, then stop
-MongoDB with `docker compose down`. The data directory remains for the next
-start.
-
-Configuration variables:
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `TV_HTTP_ADDR` | `127.0.0.1:8080` | Loopback HTTP listen address |
-| `TV_MONGODB_URI` | `mongodb://127.0.0.1:27017` | MongoDB URI (never logged) |
-| `TV_MONGODB_DATABASE` | `terminal_velocity` | Database name |
-
-Health returns HTTP 200 with `status: ok` when MongoDB responds to ping, and
-HTTP 503 with `status: degraded` when it is unavailable.
+`TV_HTTP_ADDR`, `TV_MONGODB_URI`, and `TV_MONGODB_DATABASE` override the loopback address, Mongo URI, and database name. Mongo URIs and driver errors are not written to logs.
