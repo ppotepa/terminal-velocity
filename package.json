@@ -8,7 +8,8 @@
   },
   "workspaces": [
     "packages/backend",
-    "apps/api"
+    "apps/api",
+    "apps/web"
   ],
   "scripts": {
     "start": "npm run start --workspace=@airframes/api",
@@ -16,7 +17,8 @@
     "test": "node --test scripts/architecture/*.test.mjs scripts/positions/*.test.mjs && npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "check:boundaries": "node scripts/check-boundaries.mjs",
-    "check": "npm run typecheck && npm run check:boundaries && npm test",
+    "check": "npm run typecheck && npm run check:boundaries && npm run lint --workspace=@airframes/web && npm test && npm run build:web",
+    "build:web": "npm run build --workspace=@airframes/web",
     "example": "node examples/send-demo-message.mjs",
     "smoke": "node scripts/smoke-api.mjs",
     "db:migrate": "node scripts/postgres/migrate.mjs",
@@ -28,7 +30,7 @@
     "test:postgres:local": "node scripts/postgres/run-local.mjs",
     "messages": "node scripts/messages/cli.mjs",
     "test:messages": "node --test scripts/messages/page-budget.test.mjs packages/backend/tests/airframes-transport.test.mjs packages/backend/tests/source-normalization.test.mjs",
-    "test:browser": "node --test --test-concurrency=1 scripts/messages/airframes-live.test.mjs scripts/messages/on-demand.test.mjs",
+    "test:browser": "node --test --test-concurrency=1 scripts/messages/airframes-live.test.mjs scripts/messages/on-demand.test.mjs apps/web/tests/browser/browser.test.mjs",
     "positions:preview": "node scripts/positions/cli.mjs",
     "source:replay": "node scripts/source/replay.mjs",
     "source:inspect": "node scripts/source/inspect-quarantine.mjs"

@@ -10,18 +10,20 @@ const directory = path.dirname(fileURLToPath(import.meta.url));
 const backend = 'packages/backend/src/';
 const module = `${backend}modules/sample/`;
 const api = 'apps/api/src/';
+const web = 'apps/web/src/';
 
 async function fixture(t, files) {
   const root = await mkdtemp(path.join(directory, '.fixture-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const manifests = {
-    'package.json': { private: true, type: 'module', workspaces: ['packages/backend', 'apps/api'] },
+    'package.json': { private: true, type: 'module', workspaces: ['packages/backend', 'apps/api', 'apps/web'] },
     'packages/backend/package.json': { name: '@airframes/backend', type: 'module', exports: {
       './demo': './src/demo/public/index.ts',
       './correlation': './src/modules/aircraft-correlation/public/index.ts',
       './availability': './src/modules/message-availability/public/index.ts',
     } },
     'apps/api/package.json': { name: '@airframes/api', type: 'module', dependencies: { '@airframes/backend': '0.1.0' } },
+    'apps/web/package.json': { name: '@airframes/web', type: 'module', dependencies: { react: '19.3.1' } },
   };
   for (const [file, contents] of Object.entries(manifests)) files[file] = JSON.stringify(contents);
   for (const [file, contents] of Object.entries(files)) {
@@ -112,6 +114,37 @@ test('API may use Node builtins and own modules', async t => {
     [`${api}config.ts`]: 'export type Config = { port: number };',
   });
   assert.deepEqual(result.diagnostics, []);
+});
+
+test('web may compose its own UI but cannot import backend internals', async t => {
+  const result = await fixture(t, {
+    [`${web}app/App.ts`]: "import { Button } from '../shared/Button.ts'; import { facts } from '../../../../packages/backend/src/modules/sample/domain/facts.ts';",
+    [`${web}shared/Button.ts`]: 'export const Button = 1;',
+    [`${module}domain/facts.ts`]: 'export const facts = 1;',
+  });
+  assert.ok(codes(result).includes('CROSS_WORKSPACE_PATH'), JSON.stringify(result.diagnostics));
+  assert.equal(result.diagnostics.filter(issue => issue.file === `${web}app/App.ts`).length, 1);
+});
+
+test('web cannot import Node builtins and backend cannot import web', async t => {
+  const result = await fixture(t, {
+    [`${web}app/App.ts`]: "import { readFile } from 'node:fs';",
+    [`${module}application/use-case.ts`]: "import { Button } from '../../../../../../apps/web/src/shared/Button.ts';",
+    [`${web}shared/Button.ts`]: 'export const Button = 1;',
+  });
+  assert.ok(codes(result).includes('WEB_BUILTIN'), JSON.stringify(result.diagnostics));
+  assert.ok(result.diagnostics.some(issue => issue.file === `${module}application/use-case.ts`),
+    JSON.stringify(result.diagnostics));
+});
+
+test('web may import a local stylesheet but missing styles fail the boundary check', async t => {
+  const valid = await fixture(t, {
+    [`${web}main.ts`]: "import './styles/base.css';",
+    [`${web}styles/base.css`]: ':root { color: black; }',
+  });
+  assert.deepEqual(valid.diagnostics, []);
+  const missing = await fixture(t, { [`${web}main.ts`]: "import './styles/missing.css';" });
+  assert.ok(codes(missing).includes('MISSING_TARGET'));
 });
 
 test('a nonexistent Node builtin is a missing import target', async t => {

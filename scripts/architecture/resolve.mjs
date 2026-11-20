@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
 import { isBuiltin } from 'node:module';
 import ts from 'typescript';
 
@@ -23,6 +24,15 @@ function exportTarget(value) {
 
 export function resolveDependency(project, from, dependency) {
   const specifier = dependency.specifier;
+  if (specifier.endsWith('.css') && specifier.startsWith('.')) {
+    const workspace = project.owner.get(from);
+    const candidate = path.resolve(path.dirname(from), specifier);
+    const sourceRoot = workspace && path.join(workspace.directory, 'src') + path.sep;
+    if (workspace?.name !== '@airframes/web' || !candidate.startsWith(sourceRoot)
+      || !existsSync(candidate) || realpathSync(candidate) !== candidate)
+      return { kind: 'error', code: 'MISSING_TARGET', message: `Cannot resolve local stylesheet ${specifier}.` };
+    return { kind: 'asset', file: candidate };
+  }
   if (specifier === 'node:types' && dependency.kind === 'reference-types') {
     return { kind: 'external', packageName: specifier, builtin: true };
   }
