@@ -47,3 +47,19 @@ func TestHubRequestsSnapshotForExpiredCursorAndSlowSubscriber(t *testing.T) {
 		t.Fatalf("overflow event=%+v open=%v", got, ok)
 	}
 }
+
+func TestHubPublishesWatchlistChangeForScopedClients(t *testing.T) {
+	h := NewHub(4, 2)
+	ch, cancel := h.Subscribe("")
+	defer cancel()
+	if !h.Publish(Event{Type: "watchlist_changed", OccurredAt: time.Unix(10, 0), Data: map[string]any{"watchRuleId": "wr-1", "action": "updated"}, ScopeActive: true}) {
+		t.Fatal("watchlist change was rejected")
+	}
+	got := <-ch
+	if got.Type != "watchlist_changed" || got.EventID == nil {
+		t.Fatalf("watchlist event=%+v", got)
+	}
+	if h.Publish(Event{Type: "watchlist_changed", OccurredAt: time.Unix(11, 0), Data: map[string]any{"watchRuleId": "wr-1"}, ScopeActive: false}) {
+		t.Fatal("unscoped watchlist change was published")
+	}
+}
