@@ -1,4 +1,4 @@
-import { Component, type ReactNode } from 'react';
+import { Component, useState, type ReactNode } from 'react';
 import { FilterPanel } from '../features/shell/FilterPanel.tsx';
 import { MapShell } from '../features/shell/MapShell.tsx';
 import { SelectionPanel } from '../features/shell/SelectionPanel.tsx';
@@ -18,7 +18,9 @@ class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: bool
 
 function Shell() {
   const [state, navigate] = useUrlState();
-  const result = useMapSnapshot(state);
+  const [bbox, setBbox] = useState('14,48,24,56');
+  const [zoom, setZoom] = useState(5);
+  const result = useMapSnapshot(state, bbox);
   const views: readonly { id: View; label: string }[] = [
     { id: 'map', label: 'Map' }, { id: 'flights', label: 'Flights' }, { id: 'stations', label: 'Stations' },
   ];
@@ -39,7 +41,8 @@ function Shell() {
         <p>Local synthetic data only</p></div>
       {state.view === 'map' ? <div className="tv-layout">
         <FilterPanel state={state} onChange={navigate} />
-        <MapShell result={result} />
+        <MapShell result={result} state={state} onChange={navigate} zoom={zoom}
+          onBounds={(nextBbox, nextZoom) => { setBbox(nextBbox); setZoom(nextZoom); }} />
         <SelectionPanel key={state.aircraft} state={state} result={result} onChange={navigate} />
       </div> : <Panel title={state.view === 'flights' ? 'Flights' : 'Stations'}>
         <StateMessage kind="empty" title="This view is not available yet">

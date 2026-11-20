@@ -5,6 +5,10 @@ import { createServer } from 'node:net';
 import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { createTestPools, resetTestData, uniqueId } from '../../../../packages/backend/tests/integration/helpers/database.mjs';
+import { postgresIdentityCommitter } from '../../../../packages/backend/src/modules/fleet-identity/infrastructure/postgres/postgres-identity-committer.ts';
+import { postgresPositionHistoryWriter } from '../../../../packages/backend/src/modules/flight-tracking/infrastructure/postgres/append-position.ts';
+import { postgresPositionLinker } from '../../../../packages/backend/src/modules/fleet-identity/infrastructure/postgres/postgres-position-linker.ts';
+import { createCurrentPositionWorker } from '../../../../packages/backend/src/modules/flight-tracking/infrastructure/postgres/current-position-projection.ts';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 let pools;
@@ -131,5 +135,36 @@ test('unauthenticated demo endpoints reveal neither private provider records nor
     bearer: 'VDL2', text: 'Synthetic public fixture', icao24: 'D00001' };
   assert.equal((await request(api.base, '/api/v1/demo/messages', demo)).status, 201);
   assert.equal((await request(api.base, '/api/v1/demo/messages', demo)).status, 200);
+  await api.stop();
+});
+
+test('private HTTP track reads only actual linked PostgreSQL observations with a gap', { timeout: 20000 }, async t => {
+  const commit = postgresIdentityCommitter(pools.runtime);
+  await commit.createAircraft('ac_http-track');
+  await commit.append({ aircraftId: 'ac_http-track', identifier: { kind: 'ICAO24', value: 'A1B2C3' },
+    validFrom: 0, validUntil: null, sourceId: 'synthetic', issuer: 'test' });
+  const now = Date.parse('2026-11-20T12:00:00.000Z');
+  const writer = postgresPositionHistoryWriter(pools.runtime);
+  const linker = postgresPositionLinker(pools.runtime);
+  for (const [id, offset, latitude] of [['one', -700_000, 51], ['two', -100_000, 52]]) {
+    const sourceObservationId = `epoch:synthetic-1:http-${id}`;
+    const fact = { schemaVersion: 1, sourceId: 'src_synthetic', sourceObservationId,
+      observedAt: new Date(now + offset).toISOString(), observedAtBasis: 'SOURCE_TIMESTAMP',
+      ingestedAt: new Date(now).toISOString(), timestampPrecision: 'SECOND',
+      timestampUncertaintyMs: 0, measurementKind: 'ADS_B', latitude, longitude: 20,
+      quality: { nic: 8, nacP: 9 }, identifierHints: { icao24: 'A1B2C3' } };
+    assert.equal((await writer.append(fact)).ok, true);
+    await linker.reevaluate('src_synthetic', sourceObservationId);
+  }
+  const project = createCurrentPositionWorker(pools.runtime);
+  for (let n = 0; n < 10; n++) if (await project() === null) break;
+  const api = await launch(t);
+  const track = await request(api.base,
+    `/api/v1/internal/aircraft/ac_http-track/observed-track?from=${now - 800_000}&to=${now}&zoom=5`);
+  assert.equal(track.status, 200);
+  assert.equal(track.body.data.observedCount, 2);
+  assert.deepEqual(track.body.data.segments.map(segment => segment.breakBefore), [null, 'TIME_GAP']);
+  assert.deepEqual(track.body.data.segments.flatMap(segment => segment.points.map(point => point.latitude)), [51,52]);
+  assert.equal(JSON.stringify(track.body).includes('destination'), false);
   await api.stop();
 });

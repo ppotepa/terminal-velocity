@@ -1,14 +1,37 @@
 # Terminal Velocity — implementation status
 
-### S4-08 private web shell (issue #21, in progress)
+### S4-09 private MapLibre viewport (issue #22, in progress)
+
+The map renders the bounded private snapshot with stable aircraft ID keyed markers,
+debounced viewport requests, abort of obsolete requests, message-freshness colors,
+separate position/feed labels, URL-backed selection and an always available
+keyboard-accessible list. The private observed-track HTTP route uses the existing
+PostgreSQL reader and returns only recorded, simplified segments and gap reasons;
+the in-memory demo has no observed track and returns an empty result. A selected
+track is a bounded two-day, at-most-500-point page. More observations are signaled
+but not paged in this map MVP. No route destination is inferred. The map displays
+heading only when a validated optional `headingDegrees` field is supplied; the
+current map projection does not supply heading, so current markers are unrotated.
+
+`VITE_MAP_STYLE_URL` accepts an HTTPS style or same-origin path for local builds.
+The default is a labeled blank MapLibre style with no external tile request. If a
+style or tile fails, the list and statuses remain usable. A style operator must
+verify the tile/style license, attribution and request policy before configuring
+it; the [MapLibre demo style](https://demotiles.maplibre.org/style.json) is only
+a development example, not an approved production tile service. This feature
+does not authorize public message or position publication. No migration is added.
+
+### S4-08 private web shell (issue #21, merged PR #71)
 
 The new React/Vite workspace uses one light-mode token set, reusable accessible
 controls, URL-backed navigation/selection/filter state and a typed private map
 API client. It presents a responsive shell with explicit loading, empty and
-error states; no markers, flight list or live receiver claims appear. The
+error states. The
 architecture checker now recognizes web source and blocks cross-workspace
 imports and Node builtins. Root checks include web types, lint, unit tests and
-build; local Playwright layout and accessibility verification is in progress.
+build; local Playwright layout and accessibility verification passed on exact
+head and merge SHA. PR #71 merged as `513fae3`. The flight and station views
+remain placeholders until their own issues.
 
 ### S4-07 private bbox map snapshot (issue #20, merged PR #70)
 

@@ -34,3 +34,21 @@ test('map HTTP rejects malformed, overlarge and repeated query parameters', asyn
   const method = await fetch(`${base}${path}?bbox=0,0,1,1`, { method: 'POST' });
   assert.equal(method.status, 405);
 });
+
+test('private observed-track HTTP route is bounded and empty in memory mode', async t => {
+  const { base } = await startServer(t);
+  const path = '/api/v1/internal/aircraft/ac_demo-001/observed-track';
+  const response = await fetch(`${base}${path}?from=1763424000000&to=1763510400000&zoom=5`);
+  assert.equal(response.status, 200);
+  const result = (await response.json()).data;
+  assert.equal(result.aircraftId, 'ac_demo-001');
+  assert.deepEqual(result.segments, []);
+  for (const suffix of ['', '?from=0&to=9999999999999',
+    '?from=0&to=1&zoom=23', '?from=0&to=1&extra=1',
+    '?from=0&from=1&to=2']) {
+    const bad = await fetch(`${base}${path}${suffix}`);
+    assert.equal(bad.status, 400, suffix);
+    assert.equal((await bad.json()).error.code, 'INVALID_TRACK_QUERY');
+  }
+  assert.equal((await fetch(`${base}${path}?from=1&to=2`, { method: 'POST' })).status, 405);
+});

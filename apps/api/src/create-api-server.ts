@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import { createDemoTracker, createDemoMapReader, type DemoTracker } from '@airframes/backend/demo';
 import type { MapReader } from '@airframes/backend/map';
+import type { ObservedTrackReader } from '@airframes/backend/flight-tracking';
 import { sendProblem } from './http/send-problem.ts';
 import { handleRequest } from './routing/handle-request.ts';
 import type { ReadApiHealth } from './http/api-health.ts';
@@ -8,7 +9,9 @@ import type { ReadApiHealth } from './http/api-health.ts';
 /** Creates an unbound HTTP server. The executable binds it exclusively to loopback. */
 export function createApiServer(tracker: DemoTracker = createDemoTracker(),
   readHealth: ReadApiHealth = async () => ({ status: 'ok', mode: 'demo', storage: 'memory' }),
-  mapReader: MapReader = createDemoMapReader(tracker)): Server {
+  mapReader: MapReader = createDemoMapReader(tracker),
+  trackReader: ObservedTrackReader = { read: async query => ({ aircraftId: query.aircraftId,
+    projectionRevision: 0, segments: [], observedCount: 0, hasMore: false, next: null }) }): Server {
   return createServer({
     maxHeaderSize: 8 * 1024,
     requestTimeout: 15_000,
@@ -18,7 +21,7 @@ export function createApiServer(tracker: DemoTracker = createDemoTracker(),
     // A disconnected client can emit a late stream error after the body reader has finished.
     // The connection is already unusable; do not turn that transport failure into a process crash.
     request.on('error', () => {});
-    void handleRequest(tracker, request, response, readHealth, mapReader).catch((error: unknown) => {
+    void handleRequest(tracker, request, response, readHealth, mapReader, trackReader).catch((error: unknown) => {
       request.resume();
       sendProblem(response, error);
     });

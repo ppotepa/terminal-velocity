@@ -1,4 +1,5 @@
 @import './tokens.css';
+@import 'maplibre-gl/dist/maplibre-gl.css';
 
 * { box-sizing: border-box; }
 html { font-family: var(--font-ui); font-size: 16px; background: var(--canvas); color: var(--text); }
@@ -62,6 +63,27 @@ button { cursor: pointer; }
 .tv-map-surface p { margin: 0; color: var(--text-muted); line-height: 1.5; }
 .tv-map-summary { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border);
   font-size: var(--text-sm); color: var(--text-muted); }
+.tv-map-frame { position: relative; height: 480px; background: #e8eff2; }
+.tv-map-canvas { width: 100%; height: 100%; }
+.tv-map-overlay { position: absolute; left: var(--space-3); top: var(--space-3); right: var(--space-3);
+  margin: 0; padding: var(--space-2) var(--space-3); color: var(--status-error);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  font-size: var(--text-sm); pointer-events: none; }
+.tv-map-overlay--blank { top: auto; bottom: var(--space-3); color: var(--text); }
+.tv-aircraft-marker { width: 32px; height: 32px; border: 2px solid #fff; border-radius: 50%;
+  background: var(--marker-color); color: #fff; font-size: 20px; line-height: 1; text-align: center;
+  box-shadow: 0 1px 5px #20304088; transform: rotate(var(--marker-heading)); }
+.tv-aircraft-marker[aria-pressed="true"] { outline: 3px solid var(--focus); outline-offset: 2px; }
+.tv-legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin: 0 3px 0 8px; }
+.tv-legend-dot--recent { background: #0d7c6e; }
+.tv-legend-dot--stale { background: #a46410; }
+.tv-legend-dot--none { background: #5c6676; }
+.tv-map-list { margin-top: var(--space-3); display: grid; gap: var(--space-2); }
+.tv-map-list h3 { margin: 0; font-size: var(--text-sm); }
+.tv-map-list__item { width: 100%; display: grid; gap: 2px; text-align: left;
+  padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--text); font-size: var(--text-xs); }
+.tv-map-list__item[aria-pressed="true"] { border-color: var(--accent); background: #e8f2fb; }
 .tv-state { display: grid; gap: var(--space-2); padding: var(--space-3);
   border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-muted); }
 .tv-state strong { font-size: var(--text-sm); overflow-wrap: anywhere; }
@@ -84,6 +106,7 @@ button { cursor: pointer; }
   .tv-layout { grid-template-columns: minmax(210px, 250px) minmax(0, 1fr); }
   .tv-panel--details { grid-column: 1 / -1; }
   .tv-map-surface { min-height: 420px; }
+  .tv-map-frame { height: 420px; }
 }
 @media (max-width: 639px) {
   .tv-header { align-items: start; flex-direction: column; padding: var(--space-3) var(--space-4); }
@@ -92,4 +115,5 @@ button { cursor: pointer; }
   .tv-panel--details { grid-column: auto; }
   .tv-page-head { align-items: start; flex-direction: column; }
   .tv-map-surface { min-height: 300px; }
+  .tv-map-frame { height: 300px; }
 }

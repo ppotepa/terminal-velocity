@@ -7,6 +7,7 @@ export interface MapAircraft {
     readonly freshness: 'CURRENT' | 'STALE' | 'UNKNOWN';
     readonly source: string;
     readonly measurementKind: 'ADS_B' | 'MLAT' | 'OTHER' | 'DEMO';
+    readonly headingDegrees?: number;
   };
   readonly messages: {
     readonly freshness: 'RECENT' | 'STALE' | 'NONE';
@@ -46,6 +47,9 @@ export function decodeMapSnapshot(value: unknown): MapSnapshot {
       || typeof position['observedAt'] !== 'string' || !Number.isFinite(Date.parse(position['observedAt']))
       || !['CURRENT','STALE','UNKNOWN'].includes(String(position['freshness']))
       || typeof position['source'] !== 'string' || !['ADS_B','MLAT','OTHER','DEMO'].includes(String(position['measurementKind']))
+      || (position['headingDegrees'] !== undefined && (typeof position['headingDegrees'] !== 'number'
+        || !Number.isFinite(position['headingDegrees']) || position['headingDegrees'] < 0
+        || position['headingDegrees'] >= 360))
       || !['RECENT','STALE','NONE'].includes(String(messages['freshness']))
       || !(messages['lastMessageAt'] === null || (typeof messages['lastMessageAt'] === 'string'
         && Number.isFinite(Date.parse(messages['lastMessageAt']))))
@@ -59,6 +63,7 @@ export function decodeMapSnapshot(value: unknown): MapSnapshot {
         freshness: position['freshness'] as MapAircraft['position']['freshness'],
         source: position['source'],
         measurementKind: position['measurementKind'] as MapAircraft['position']['measurementKind'],
+        ...(position['headingDegrees'] === undefined ? {} : { headingDegrees: position['headingDegrees'] as number }),
       },
       messages: {
         freshness: messages['freshness'] as MapAircraft['messages']['freshness'],

@@ -15,7 +15,7 @@
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
     "skipLibCheck": false,
-    "types": ["vite/client"]
+    "types": ["vite/client", "geojson"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

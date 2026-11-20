@@ -9,6 +9,9 @@ export function matchRoute(target: string): ApiRoute {
   const path = url.pathname;
   if (path === '/api/v1/internal/map/aircraft')
     return { name: 'map-aircraft', method: 'GET', search: url.search };
+  const track = /^\/api\/v1\/internal\/aircraft\/([^/]+)\/observed-track$/.exec(path);
+  if (track?.[1] !== undefined) return { name: 'observed-track', method: 'GET',
+    id: decodeId(track[1]), search: url.search };
   if (url.search !== '') throw new HttpProblem(400, 'UNSUPPORTED_QUERY', 'This demo API does not support query parameters.');
   if (path === '/healthz') return { name: 'health', method: 'GET' };
   if (path === '/api/v1/aircraft') return { name: 'aircraft-list', method: 'GET' };

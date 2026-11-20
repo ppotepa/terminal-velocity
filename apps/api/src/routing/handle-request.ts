@@ -1,5 +1,6 @@
 import type { DemoTracker } from '@airframes/backend/demo';
 import type { MapReader } from '@airframes/backend/map';
+import type { ObservedTrackReader } from '@airframes/backend/flight-tracking';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { HttpProblem } from '../http/http-problem.ts';
 import { readJsonBody } from '../http/read-json-body.ts';
@@ -8,9 +9,10 @@ import { sendJson } from '../http/send-json.ts';
 import { matchRoute } from './match-route.ts';
 import type { ReadApiHealth } from '../http/api-health.ts';
 import { mapHttpPage, parseMapViewport } from './map-viewport.ts';
+import { parseObservedTrack } from './observed-track.ts';
 
 export async function handleRequest(tracker: DemoTracker, request: IncomingMessage, response: ServerResponse,
-  readHealth: ReadApiHealth, mapReader: MapReader): Promise<void> {
+  readHealth: ReadApiHealth, mapReader: MapReader, trackReader: ObservedTrackReader): Promise<void> {
   const route = matchRoute(request.url ?? '/');
   if (request.method !== route.method) {
     throw new HttpProblem(405, 'METHOD_NOT_ALLOWED', `Use ${route.method} for this endpoint.`, { Allow: route.method });
@@ -22,14 +24,23 @@ export async function handleRequest(tracker: DemoTracker, request: IncomingMessa
       return;
     }
     case 'map-aircraft': {
-      const address = request.socket.remoteAddress;
-      if (address !== '127.0.0.1' && address !== '::1' && address !== '::ffff:127.0.0.1')
-        throw new HttpProblem(403, 'PRIVATE_ENDPOINT', 'The map snapshot is available on loopback only.');
+      requireLoopback(request);
       const query = parseMapViewport(route.search);
       try { sendJson(response, 200, mapHttpPage(await mapReader.read(query))); }
       catch (error) {
         if (error instanceof RangeError && error.message === 'STALE_MAP_CURSOR')
           throw new HttpProblem(409, 'STALE_MAP_CURSOR', 'The map changed; request a new first page.');
+        throw error;
+      }
+      return;
+    }
+    case 'observed-track': {
+      requireLoopback(request);
+      const query = parseObservedTrack(route.id, route.search);
+      try { sendJson(response, 200, { data: await trackReader.read(query) }); }
+      catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'STALE_OBSERVED_TRACK_CURSOR')
+          throw new HttpProblem(409, 'STALE_OBSERVED_TRACK_CURSOR', 'The track changed; request a new first page.');
         throw error;
       }
       return;
@@ -51,4 +62,10 @@ export async function handleRequest(tracker: DemoTracker, request: IncomingMessa
       sendApiResult(response, result, result.ok && result.value.created ? 201 : 200);
     }
   }
+}
+
+function requireLoopback(request: IncomingMessage): void {
+  const address = request.socket.remoteAddress;
+  if (address !== '127.0.0.1' && address !== '::1' && address !== '::ffff:127.0.0.1')
+    throw new HttpProblem(403, 'PRIVATE_ENDPOINT', 'This endpoint is available on loopback only.');
 }

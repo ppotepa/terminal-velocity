@@ -10,14 +10,17 @@ export class ApiClientError extends Error {
 }
 
 export interface ApiClient {
-  request<T>(route: '/api/v1/internal/map/aircraft', query: Readonly<Record<string, string>>,
+  request<T>(route: string, query: Readonly<Record<string, string>>,
     signal: AbortSignal): Promise<T>;
 }
 
 export function createApiClient(fetcher: typeof fetch = fetch,
   baseUrl: string = window.location.origin): ApiClient {
-  return { async request<T>(route: '/api/v1/internal/map/aircraft',
+  return { async request<T>(route: string,
     query: Readonly<Record<string, string>>, signal: AbortSignal): Promise<T> {
+    if (route !== '/api/v1/internal/map/aircraft'
+      && !/^\/api\/v1\/internal\/aircraft\/ac_[A-Za-z0-9-]{1,64}\/observed-track$/.test(route))
+      throw new TypeError('Unsupported private API route.');
     const url = new URL(route, baseUrl);
     for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
     const response = await fetcher(url, { signal, headers: { Accept: 'application/json' } });

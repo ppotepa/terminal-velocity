@@ -48,17 +48,32 @@ async function setup(t) {
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   let fail = false;
+  let slow = false;
   const requests = [];
   await page.route('**/api/v1/internal/map/aircraft?**', async route => {
     const url = new URL(route.request().url());
     requests.push(url);
+    if (slow && url.searchParams.get('positionStatus') === 'STALE')
+      await new Promise(resolve => setTimeout(resolve, 600));
     if (fail) return route.fulfill({ status: 503, contentType: 'application/json',
       body: JSON.stringify({ error: { code: 'UNAVAILABLE', message: 'Synthetic API unavailable.' } }) });
     return route.fulfill({ status: 200, contentType: 'application/json',
       body: JSON.stringify(url.searchParams.get('positionStatus') === 'CURRENT'
         ? { ...snapshot, data: [] } : snapshot) });
   });
-  return { page, base, requests, setFailure(value) { fail = value; } };
+  await page.route('**/api/v1/internal/aircraft/*/observed-track?**', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: {
+      aircraftId: 'ac_demo-001', observedCount: 4, hasMore: false, segments: [
+        { breakBefore: null, continuesPrevious: false, points: [
+          { latitude: 51, longitude: 20, observedAtMs: 1 },
+          { latitude: 52, longitude: 21, observedAtMs: 2 },
+        ] },
+        { breakBefore: 'TIME_GAP', continuesPrevious: false, points: [
+          { latitude: 53, longitude: 22, observedAtMs: 3 },
+          { latitude: 54, longitude: 23, observedAtMs: 4 },
+        ] },
+      ] } }) }));
+  return { page, base, requests, setFailure(value) { fail = value; }, setSlow(value) { slow = value; } };
 }
 
 test('light shell has stable desktop/tablet/mobile layout snapshots and readable typography', async t => {
@@ -97,6 +112,40 @@ test('light shell has stable desktop/tablet/mobile layout snapshots and readable
   await page.goto(`${base}/?aircraft=ac_${'X'.repeat(64)}`);
   await page.getByText('Selected ac_').waitFor();
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390));
+});
+
+test('map markers and list selection persist across reload with observed gaps at desktop and mobile', async t => {
+  const { page, base, requests } = await setup(t);
+  await page.goto(base);
+  await page.getByText('1 aircraft position in this viewport').waitFor();
+  await page.locator('.tv-aircraft-marker').first().waitFor();
+  assert.equal(await page.locator('.tv-aircraft-marker').count(), 1);
+  await page.locator('.tv-aircraft-marker').first().click();
+  assert.equal(new URL(page.url()).searchParams.get('aircraft'), 'ac_demo-001');
+  await page.getByText(/Observed track: 4 points in 2 segments/).waitFor();
+  assert.ok(await page.getByText(/Gaps are shown as separate lines/).isVisible());
+  await page.reload();
+  await page.getByText('Selected ac_demo-001').waitFor();
+  assert.equal(await page.locator('.tv-aircraft-marker').count(), 1);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await page.getByRole('button', { name: /ac_demo-001.*No recent message/ }).last().isVisible());
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390));
+  assert.ok(requests.every(url => url.searchParams.has('bbox')));
+});
+
+test('a late viewport response cannot replace a newer filter result', async t => {
+  const { page, base, setSlow } = await setup(t);
+  setSlow(true);
+  await page.goto(base);
+  await page.getByText('1 aircraft position in this viewport').waitFor();
+  const position = page.getByRole('combobox', { name: 'Position status' });
+  await position.selectOption('STALE');
+  await new Promise(resolve => setTimeout(resolve, 220));
+  await position.selectOption('CURRENT');
+  await page.getByText('No positions in this viewport').waitFor();
+  await new Promise(resolve => setTimeout(resolve, 650));
+  assert.ok(await page.getByText('No positions in this viewport').isVisible());
+  assert.equal(await page.locator('.tv-aircraft-marker').count(), 0);
 });
 
 test('keyboard focus, named controls, URL selection and empty/error states work', async t => {
