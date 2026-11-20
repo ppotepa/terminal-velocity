@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -47,12 +48,14 @@ func run() error {
 	}()
 
 	composeCtx, cancelCompose := context.WithTimeout(rootCtx, 20*time.Second)
-	endpoints, err := bootstrap.Compose(composeCtx, db.Database())
+	syntheticMode := strings.EqualFold(strings.TrimSpace(os.Getenv("TV_SYNTHETIC_MODE")), "true")
+	composition, err := bootstrap.Compose(composeCtx, db.Database(), syntheticMode)
 	cancelCompose()
 	if err != nil {
 		return errors.New("application composition failed; check MongoDB indexes and configuration")
 	}
-	server := bootstrap.NewHTTPServer(cfg.HTTPAddr, cfg.Version, db, endpoints)
+	composition.Start(rootCtx)
+	server := bootstrap.NewHTTPServer(cfg.HTTPAddr, cfg.Version, db, composition.Endpoints)
 	serveErr := make(chan error, 1)
 	go func() {
 		log.Printf("server listening on %s", cfg.HTTPAddr)
