@@ -13,6 +13,7 @@ import (
 	trackingstore "github.com/ppotepa/terminal-velocity/backend/internal/adapters/mongo/tracking"
 	watchstore "github.com/ppotepa/terminal-velocity/backend/internal/adapters/mongo/watchlist"
 	"github.com/ppotepa/terminal-velocity/backend/internal/application/acquisition"
+	alertapp "github.com/ppotepa/terminal-velocity/backend/internal/application/alerting"
 	decodeapp "github.com/ppotepa/terminal-velocity/backend/internal/application/decoding"
 	"github.com/ppotepa/terminal-velocity/backend/internal/application/events"
 	messageapp "github.com/ppotepa/terminal-velocity/backend/internal/application/messages"
@@ -21,6 +22,7 @@ import (
 	"github.com/ppotepa/terminal-velocity/backend/internal/ports/sources"
 	transport "github.com/ppotepa/terminal-velocity/backend/internal/transport/http"
 	aircrafthttp "github.com/ppotepa/terminal-velocity/backend/internal/transport/http/aircraft"
+	alerthttp "github.com/ppotepa/terminal-velocity/backend/internal/transport/http/alerts"
 	decoderhttp "github.com/ppotepa/terminal-velocity/backend/internal/transport/http/decoders"
 	messagehttp "github.com/ppotepa/terminal-velocity/backend/internal/transport/http/messages"
 	sourcehttp "github.com/ppotepa/terminal-velocity/backend/internal/transport/http/sourcecontrol"
@@ -72,10 +74,21 @@ func Compose(ctx context.Context, db *driver.Database, syntheticMode ...bool) (C
 	}
 	hub := events.NewHub(events.DefaultHistory, events.DefaultBuffer)
 	fixtureEnabled := len(syntheticMode) > 0 && syntheticMode[0]
+	var alertScope alertapp.ScopeVerifier
+	var alertEvidence alertapp.EvidenceVerifier
+	if fixtureEnabled {
+		alertScope = fixtureAlertScope{rules: watchService}
+		alertEvidence = fixtureAlertEvidence{db: db}
+	}
+	alertService := alertapp.NewService(alertRepo, alertScope, alertEvidence)
 	var jobs []func(context.Context) error
 	if fixtureEnabled {
+		countryService, err := loadFixtureCountryService()
+		if err != nil {
+			return Composition{}, err
+		}
 		source := fixtureSource{}
-		scheduler := acquisition.NewScheduler(watchService, []sources.Source{source}, newMemoryCheckpoints(), fixtureConsumer{rules: watchService, tracking: trackingService, messages: messageService, decoders: decoderService, hub: hub}.Consume, 5*time.Second)
+		scheduler := acquisition.NewScheduler(watchService, []sources.Source{source}, newMemoryCheckpoints(), fixtureConsumer{rules: watchService, tracking: trackingService, messages: messageService, decoders: decoderService, alerts: alertService, geography: countryService, db: db, hub: hub}.Consume, 5*time.Second)
 		jobs = append(jobs, scheduler.Run)
 	}
 	return Composition{Endpoints: transport.Endpoints{
@@ -83,6 +96,7 @@ func Compose(ctx context.Context, db *driver.Database, syntheticMode ...bool) (C
 		Aircraft:   aircrafthttp.NewHandler(aircraftReader{tracking: trackingService, rules: watchService}),
 		Decoders:   decoderhttp.NewHandler(decoderReader{service: decoderService, configs: decoderRepo, registry: registry}),
 		Messages:   messagehttp.NewHandler(messageReader{messages: messageService, decoders: decoderService, rules: watchService}),
+		Alerts:     alerthttp.NewHandler(alertReader{service: alertService, repo: alertRepo, db: db}),
 		Sources:    sourcehttp.NewHandler(staticSourceHealth{synthetic: fixtureEnabled}),
 		Events:     ssehttp.NewHandler(hub, 20*time.Second),
 	}, jobs: jobs}, nil

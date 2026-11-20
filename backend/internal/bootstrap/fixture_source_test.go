@@ -35,3 +35,27 @@ func TestFixtureSourceReturnsDeterministicBoundedCallsSignObservation(t *testing
 		t.Fatalf("invalid fixture observation: %+v", item)
 	}
 }
+
+func TestFixtureSourceBoundsGeneratedCallsignToEightCharacters(t *testing.T) {
+	source := fixtureSource{}
+	caps := source.Capabilities()
+	query := sources.Query{Key: "fixture-key", SourceID: caps.ID, Lookup: sources.LookupCallsign, Value: "RESTART", Prefix: true, CandidateLimit: 1}
+	result, err := source.Fetch(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var item fixtureObservation
+	if err := json.Unmarshal(result.Records[0].Payload, &item); err != nil {
+		t.Fatal(err)
+	}
+	if item.Callsign != "RESTART2" || len(item.Callsign) > 8 {
+		t.Fatalf("generated callsign is invalid: %q", item.Callsign)
+	}
+	if value, err := fixtureCallsignForPrefix("A B"); err != nil || value != "A B42" {
+		t.Fatalf("valid spaced callsign prefix was rejected: value=%q err=%v", value, err)
+	}
+	query.Value = "TOOLONGER"
+	if _, err := source.Fetch(context.Background(), query); err == nil {
+		t.Fatal("expected an overlong callsign prefix to fail closed")
+	}
+}

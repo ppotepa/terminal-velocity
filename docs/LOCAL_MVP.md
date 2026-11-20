@@ -21,7 +21,8 @@ The API binds to `127.0.0.1:8080`. Set `TV_SYNTHETIC_MODE=true` before starting 
 - `/api/v1/decoders` lists built-in decoder descriptors and Mongo-backed settings; config updates use `If-Match` revisions.
 - `POST /api/v1/decoders/{decoderId}/preview` decodes a supplied bounded payload without persisting it.
 - `/api/v1/map/snapshot`, aircraft/flight list routes, `/api/v1/flights/{id}/track`, and message list/detail routes are mounted. Synthetic mode creates persisted, source-labeled positions and messages only from active WatchRules.
-- `GET /api/v1/events` serves SSE heartbeats and `snapshot_required` for stale cursors. Synthetic mode publishes position, message, and decoder events.
+- `/api/v1/alert-rules` and `/api/v1/alert-events` expose persisted alert rule CRUD, history and acknowledgement.
+- `GET /api/v1/events` serves SSE heartbeats and `snapshot_required` for stale cursors. Synthetic mode publishes position, message, decoder and alert events.
 
 Run the reproducible smoke checks from the repository root while Mongo and the API are running:
 
@@ -29,10 +30,10 @@ Run the reproducible smoke checks from the repository root while Mongo and the A
 ./scripts/demo/smoke.sh
 ```
 
-The script creates and removes a temporary active synthetic watch rule, waits for a source-labeled position and matched/decoded message, checks message list/detail and SSE updates, requests a decoder preview, and verifies stale-cursor snapshot recovery. Start the server with `TV_SYNTHETIC_MODE=true` for this workflow.
+The script creates and removes a temporary country-entry alert and active synthetic WatchRule, observes the fixture route cross from the UK into France, then verifies the persisted crossing alert, source-labeled track, matched/decoded message list/detail, SSE updates, decoder preview and stale-cursor snapshot recovery. Start the server with `TV_SYNTHETIC_MODE=true` for this workflow. The fixture follows a deterministic London/Paris route and the alert uses the pinned country boundary dataset; all resulting records remain explicitly labeled synthetic.
 
 ## Integration status and limits
 
 BE-24 composition initializes Mongo indexes, installs default decoder settings, mounts the composed routes below the OpenAPI `/api/v1` base, and shuts down the HTTP server and Mongo connection cleanly. Real data sources remain disabled; this is not evidence of live provider access.
 
-The watch → position → message → decode/correlation and reconnect refresh paths pass the local synthetic smoke. Alert rule/event routes and alert evaluation are not yet composed, so the full alert workflow remains unverified. Real-provider access remains explicitly unverified. The BE-09 OpenAPI contract also lacks alert acknowledgement and the watchlist event type.
+The local smoke exercises watch → position → message → decode/correlation → country crossing → persisted alert → reconnect refresh. A separate local run restarted the API while Mongo stayed up, then confirmed the France crossing events, current position, matched messages and decoder results were still readable. Real-provider access remains explicitly unverified. The BE-09 OpenAPI contract also lacks alert acknowledgement and the watchlist event type.

@@ -240,7 +240,11 @@ func fixtureCallsigns(rule watch.WatchRule) []string {
 			}
 			value := strings.TrimSpace(strings.ToUpper(criterion.Value))
 			if strings.HasSuffix(value, "*") {
-				value = strings.TrimSuffix(value, "*") + "42"
+				if fixture, err := fixtureCallsignForPrefix(strings.TrimSuffix(value, "*")); err == nil {
+					value = fixture
+				} else {
+					continue
+				}
 			}
 			if value != "" && !seen[value] {
 				seen[value] = true
