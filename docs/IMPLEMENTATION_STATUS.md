@@ -346,4 +346,19 @@ The history reader validates a 31-day maximum time window and 500-row maximum pa
 
 Node 24 type checking passed in the authoring checkout. The real PostgreSQL integration suite and exact-head coordinator CI remain required before marking #16 verified. No provider rights or deployment acceptance is implied by synthetic tests.
 
-Authoring verification on 2026-11-20 used Node 24.22.3: offline `npm ci`, `npm run typecheck`, `npm run check:boundaries`, all 18 backend test files, `npm run test:messages`, and `git diff --check` passed. `npm run check` reached the existing private-preview test but failed because this shell cannot bind its synthetic loopback server. `npm run test:postgres:local` stopped before database startup because `initdb` refuses root; the coordinator's private unprivileged CI must run migration and PostgreSQL integration tests on the exact checkout. The migration's SQL behavior, query plan, concurrency and rollback assertions are written but are not yet claimed passing. The working tree has resolved merge contents, while `.git` is read-only here and its two unmerged index entries require coordinator staging. No live source was fetched, retained, or published for #16.
+Authoring verification on 2026-11-20 used Node 24.22.3: offline `npm ci`, `npm run typecheck`, `npm run check:boundaries`, all 18 backend test files, `npm run test:messages`, and `git diff --check` passed. `npm run check` reached the existing private-preview test but failed because this shell cannot bind its synthetic loopback server. `npm run test:postgres:local` stopped before database startup because `initdb` refuses root; the coordinator's private unprivileged CI must run migration and PostgreSQL integration tests on the exact checkout. The migration's SQL behavior, query plan, concurrency and rollback assertions are written but are not yet claimed passing. No live source was fetched, retained, or published for #16.
+
+### S4-03 PostgreSQL upgrade regression follow-up (2026-11-20)
+
+Coordinator isolated CI for `40d3e5ed7689c4f617e81ce77097609feca1a24b` passed
+`npm ci` and `npm run check` but failed 2 of 91 PostgreSQL integration tests.
+Both failures were in predecessor upgrade tests whose exact migration lists still
+ended at 006. Those tests now expect additive migration 007 during a full
+upgrade, while retaining their checksum, record-preservation, and one-time
+application checks. This is a test expectation update for the new migration;
+the migration and runtime behavior are unchanged. The corrected checkout has
+not yet passed PostgreSQL integration or coordinator exact-SHA CI. In the
+authoring shell, Node 24 offline `npm ci`, type checking, architecture checks,
+the focused position contract/history tests, and `git diff --check` passed.
+`npm run check` stopped at the existing private-preview loopback test;
+`npm run test:postgres:local` could not start because `initdb` refuses root.
