@@ -1,0 +1,13 @@
+{
+  "flightId": "fl-synthetic-1",
+  "segments": [
+    [
+      { "latitude": 51.47, "longitude": -0.45, "observedAt": "2025-01-01T00:00:00Z", "source": "fixture-adsb" },
+      { "latitude": 51.50, "longitude": -0.30, "observedAt": "2025-01-01T00:00:05Z", "source": "fixture-adsb" }
+    ],
+    [
+      { "latitude": 52.00, "longitude": 1.00, "observedAt": "2025-01-01T00:10:00Z", "source": "fixture-adsb" }
+    ]
+  ],
+  "truncated": false
+}

@@ -1,0 +1,3 @@
+event: snapshot_required
+data: {"eventId":null,"type":"snapshot_required","occurredAt":"2025-01-01T00:05:00Z","sourceObservedAt":null,"data":{"reason":"cursor_expired","refresh":["/map/snapshot","/flights","/messages","/alert-events"]}}
+

@@ -1,0 +1,22 @@
+{
+  "id": "msg-synthetic-1",
+  "source": "fixture-airframes",
+  "sourceMessageRef": "synthetic-ref-1",
+  "observedAt": "2025-01-01T00:04:00Z",
+  "collectedAt": "2025-01-01T00:04:03Z",
+  "direction": "downlink",
+  "bearer": "vhf",
+  "protocol": "ACARS",
+  "contentStatus": "provider_decoded",
+  "originalText": "SYNTHETIC TEST ONLY",
+  "hints": { "callsign": { "value": "UAL52", "certainty": "observed", "source": "fixture-airframes" } },
+  "association": {
+    "outcome": "ambiguous",
+    "aircraftId": null,
+    "flightId": null,
+    "candidates": ["ac-synthetic-1", "ac-synthetic-2"],
+    "evidence": [{ "reason": "conflicting source assertions" }]
+  },
+  "reception": null,
+  "decoderResults": []
+}

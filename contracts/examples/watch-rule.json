@@ -1,0 +1,18 @@
+{
+  "id": "wr-synthetic-1",
+  "name": "Synthetic UAL watch",
+  "status": "active",
+  "scope": "targeted",
+  "groups": [
+    {
+      "mode": "any",
+      "criteria": [
+        { "kind": "callsign", "value": "UAL*" },
+        { "kind": "icao24", "value": "A1B2C3" }
+      ]
+    }
+  ],
+  "collection": { "positions": true, "messages": false, "decoderIds": [] },
+  "createdAt": "2025-01-01T00:00:00Z",
+  "updatedAt": "2025-01-01T00:00:00Z"
+}
