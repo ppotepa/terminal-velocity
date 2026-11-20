@@ -43,6 +43,8 @@ export function classifyFile(project, file) {
   if (!workspace) return { zone: 'outside', workspace: null, unit: null, layer: null };
   const relative = slash(path.relative(path.join(workspace.directory, 'src'), file));
   if (workspace.name === '@airframes/api') return { zone: 'api', workspace, relative, unit: 'api', layer: 'api' };
+  if (workspace.name === '@airframes/web') return { zone: 'web', workspace, relative,
+    unit: relative.split('/')[0], layer: 'web' };
   if (workspace.name !== '@airframes/backend') return { zone: 'unknown', workspace, relative, unit: null, layer: null };
   if (relative.startsWith('kernel/')) return { zone: 'kernel', workspace, relative, unit: 'kernel', layer: 'kernel' };
   if (relative.startsWith('contracts/')) return { zone: 'contracts', workspace, relative, unit: 'contracts', layer: 'contracts' };

@@ -13,7 +13,12 @@ export function checkDependencyPolicy(project, fromFile, resolution) {
   if (from.zone === 'backend' && !coreLayers.has(from.layer)) {
     return failure('UNKNOWN_LAYER', `Backend layer ${from.layer} has no architecture policy.`);
   }
+  if (resolution.kind === 'asset') return from.zone === 'web' ? null
+    : failure('ASSET_DEPENDENCY', 'Only web source may import stylesheets.');
   if (resolution.kind === 'external') {
+    if (from.zone === 'web' && resolution.builtin) {
+      return failure('WEB_BUILTIN', 'Browser source cannot depend on Node builtins.');
+    }
     if (from.zone === 'kernel' || from.zone === 'contracts' || pureLayers.has(from.layer)) {
       return failure('IMPURE_DEPENDENCY', `${from.zone}/${from.layer} cannot depend on ${resolution.packageName}, including type-only imports.`);
     }
@@ -38,6 +43,8 @@ export function checkDependencyPolicy(project, fromFile, resolution) {
     return null;
   }
   if (from.zone === 'api') return null;
+  if (from.zone === 'web') return to.zone === 'web' ? null
+    : failure('WEB_DEPENDENCY', 'Web source may import only its own workspace.');
   if (from.zone === 'kernel') return to.zone === 'kernel' ? null
     : failure('KERNEL_DEPENDENCY', 'Kernel may depend only on kernel.');
   if (from.zone === 'contracts') return ['kernel', 'contracts'].includes(to.zone) ? null

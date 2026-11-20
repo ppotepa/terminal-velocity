@@ -1,6 +1,16 @@
-# Terminal Velocity — implementation status, Stage 2
+# Terminal Velocity — implementation status
 
-### S4-07 private bbox map snapshot (issue #20, in progress)
+### S4-08 private web shell (issue #21, in progress)
+
+The new React/Vite workspace uses one light-mode token set, reusable accessible
+controls, URL-backed navigation/selection/filter state and a typed private map
+API client. It presents a responsive shell with explicit loading, empty and
+error states; no markers, flight list or live receiver claims appear. The
+architecture checker now recognizes web source and blocks cross-workspace
+imports and Node builtins. Root checks include web types, lint, unit tests and
+build; local Playwright layout and accessibility verification is in progress.
+
+### S4-07 private bbox map snapshot (issue #20, merged PR #70)
 
 Migration 018 maintains compact map coordinates from confirmed current-position
 heads and per-protocol status from synthetic Stage 2 contributions. The private
@@ -11,8 +21,10 @@ prior page cursor. Position freshness, synthetic message freshness, coverage
 and real-feed health remain independent. No message contents or private
 provider contribution statuses enter the map row or response. The original six
 demo endpoints remain intact. This is a local prototype without authentication
-or publication policy; Stage 5 owns those controls. Local verification and
-review are in progress.
+or publication policy; Stage 5 owns those controls. PR #70 merged as `e400f95`;
+exact head and merge SHA passed local Node 24 checks (34 script, 203 backend,
+32 API), PostgreSQL 17.12 (135), message tests (41), browser tests (26), demo
+and smoke. Hosted CI remains a separate #49 gate.
 
 ### S4-06 observed aircraft tracks (issue #19, merged PR #69)
 

@@ -1,10 +1,10 @@
 # Terminal Velocity
 
-A backend for an application that connects an aircraft map with aircraft radio messages. The project uses a modular monolith: small domain modules, SRP, explicit ports, and controlled dependencies.
+A private local prototype that connects aircraft positions with associated radio-message status. The project uses small domain modules, explicit ports, controlled dependencies and a React web shell.
 
 Repository: [ppotepa/terminal-velocity](https://github.com/ppotepa/terminal-velocity). Earlier design documents use the working name Airframes Tracker; internal packages retain the `@airframes` namespace. All project-authored documentation and text use English.
 
-**Stage 2: durable message flow.** The API accepts synthetic messages, correlates them with aircraft, and exposes message availability for the future map. PostgreSQL mode persists message facts, decision history, outbox deliveries, consumer receipts, and availability contributions across restarts. Memory mode remains the default for a quick demonstration. Positions are fixtures in both modes.
+The API accepts synthetic messages and exposes separate position and message status. PostgreSQL mode persists message facts and private position projections; memory mode remains a quick three-aircraft demonstration. The web shell is local and synthetic. MapLibre markers, public authentication and publication policy are later stages.
 
 ## Quick start — memory mode
 
@@ -17,6 +17,10 @@ npm start
 ```
 
 The API listens on `http://127.0.0.1:3000`. Set `PORT` to use a different port. The host is fixed because the demonstrator does not yet provide production authentication or a publication policy.
+
+To open the private web shell, leave the API on port 3000 and run
+`npm run dev --workspace=@airframes/web` in another terminal. Visit
+`http://127.0.0.1:5173`. See [WEB.md](docs/WEB.md) for scope and checks.
 
 For persistent storage, follow [PostgreSQL setup](docs/POSTGRES.md). It provides a local Compose database, explicit migrations, a separate runtime login, and startup with `STORAGE_DRIVER=postgres`. The API reads exported environment variables; it does not load an `.env` file automatically.
 
@@ -53,6 +57,7 @@ Freshness uses **observation time**, including for historical data. Expired stat
 | `packages/backend/src/modules/event-delivery` | Fan-out, fenced leases, retries, inbox deduplication, and acknowledgment |
 | `packages/backend/src/demo` | Synthetic scenario composition, memory/PostgreSQL adapters, and DTOs |
 | `apps/api/src` | HTTP transport, routing, process configuration, and shutdown |
+| `apps/web/src` | Private React shell, reusable controls and typed API client |
 | `db/migrations` | Executable, checksummed PostgreSQL migrations and schema ownership |
 | `scripts/postgres` | Migration CLI and isolated real-database test harness |
 | `scripts/architecture` | Dependency checks using the TypeScript AST and violation tests |
@@ -64,7 +69,9 @@ Granularity follows code responsibilities. Each file does not require a separate
 
 | Command | Scope |
 |---|---|
-| `npm run check` | Strict type checking, module boundaries, and database-independent tests |
+| `npm run check` | Strict types, module boundaries, web lint/build and database-independent tests |
+| `npm run build:web` | Production asset build for the private web shell |
+| `npm run test:browser` | Local Chromium browser checks, including the web shell |
 | `npm run typecheck` | TypeScript verification with `tsc` |
 | `npm run check:boundaries` | Static dependency and cycle checks |
 | `npm test` | Domain, API scenario, and architecture checker tests |
@@ -83,4 +90,4 @@ The GitHub Actions workflow is configured to run the checks and real PostgreSQL 
 
 [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) distinguishes implemented behavior from the target architecture. [MASTER_IMPLEMENTATION_PLAN.md](docs/MASTER_IMPLEMENTATION_PLAN.md) is the complete issue-by-issue, code-first agent execution plan (48 tasks; hosted CI/CD postponed). [ROADMAP.md](docs/ROADMAP.md) describes the next slices: one real connector, positions and map reads, publication scope, and incremental updates.
 
-The current stage does not include real ADS-B/Airframes sources, a complete RF decoder, reassembly, a map frontend, or production access/publication controls. Durable availability currently has one fixed synthetic visibility scope. The SQL and JSON Schema files under `docs/architecture` remain historical target designs; executable schema lives under `db/migrations`. Public deployment requires the access and publication layers first.
+The current stage does not include approved real ADS-B/Airframes retention, a complete RF decoder, reassembly, map markers, or production access/publication controls. Durable availability currently has one fixed synthetic visibility scope. The SQL and JSON Schema files under `docs/architecture` remain historical target designs; executable schema lives under `db/migrations`. Public deployment requires the access and publication layers first.
