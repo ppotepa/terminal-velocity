@@ -24,8 +24,8 @@ export interface PositionAdapter<TRaw, TContext extends PositionParseContext = P
 }
 
 /** Revalidates adapter output so an adapter cannot bypass the canonical or configured source boundary. */
-export function acceptPositionObservation<TRaw>(
-  adapter: PositionAdapter<TRaw, PositionAdapterContext>, raw: TRaw, context: PositionAdapterContext,
+export function acceptPositionObservation<TRaw, TContext extends PositionAdapterContext>(
+  adapter: PositionAdapter<TRaw, TContext>, raw: TRaw, context: TContext,
 ): Result<PositionObservation, PositionParseError | PositionCapabilityError> {
   if (context.sourceId !== context.capabilities.sourceId)
     return err({ code: 'UNSUPPORTED_POSITION_CAPABILITY', field: 'sourceId' });

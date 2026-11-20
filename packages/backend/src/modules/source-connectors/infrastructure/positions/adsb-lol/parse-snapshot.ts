@@ -1,6 +1,8 @@
 import { err, ok, type Result } from '../../../../../kernel/result.ts';
-import type {
-  PositionObservation, PositionParseError, PositionSourceId, UtcTimestamp,
+import {
+  acceptPositionObservation, type PositionObservation, type PositionParseError,
+  type PositionSourceId, type PositionSourceCapabilities, type PositionCapabilityError,
+  type UtcTimestamp,
 } from '../../../../flight-tracking/public/index.ts';
 import { adsbLolPositionAdapter } from './parse-aircraft.ts';
 import type { AdsbLolPositionQuery } from './query.ts';
@@ -36,7 +38,7 @@ export interface AdsbLolPositionBatch {
 export type AdsbLolSnapshotError =
   | { readonly code: 'INVALID_RESPONSE'; readonly field: string }
   | { readonly code: 'SOURCE_REPORTED_FAILURE'; readonly message: string }
-  | { readonly code: 'INVALID_AIRCRAFT'; readonly index: number; readonly error: PositionParseError }
+  | { readonly code: 'INVALID_AIRCRAFT'; readonly index: number; readonly error: PositionParseError | PositionCapabilityError }
   | { readonly code: 'DUPLICATE_OBSERVATION_ID'; readonly index: number };
 
 type PlainRecord = Record<string, unknown>;
@@ -80,6 +82,7 @@ function distanceNm(aLat: number, aLon: number, bLat: number, bLon: number): num
 
 export interface ParseAdsbLolSnapshotContext {
   readonly sourceId: PositionSourceId;
+  readonly capabilities: PositionSourceCapabilities;
   readonly fetchedAt: string;
   readonly query: AdsbLolPositionQuery;
 }
@@ -127,8 +130,9 @@ export function parseAdsbLolPositionSnapshot(
       noPositionCount += 1;
       continue;
     }
-    const parsed = adsbLolPositionAdapter.parse(raw, {
+    const parsed = acceptPositionObservation(adsbLolPositionAdapter, raw, {
       sourceId: context.sourceId,
+      capabilities: context.capabilities,
       snapshotNowMs: now as number,
       ingestedAt: context.fetchedAt,
     });

@@ -23,13 +23,18 @@ import {
 } from '../src/modules/source-connectors/infrastructure/positions/adsb-lol/poller.ts';
 
 const SOURCE_ID = positionSourceId('src_adsblol-test').value;
+const CAPABILITIES = Object.freeze({
+  sourceId: SOURCE_ID,
+  measurementKinds: Object.freeze(['ADS_B', 'MLAT', 'OTHER']),
+  observedAtBases: Object.freeze(['SOURCE_AGE_FROM_REFERENCE']),
+});
 const FETCHED_AT = '2026-11-19T12:00:02.000Z';
 const QUERY = adsbLolPositionQuery({ latitude: 52.52, longitude: 13.405, radiusNm: 10 }).value;
 const FIXTURE = JSON.parse(await readFile(new URL('./fixtures/positions/adsb-lol-v2-synthetic.json', import.meta.url),
   'utf8'));
 
-function snapshot(input = FIXTURE) {
-  return parseAdsbLolPositionSnapshot(input, { sourceId: SOURCE_ID, fetchedAt: FETCHED_AT, query: QUERY });
+function snapshot(input = FIXTURE, capabilities = CAPABILITIES) {
+  return parseAdsbLolPositionSnapshot(input, { sourceId: SOURCE_ID, capabilities, fetchedAt: FETCHED_AT, query: QUERY });
 }
 
 function budget(options = {}) {
@@ -46,11 +51,12 @@ function jsonResponse(value, init = {}) {
 }
 
 function transport(response, options = {}) {
-  return createAdsbLolPositionTransportForTest(QUERY, SOURCE_ID, {
+  const { capabilities = CAPABILITIES, ...transportOptions } = options;
+  return createAdsbLolPositionTransportForTest(QUERY, SOURCE_ID, capabilities, {
     response,
     now: () => Date.parse(FETCHED_AT),
     requestBudget: budget(),
-    ...options,
+    ...transportOptions,
   });
 }
 
@@ -142,6 +148,42 @@ test('ground barometric state intentionally takes precedence over simultaneous g
     [{ kind: 'SURFACE', valueFt: null }]);
 });
 
+test('snapshot rejects provider measurements outside reviewed capabilities', async () => {
+  const restricted = { sourceId: SOURCE_ID, measurementKinds: ['ADS_B', 'MLAT'],
+    observedAtBases: ['SOURCE_AGE_FROM_REFERENCE'] };
+  const parsed = snapshot(FIXTURE, restricted);
+  assert.deepEqual(parsed.error, { code: 'INVALID_AIRCRAFT', index: 3,
+    error: { code: 'UNSUPPORTED_POSITION_CAPABILITY', field: 'measurementKind' } });
+  const result = await transport(jsonResponse(FIXTURE), { capabilities: restricted }).fetchNext();
+  assert.deepEqual(result.error, parsed.error);
+  const wrongTimeBasis = { ...CAPABILITIES, observedAtBases: ['SOURCE_TIMESTAMP'] };
+  assert.deepEqual(snapshot(FIXTURE, wrongTimeBasis).error, { code: 'INVALID_AIRCRAFT', index: 0,
+    error: { code: 'UNSUPPORTED_POSITION_CAPABILITY', field: 'observedAtBasis' } });
+  const configuredKinds = ['ADS_B', 'MLAT'];
+  const configured = transport(jsonResponse(FIXTURE), { capabilities: {
+    sourceId: SOURCE_ID, measurementKinds: configuredKinds,
+    observedAtBases: ['SOURCE_AGE_FROM_REFERENCE'],
+  } });
+  configuredKinds.push('OTHER');
+  assert.deepEqual((await configured.fetchNext()).error, parsed.error);
+});
+
+test('provider fields with wrong units or unit-bearing shapes are rejected', () => {
+  for (const [field, value] of [
+    ['gs', { value: 240, unit: 'km/h' }],
+    ['track', { value: 1.57, unit: 'radians' }],
+    ['alt_baro', { value: 1000, unit: 'meters' }],
+    ['alt_geom', '300 meters'],
+    ['rc', { value: 75, unit: 'feet' }],
+  ]) {
+    const malformed = structuredClone(FIXTURE);
+    malformed.ac[0][field] = value;
+    const parsed = snapshot(malformed);
+    assert.equal(parsed.ok, false, field);
+    assert.equal(parsed.error.code, 'INVALID_AIRCRAFT', field);
+  }
+});
+
 test('query constructor enforces the local geographic cap and creates only the provider point URL', () => {
   assert.equal(adsbLolPositionQuery({ latitude: -90, longitude: 180, radiusNm: 50 }).ok, true);
   for (const input of [
@@ -159,17 +201,17 @@ test('transport validates a JavaScript caller query before it can make a request
     { latitude: 52.52, longitude: 13.405, radiusNm: 51 },
     { latitude: 92, longitude: 13.405, radiusNm: 10 },
     { latitude: 52.52, longitude: Number.NaN, radiusNm: 10 },
-  ]) assert.throws(() => createAdsbLolPositionTransport(input, SOURCE_ID), RangeError);
-  assert.throws(() => createAdsbLolPositionTransport(QUERY, SOURCE_ID, {
+  ]) assert.throws(() => createAdsbLolPositionTransport(input, SOURCE_ID, CAPABILITIES), RangeError);
+  assert.throws(() => createAdsbLolPositionTransport(QUERY, SOURCE_ID, CAPABILITIES, {
     requestBudget: budget(),
   }), /cannot be overridden/u);
-  assert.throws(() => createAdsbLolPositionTransportForTest(QUERY, SOURCE_ID, {
+  assert.throws(() => createAdsbLolPositionTransportForTest(QUERY, SOURCE_ID, CAPABILITIES, {
     fetch: globalThis.fetch, response: jsonResponse(FIXTURE), requestBudget: budget(),
   }), /cannot accept a fetch function/u);
   for (const options of [
     { timeoutMs: 8_001 }, { timeoutMs: 2_147_483_647 },
     { maximumResponseBytes: 1_000_001 }, { maximumResponseBytes: Number.MAX_SAFE_INTEGER },
-  ]) assert.throws(() => createAdsbLolPositionTransport(QUERY, SOURCE_ID, options), RangeError);
+  ]) assert.throws(() => createAdsbLolPositionTransport(QUERY, SOURCE_ID, CAPABILITIES, options), RangeError);
 });
 
 test('snapshot parser rejects malformed envelope, source errors, coordinate pairs and time evidence', () => {
@@ -234,13 +276,13 @@ test('transport reads one bounded JSON snapshot and charges every attempted requ
 });
 
 test('transport shares its default in-process budget across independently created transports', async () => {
-  const left = createAdsbLolPositionTransport(QUERY, SOURCE_ID, {
+  const left = createAdsbLolPositionTransport(QUERY, SOURCE_ID, CAPABILITIES, {
     fetch: async () => jsonResponse(FIXTURE), now: () => Date.now(),
   });
-  const right = createAdsbLolPositionTransport(QUERY, SOURCE_ID, {
+  const right = createAdsbLolPositionTransport(QUERY, SOURCE_ID, CAPABILITIES, {
     fetch: async () => jsonResponse(FIXTURE), now: () => Date.now(),
   });
-  const forgedClock = createAdsbLolPositionTransport(QUERY, SOURCE_ID, {
+  const forgedClock = createAdsbLolPositionTransport(QUERY, SOURCE_ID, CAPABILITIES, {
     fetch: async () => jsonResponse(FIXTURE), now: () => Date.now() + 86_400_000,
   });
   assert.equal((await left.fetchNext()).ok, true);

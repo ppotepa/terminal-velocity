@@ -1,5 +1,5 @@
 import { err, ok, type Result } from '../../../../../kernel/result.ts';
-import type { PositionParseError, PositionSourceId } from '../../../../flight-tracking/public/index.ts';
+import type { PositionParseError, PositionCapabilityError, PositionSourceId, PositionSourceCapabilities } from '../../../../flight-tracking/public/index.ts';
 import {
   processPositionRequestBudget, type PositionRequestBudget,
 } from './request-budget.ts';
@@ -20,7 +20,7 @@ export type AdsbLolTransportError =
   | { readonly code: 'AUTHENTICATION_FAILURE'; readonly status: 401 | 403 }
   | { readonly code: 'INVALID_RESPONSE'; readonly field: string }
   | { readonly code: 'SOURCE_REPORTED_FAILURE'; readonly message: string }
-  | { readonly code: 'INVALID_AIRCRAFT'; readonly index: number; readonly error: PositionParseError }
+  | { readonly code: 'INVALID_AIRCRAFT'; readonly index: number; readonly error: PositionParseError | PositionCapabilityError }
   | { readonly code: 'DUPLICATE_OBSERVATION_ID'; readonly index: number }
   | { readonly code: 'ABORTED' };
 
@@ -167,16 +167,18 @@ function cancelResponseBody(response: Response): void {
 export function createAdsbLolPositionTransport(
   query: AdsbLolPositionQuery,
   sourceId: PositionSourceId,
+  capabilities: PositionSourceCapabilities,
   options: AdsbLolTransportOptions = {},
 ): AdsbLolPositionTransport {
   if ('requestBudget' in options || 'requestBudgetOptions' in options)
     throw new TypeError('Live transport budget cannot be overridden.');
-  return createTransport(query, sourceId, options, processPositionRequestBudget, Date.now);
+  return createTransport(query, sourceId, capabilities, options, processPositionRequestBudget, Date.now);
 }
 
 export function createAdsbLolPositionTransportForTest(
   query: AdsbLolPositionQuery,
   sourceId: PositionSourceId,
+  capabilities: PositionSourceCapabilities,
   options: AdsbLolTransportTestOptions,
 ): AdsbLolPositionTransport {
   if ('fetch' in options) throw new TypeError('Fixture transport cannot accept a fetch function.');
@@ -194,12 +196,13 @@ export function createAdsbLolPositionTransportForTest(
     }
     return options.response;
   };
-  return createTransport(query, sourceId, { ...options, fetch: fixtureFetch }, options.requestBudget, options.now ?? Date.now);
+  return createTransport(query, sourceId, capabilities, { ...options, fetch: fixtureFetch }, options.requestBudget, options.now ?? Date.now);
 }
 
 function createTransport(
   inputQuery: AdsbLolPositionQuery,
   sourceId: PositionSourceId,
+  capabilities: PositionSourceCapabilities,
   options: AdsbLolTransportOptions,
   budget: PositionRequestBudget,
   budgetClock: () => number,
@@ -207,6 +210,14 @@ function createTransport(
   const validated = adsbLolPositionQuery(inputQuery);
   if (!validated.ok) throw new RangeError(`Invalid position query: ${validated.error.field}.`);
   const query = validated.value;
+  if (!capabilities || capabilities.sourceId !== sourceId
+    || !Array.isArray(capabilities.measurementKinds) || !Array.isArray(capabilities.observedAtBases))
+    throw new TypeError('Reviewed source capabilities must match the transport source.');
+  const reviewedCapabilities: PositionSourceCapabilities = Object.freeze({
+    sourceId,
+    measurementKinds: Object.freeze([...capabilities.measurementKinds]),
+    observedAtBases: Object.freeze([...capabilities.observedAtBases]),
+  });
   const fetcher = options.fetch ?? globalThis.fetch;
   const clock = options.now ?? Date.now;
   const timeoutMs = options.timeoutMs ?? ADSB_LOL_REQUEST_TIMEOUT_MS;
@@ -278,7 +289,7 @@ function createTransport(
         if (!body.ok) return err({ code: 'INVALID_RESPONSE', field: 'body' });
         const fetchedAt = toUtcIso(clock());
         if (!fetchedAt) return err({ code: 'INVALID_RESPONSE', field: 'local-clock' });
-        const parsed = parseAdsbLolPositionSnapshot(body.value, { sourceId, fetchedAt, query });
+        const parsed = parseAdsbLolPositionSnapshot(body.value, { sourceId, capabilities: reviewedCapabilities, fetchedAt, query });
         return parsed.ok ? ok(parsed.value) : err(snapshotError(parsed.error));
       } finally {
         clearTimeout(timeout);

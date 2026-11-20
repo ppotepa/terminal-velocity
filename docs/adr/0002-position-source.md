@@ -71,6 +71,18 @@ The returned batch includes the configured request limits and declares
 fetch time, consecutive failures, and the last error category. Those health
 fields do not refresh or override per-observation source time.
 
+The live transport requires an explicit reviewed `PositionSourceCapabilities`
+configuration for its source ID. Each positioned row passes through
+`acceptPositionObservation`, which revalidates the canonical observation and
+checks its measurement kind and time basis against that configuration. A
+provider type mapped to `OTHER` is rejected when `OTHER` is outside the
+configured capabilities. The private preview currently allows `ADS_B`, `MLAT`,
+and `OTHER` with `SOURCE_AGE_FROM_REFERENCE`; the configured capability set is
+local to that preview and does not grant public publication rights. Provider
+numeric fields are interpreted only in the documented units. Unit-bearing
+objects or strings in those fields are rejected; a bare but plausible number
+in an undocumented unit cannot be detected from the response alone.
+
 The explicit `npm run positions:preview -- --live --lat 52.52 --lon 13.405 --radius-nm 10`
 command starts an independent position poller and a JSON preview at
 `127.0.0.1:3001/positions`. It serves only canonical batches, binds only to

@@ -6,12 +6,17 @@ import { createAdsbLolPositionPoller } from '../../packages/backend/src/modules/
 
 const HOST = '127.0.0.1';
 const SOURCE_ID = positionSourceId('src_adsblol-private-preview').value;
+const CAPABILITIES = Object.freeze({
+  sourceId: SOURCE_ID,
+  measurementKinds: Object.freeze(['ADS_B', 'MLAT', 'OTHER']),
+  observedAtBases: Object.freeze(['SOURCE_AGE_FROM_REFERENCE']),
+});
 
 export async function startPrivatePositionPreview({ query, port = 0, transportFactory = createAdsbLolPositionTransport }) {
   const validated = adsbLolPositionQuery(query);
   if (!validated.ok) throw new RangeError(`Invalid preview query: ${validated.error.field}.`);
   if (!Number.isSafeInteger(port) || port < 0 || port > 65535) throw new RangeError('Invalid preview port.');
-  const transport = transportFactory(validated.value, SOURCE_ID);
+  const transport = transportFactory(validated.value, SOURCE_ID, CAPABILITIES);
   const poller = createAdsbLolPositionPoller(transport);
   let latest = null;
   const server = createServer((request, response) => {

@@ -10,8 +10,8 @@ const fixture = JSON.parse(await readFile(new URL('../../packages/backend/tests/
 const query = { latitude: 52.52, longitude: 13.405, radiusNm: 10 };
 
 test('private preview starts on loopback, serves canonical observations only, and shuts down', async () => {
-  const preview = await startPrivatePositionPreview({ query, transportFactory: (positionQuery, sourceId) =>
-    createAdsbLolPositionTransportForTest(positionQuery, sourceId, {
+  const preview = await startPrivatePositionPreview({ query, transportFactory: (positionQuery, sourceId, capabilities) =>
+    createAdsbLolPositionTransportForTest(positionQuery, sourceId, capabilities, {
       response: new Response(JSON.stringify(fixture), {
         headers: { 'content-type': 'application/json' },
       }),

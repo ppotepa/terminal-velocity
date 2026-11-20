@@ -247,6 +247,10 @@ The `feature/s4-02-adsblol-position-source` branch adds an adsb.lol v2 point/rad
 
 The source decision in [`adr/0002-position-source.md`](adr/0002-position-source.md) permits private/local use under ODbL 1.0 only. The explicit `positions:preview` command now composes the live adapter with a loopback-only, in-memory JSON preview; the demo API still does not start it. The live transport validates its query at construction and always uses the process-shared quota policy. An explicit fixture factory supplies an isolated budget for offline tests. The parser rejects out-of-query-area rows, and deliberately favors `SURFACE` over simultaneous numeric geometric altitude under schema v1. The fixture is synthetic; no database migration, public API/UI wiring, or persistent storage was added. Public use/deployment remains NO-GO pending Stage 5 publication controls and issue #46 licensing review.
 
+The review follow-up routes positioned rows through the S4-01 `acceptPositionObservation` boundary with explicit reviewed source capabilities. Provider types or time bases outside that configuration reject the snapshot. Synthetic regression tests cover this boundary and malformed unit-bearing speed, track, altitude, and quality fields. These offline checks do not establish current provider access or rights acceptance for the reviewed commit; an authorized live check remains an external acceptance gate.
+
+For this follow-up, Node 24.22.3 `npm ci --offline --ignore-scripts --no-audit --no-fund`, typechecking, the architecture boundary check, and all 17 backend test files passed. `npm run check` stopped in the private-preview suite because this shell rejects loopback `listen` with `EPERM` on `127.0.0.1`; the two tests that require a server failed for that reason. The preview's two argument-only tests passed. Exact-commit coordinator CI must run the full suite in its permitted isolated environment. No live provider request or rights recheck was performed in this follow-up.
+
 Local verification used Node.js **24.22.3** and Debian PostgreSQL **17.12**:
 
 | Command | Result |

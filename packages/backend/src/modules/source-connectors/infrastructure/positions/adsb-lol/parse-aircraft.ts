@@ -1,11 +1,11 @@
 import { err, type Result } from '../../../../../kernel/result.ts';
 import {
   parsePositionObservation,
-  type PositionAdapter, type PositionObservation, type PositionParseContext,
+  type PositionAdapter, type PositionObservation, type PositionAdapterContext,
   type PositionParseError, type PositionSourceId,
 } from '../../../../flight-tracking/public/index.ts';
 
-export type AdsbLolAircraftContext = PositionParseContext & {
+export type AdsbLolAircraftContext = PositionAdapterContext & {
   readonly sourceId: PositionSourceId;
   readonly snapshotNowMs: number;
 };
