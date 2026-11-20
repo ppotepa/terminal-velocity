@@ -173,5 +173,11 @@ These limits support a private/local preview only under
 authorize public display or deployment.
 
 The provider response fixture is synthetic and offline. S4-02 adds no database,
-API route, map, or automatic poller wiring. A later composition root must opt in
-explicitly and keep any preview private until publication policy is approved.
+map, or automatic poller wiring. The explicit private preview command is the
+composition root for this adapter:
+`npm run positions:preview -- --live --lat 52.52 --lon 13.405 --radius-nm 10`.
+It binds to `127.0.0.1` only and
+serves the latest canonical batch at `/positions` in memory. It does not start
+with the demo API or messages command. A later issue owns persistence and
+publication controls. The provider's geographic circle is checked for every
+positioned row; an out-of-query-area row rejects the snapshot.

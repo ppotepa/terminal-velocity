@@ -4,7 +4,7 @@ import type {
 } from '../../../../flight-tracking/public/index.ts';
 import { adsbLolPositionAdapter } from './parse-aircraft.ts';
 import type { AdsbLolPositionQuery } from './query.ts';
-import { ADSB_LOL_MAX_RADIUS_NM } from './query.ts';
+import { ADSB_LOL_MAX_RADIUS_NM, adsbLolPositionQuery } from './query.ts';
 import {
   ADSB_LOL_MAX_REQUESTS_PER_WINDOW, ADSB_LOL_MINIMUM_INTERVAL_MS, ADSB_LOL_ROLLING_WINDOW_MS,
 } from './request-budget.ts';
@@ -69,6 +69,15 @@ function utcIsoFromMilliseconds(input: unknown): UtcTimestamp | null {
   }
 }
 
+function distanceNm(aLat: number, aLon: number, bLat: number, bLon: number): number {
+  const radians = Math.PI / 180;
+  const latitudeDelta = (bLat - aLat) * radians;
+  const longitudeDelta = (bLon - aLon) * radians;
+  const haversine = Math.sin(latitudeDelta / 2) ** 2
+    + Math.cos(aLat * radians) * Math.cos(bLat * radians) * Math.sin(longitudeDelta / 2) ** 2;
+  return 3440.065 * 2 * Math.asin(Math.min(1, Math.sqrt(haversine)));
+}
+
 export interface ParseAdsbLolSnapshotContext {
   readonly sourceId: PositionSourceId;
   readonly fetchedAt: string;
@@ -82,6 +91,8 @@ export function parseAdsbLolPositionSnapshot(
 ): Result<AdsbLolPositionBatch, AdsbLolSnapshotError> {
   const record = plainRecord(input);
   if (!record) return err({ code: 'INVALID_RESPONSE', field: 'envelope' });
+  const query = adsbLolPositionQuery(context.query);
+  if (!query.ok) return err({ code: 'INVALID_RESPONSE', field: `query.${query.error.field}` });
   const aircraft = record['ac'];
   const now = record['now'];
   const cachedAtMs = record['ctime'];
@@ -126,6 +137,10 @@ export function parseAdsbLolPositionSnapshot(
       continue;
     }
     if (!parsed.ok) return err({ code: 'INVALID_AIRCRAFT', index, error: parsed.error });
+    if (distanceNm(query.value.latitude, query.value.longitude,
+      parsed.value.latitude, parsed.value.longitude) > query.value.radiusNm)
+      return err({ code: 'INVALID_AIRCRAFT', index,
+        error: { code: 'INVALID_INPUT', field: 'query-area' } });
     if (observationIds.has(parsed.value.sourceObservationId))
       return err({ code: 'DUPLICATE_OBSERVATION_ID', index });
     observationIds.add(parsed.value.sourceObservationId);

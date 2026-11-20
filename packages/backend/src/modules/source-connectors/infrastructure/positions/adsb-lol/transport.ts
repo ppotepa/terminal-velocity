@@ -1,10 +1,10 @@
 import { err, ok, type Result } from '../../../../../kernel/result.ts';
 import type { PositionParseError, PositionSourceId } from '../../../../flight-tracking/public/index.ts';
 import {
-  createPositionRequestBudget, processPositionRequestBudget, type PositionRequestBudget, type RequestBudgetOptions,
+  processPositionRequestBudget, type PositionRequestBudget,
 } from './request-budget.ts';
 import type { AdsbLolPositionQuery } from './query.ts';
-import { adsbLolPointUrl } from './query.ts';
+import { adsbLolPointUrl, adsbLolPositionQuery } from './query.ts';
 import { parseAdsbLolPositionSnapshot, type AdsbLolPositionBatch, type AdsbLolSnapshotError } from './parse-snapshot.ts';
 
 export const ADSB_LOL_REQUEST_TIMEOUT_MS = 8_000;
@@ -32,10 +32,13 @@ export interface AdsbLolPositionTransport {
 export interface AdsbLolTransportOptions {
   readonly fetch?: typeof globalThis.fetch;
   readonly now?: () => number;
-  readonly requestBudget?: PositionRequestBudget;
-  readonly requestBudgetOptions?: RequestBudgetOptions;
   readonly timeoutMs?: number;
   readonly maximumResponseBytes?: number;
+}
+
+/** Offline contract tests may replace the process budget; never pass this from a live composition root. */
+export interface AdsbLolTransportTestOptions extends AdsbLolTransportOptions {
+  readonly requestBudget: PositionRequestBudget;
 }
 
 function retryAfterMs(header: string | null, nowMs: number): number {
@@ -157,6 +160,29 @@ export function createAdsbLolPositionTransport(
   sourceId: PositionSourceId,
   options: AdsbLolTransportOptions = {},
 ): AdsbLolPositionTransport {
+  if ('requestBudget' in options || 'requestBudgetOptions' in options)
+    throw new TypeError('Live transport budget cannot be overridden.');
+  return createTransport(query, sourceId, options, processPositionRequestBudget);
+}
+
+export function createAdsbLolPositionTransportForTest(
+  query: AdsbLolPositionQuery,
+  sourceId: PositionSourceId,
+  options: AdsbLolTransportTestOptions,
+): AdsbLolPositionTransport {
+  if (!options.fetch) throw new Error('Test transport requires an injected fixture fetch.');
+  return createTransport(query, sourceId, options, options.requestBudget);
+}
+
+function createTransport(
+  inputQuery: AdsbLolPositionQuery,
+  sourceId: PositionSourceId,
+  options: AdsbLolTransportOptions,
+  budget: PositionRequestBudget,
+): AdsbLolPositionTransport {
+  const validated = adsbLolPositionQuery(inputQuery);
+  if (!validated.ok) throw new RangeError(`Invalid position query: ${validated.error.field}.`);
+  const query = validated.value;
   const fetcher = options.fetch ?? globalThis.fetch;
   const clock = options.now ?? Date.now;
   const timeoutMs = options.timeoutMs ?? ADSB_LOL_REQUEST_TIMEOUT_MS;
@@ -165,10 +191,6 @@ export function createAdsbLolPositionTransport(
     throw new RangeError('Request timeout must be a positive integer supported by the runtime timer.');
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1)
     throw new RangeError('Maximum response size must be a positive safe integer.');
-  const budget = options.requestBudget
-    ?? (options.requestBudgetOptions
-      ? createPositionRequestBudget(options.requestBudgetOptions)
-      : processPositionRequestBudget);
 
   return Object.freeze({
     async fetchNext(signal?: AbortSignal): Promise<Result<AdsbLolPositionBatch, AdsbLolTransportError>> {

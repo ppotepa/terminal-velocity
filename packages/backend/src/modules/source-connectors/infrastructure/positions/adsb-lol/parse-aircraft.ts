@@ -99,6 +99,8 @@ export const adsbLolPositionAdapter: PositionAdapter<unknown, AdsbLolAircraftCon
     if (geometric !== undefined && geometric !== null
       && (typeof geometric !== 'number' || !Number.isFinite(geometric)))
       return err({ code: 'INVALID_INPUT', field: 'alt_geom' });
+    // The canonical contract forbids SURFACE and a numeric altitude in one observation.
+    // Keep the explicit ground state; the provider's simultaneous geometric value is ambiguous.
     const altitudes = barometric === 'ground'
       ? [{ kind: 'SURFACE', valueFt: null }]
       : [

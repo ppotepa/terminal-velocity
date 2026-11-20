@@ -245,7 +245,7 @@ denies loopback binds (`listen EPERM` on 127.0.0.1).
 
 The `feature/s4-02-adsblol-position-source` branch adds an adsb.lol v2 point/radius parser and bounded HTTPS transport over the S4-01 observation contract. It maps age-derived timestamps, ADS-B/MLAT/other source types, coordinates, tagged altitude and track, optional measurements, ICAO ID hints, and source quality. Rows with only source-local IDs are counted as unresolved and omitted from canonical output. Snapshot coverage is explicitly sampled with unknown completeness. The transport has an 8-second timeout, 1 MB response limit, 50 NM radius cap, and a process-shared budget of one request per 10 minutes and 200 per rolling 24 hours. Its explicit poller honors `Retry-After`, uses capped exponential backoff, exposes separate transport health, and stops cleanly on abort. Creation alone never polls.
 
-The source decision in [`adr/0002-position-source.md`](adr/0002-position-source.md) permits private/local use under ODbL 1.0 only. The fixture is synthetic, no database/API/UI wiring or persistent storage was added, and public use/deployment remains NO-GO pending Stage 5 publication controls and issue #46 licensing review.
+The source decision in [`adr/0002-position-source.md`](adr/0002-position-source.md) permits private/local use under ODbL 1.0 only. The explicit `positions:preview` command now composes the live adapter with a loopback-only, in-memory JSON preview; the demo API still does not start it. The live transport validates its query at construction and always uses the process-shared quota policy. An explicit fixture factory supplies an isolated budget for offline tests. The parser rejects out-of-query-area rows, and deliberately favors `SURFACE` over simultaneous numeric geometric altitude under schema v1. The fixture is synthetic; no database migration, public API/UI wiring, or persistent storage was added. Public use/deployment remains NO-GO pending Stage 5 publication controls and issue #46 licensing review.
 
 Local verification used Node.js **24.22.3** and Debian PostgreSQL **17.12**:
 
@@ -262,3 +262,19 @@ Local verification used Node.js **24.22.3** and Debian PostgreSQL **17.12**:
 S4-02 has no SQL change, so PostgreSQL was run as repository regression verification only. The ephemeral cluster bound to loopback and was removed by the harness; the system PostgreSQL service remains inactive. Manual source checks were two outbound HTTPS requests and opened no local listener. Issue #15 is IN REVIEW in [PR #57](https://github.com/ppotepa/terminal-velocity/pull/57), based on merged [S4-01 PR #56](https://github.com/ppotepa/terminal-velocity/pull/56) after reconciliation. Both GitHub Actions `verify` runs for commit `672d850` failed before any steps and provided no job logs; the exact cause is unknown. Local results are green; no remote CI pass is claimed. No deployment or public listener was started.
 
 After reconciling merged S4-01, offline `npm ci` and the focused backend position tests passed. `npm run typecheck` and architecture boundaries passed. The full `npm run check` passed backend tests but API loopback tests could not bind in this shell (`listen EPERM`); coordinator CI must establish the exact-SHA result. No new live provider request was made in this handoff.
+
+### S4-02 review follow-up (2026-11-20)
+
+The review follow-up adds the explicit private preview entry point and offline
+loopback test, constrains live transport construction and quota handling, adds
+out-of-query-area and reconnect cases, and records the ground/geometric altitude
+precedence. `npm ci --offline --ignore-scripts --no-audit --no-fund`, Node 24
+`npm run typecheck`, `npm run check:boundaries`, and the focused provider suite
+passed in this authoring checkout. `npm run check` reaches the new preview test,
+but this shell rejects `listen(127.0.0.1)` with `EPERM`; the test is not marked
+passing here. Coordinator isolated CI must run the exact head in an environment
+that permits loopback. No live provider call, deployment, SQL migration, or
+public listener was made for this follow-up. The private preview test uses only
+the synthetic provider fixture. Rollback is a code revert; no database rollback
+is needed. The source-rights decision remains repository-owner evidence, not
+independent confirmation by this follow-up.

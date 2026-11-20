@@ -16,6 +16,7 @@ import {
 } from '../src/modules/source-connectors/infrastructure/positions/adsb-lol/request-budget.ts';
 import {
   createAdsbLolPositionTransport,
+  createAdsbLolPositionTransportForTest,
 } from '../src/modules/source-connectors/infrastructure/positions/adsb-lol/transport.ts';
 import {
   createAdsbLolPositionPoller,
@@ -45,7 +46,7 @@ function jsonResponse(value, init = {}) {
 }
 
 function transport(fetcher, options = {}) {
-  return createAdsbLolPositionTransport(QUERY, SOURCE_ID, {
+  return createAdsbLolPositionTransportForTest(QUERY, SOURCE_ID, {
     fetch: fetcher,
     now: () => Date.parse(FETCHED_AT),
     requestBudget: budget(),
@@ -96,10 +97,17 @@ test('synthetic provider fixture maps ADS-B, MLAT, source age, optional fields a
   assert.equal('trackKind' in mlat, false);
   assert.equal(other.measurementKind, 'OTHER');
   assert.equal(other.measurementDetail, 'adsb.lol:future_source_type');
-  assert.equal(other.latitude, 13.405);
-  assert.equal(other.longitude, 52.52);
+  assert.equal(other.latitude, 52.523);
+  assert.equal(other.longitude, 13.408);
   assert.equal('altitudes' in other, false);
   assert.equal('trackDegrees' in other, false);
+});
+
+test('ground barometric state intentionally takes precedence over simultaneous geometric altitude', () => {
+  const withGeometry = structuredClone(FIXTURE);
+  withGeometry.ac[0].alt_geom = 300;
+  assert.deepEqual(snapshot(withGeometry).value.observations[0].altitudes,
+    [{ kind: 'SURFACE', valueFt: null }]);
 });
 
 test('query constructor enforces the local geographic cap and creates only the provider point URL', () => {
@@ -112,6 +120,17 @@ test('query constructor enforces the local geographic cap and creates only the p
     { latitude: 0, longitude: 0, radiusNm: 1, apiKey: 'not-accepted' },
   ]) assert.equal(adsbLolPositionQuery(input).ok, false);
   assert.equal(adsbLolPointUrl(QUERY), 'https://api.adsb.lol/v2/lat/52.52/lon/13.405/dist/10');
+});
+
+test('transport validates a JavaScript caller query before it can make a request', () => {
+  for (const input of [
+    { latitude: 52.52, longitude: 13.405, radiusNm: 51 },
+    { latitude: 92, longitude: 13.405, radiusNm: 10 },
+    { latitude: 52.52, longitude: Number.NaN, radiusNm: 10 },
+  ]) assert.throws(() => createAdsbLolPositionTransport(input, SOURCE_ID), RangeError);
+  assert.throws(() => createAdsbLolPositionTransport(QUERY, SOURCE_ID, {
+    requestBudget: budget(),
+  }), /cannot be overridden/u);
 });
 
 test('snapshot parser rejects malformed envelope, source errors, coordinate pairs and time evidence', () => {
@@ -128,6 +147,10 @@ test('snapshot parser rejects malformed envelope, source errors, coordinate pair
   const invalidCoordinate = structuredClone(FIXTURE);
   invalidCoordinate.ac[0].lat = 90.1;
   assert.equal(snapshot(invalidCoordinate).error.code, 'INVALID_AIRCRAFT');
+  const swappedCoordinates = structuredClone(FIXTURE);
+  [swappedCoordinates.ac[0].lat, swappedCoordinates.ac[0].lon] =
+    [swappedCoordinates.ac[0].lon, swappedCoordinates.ac[0].lat];
+  assert.equal(snapshot(swappedCoordinates).error.error.field, 'query-area');
   const invalidTrack = structuredClone(FIXTURE);
   invalidTrack.ac[0].track = 360;
   assert.equal(snapshot(invalidTrack).error.code, 'INVALID_AIRCRAFT');
@@ -253,6 +276,24 @@ test('poller honors Retry-After, applies capped backoff and emits snapshots and 
   assert.equal(calls, 4);
   await poller.stop();
   assert.throws(() => poller.start(() => undefined), /only once/u);
+});
+
+test('poller reconnects after a disconnected transport and reports recovered health', async () => {
+  let calls = 0;
+  const events = [];
+  const poller = createAdsbLolPositionPoller({ fetchNext: async () => {
+    calls += 1;
+    if (calls === 1) return { ok: false, error: { code: 'TEMPORARY_FAILURE', retryAfterMs: 0 } };
+    return { ok: true, value: snapshot().value };
+  } }, { wait: async () => undefined });
+  await poller.start(event => {
+    events.push(event.type);
+    if (event.type === 'snapshot') void poller.stop();
+  });
+  assert.deepEqual(events, ['error', 'snapshot']);
+  assert.equal(calls, 2);
+  assert.equal(poller.health().consecutiveFailures, 0);
+  assert.equal(poller.health().lastErrorCode, null);
 });
 
 test('poller stop cancels an in-flight request and a pending wait without leaving a timer', async () => {
