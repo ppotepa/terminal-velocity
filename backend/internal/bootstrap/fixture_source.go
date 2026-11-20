@@ -32,6 +32,9 @@ import (
 type fixtureSource struct{}
 type fixtureObservation struct {
 	Callsign       string    `json:"callsign"`
+	Origin         string    `json:"origin"`
+	Destination    string    `json:"destination"`
+	RouteVia       []string  `json:"routeVia"`
 	ICAO24         string    `json:"icao24"`
 	Latitude       float64   `json:"latitude"`
 	Longitude      float64   `json:"longitude"`
@@ -77,7 +80,7 @@ func (fixtureSource) Fetch(ctx context.Context, q sources.Query) (sources.FetchR
 	if phase%2 == 1 {
 		lat, lon = 48.8566, 2.3522 // Paris, France.
 	}
-	value := fixtureObservation{Callsign: callsign, ICAO24: string(id), Latitude: lat, Longitude: lon, AltitudeMeters: 9800, GroundSpeedMPS: 225, HeadingDegrees: 90, ObservedAt: now, MessageText: "Q0 " + callsign + " MESSAGE: SYNTHETIC FIXTURE FLIGHT UPDATE"}
+	value := fixtureObservation{Callsign: callsign, ICAO24: string(id), Origin: "EGLL", Destination: "LFPG", RouteVia: []string{"DOV"}, Latitude: lat, Longitude: lon, AltitudeMeters: 9800, GroundSpeedMPS: 225, HeadingDegrees: 90, ObservedAt: now, MessageText: "Q0 " + callsign + " MESSAGE: SYNTHETIC FIXTURE FLIGHT UPDATE"}
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return sources.FetchResult{}, err
@@ -120,6 +123,16 @@ func (c fixtureConsumer) Consume(ctx context.Context, q sources.Query, result so
 	}
 	aircraftID := fixtureAircraftID(item.Callsign)
 	flightID := fixtureFlightID(item.Callsign)
+	point := coregeo.GeoPoint{Latitude: item.Latitude, Longitude: item.Longitude}
+	countries := make([]string, 0)
+	if c.geography != nil {
+		for _, presence := range c.geography.CountriesAt(shared.Some(point)) {
+			countries = append(countries, string(presence.Code))
+		}
+	}
+	icao, _ := shared.NewICAO24(item.ICAO24)
+	callsign, _ := shared.NewCallsign(item.Callsign)
+	candidate := watch.Candidate{ICAO24: shared.Some(icao), Callsign: shared.Some(callsign), Origin: shared.Some(item.Origin), Destination: shared.Some(item.Destination), RouteVia: item.RouteVia, RouteViaKnown: true, Areas: countries, CountryCodes: shared.Some(countries), AltitudeMeters: shared.Some(item.AltitudeMeters), Position: shared.Some(point), ObservedPath: []coregeo.GeoPoint{point}, ObservedPathKnown: true, Protocols: []string{"ACARS"}}
 	active := []watchapp.StoredRule{}
 	messageRuleIDs := []shared.WatchRuleID{}
 	decoderSet := map[coredecode.DecoderID]bool{}
@@ -130,6 +143,10 @@ func (c fixtureConsumer) Consume(ctx context.Context, q sources.Query, result so
 			return fmt.Errorf("load authorized WatchRule: %w", err)
 		}
 		if rule.Rule.Status != watch.StatusActive {
+			continue
+		}
+		if matched := watch.MatchWatchCriteria(rule.Rule, candidate); matched.Status != watch.Match {
+			// Unknown evidence and confirmed non-matches never start collection.
 			continue
 		}
 		active = append(active, rule)

@@ -63,6 +63,12 @@ paths:
               groups:
                 - mode: any
                   criteria: [{ kind: callsign, value: UAL* }, { kind: icao24, value: A1B2C3 }]
+              filters:
+                countryCodes: [FR]
+                altitudeMeters: { min: 9000, max: 11000 }
+                route: { origin: EGLL, destination: LFPG, via: [DOV] }
+                geofence: { type: Polygon, coordinates: [[[-1, 48], [5, 48], [5, 52], [-1, 52], [-1, 48]]] }
+                flightPath: { type: LineString, coordinates: [[-0.1, 51.5], [2.35, 48.85]], widthMeters: 50000 }
               collection: { positions: true, messages: false, decoderIds: [] }
       responses:
         '201':
@@ -561,6 +567,7 @@ components:
         groups: { type: array, maxItems: 32, items: { $ref: '#/components/schemas/CriteriaGroup' } }
         window: { type: [object, 'null'], properties: { start: { type: string, format: date-time }, end: { type: string, format: date-time } }, required: [start, end], additionalProperties: false }
         discovery: { type: [object, 'null'], properties: { areaId: { type: string }, maxCandidates: { type: integer, minimum: 1, maximum: 1000 } }, required: [areaId, maxCandidates], additionalProperties: false }
+        filters: { $ref: '#/components/schemas/WatchRuleFilters' }
         collection: { $ref: '#/components/schemas/CollectionPreferences' }
     WatchRule:
       allOf:
@@ -577,6 +584,50 @@ components:
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/WatchRule' } }
         nextCursor: { type: [string, 'null'] }
+    GeoJSONPosition:
+      type: array
+      minItems: 2
+      maxItems: 2
+      items: { type: number }
+      description: Coordinate pair in GeoJSON longitude, latitude order.
+    WatchRuleFilters:
+      type: object
+      description: >-
+        Evidence filters applied only after a selected Watch Rule has produced
+        a bounded source result. These filters never create a broad query.
+      additionalProperties: false
+      properties:
+        countryCodes: { type: array, maxItems: 100, uniqueItems: true, items: { type: string, pattern: '^[A-Z]{2}$' } }
+        altitudeMeters:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            min: { type: number, minimum: -1000, maximum: 30000 }
+            max: { type: number, minimum: -1000, maximum: 30000 }
+        route:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            origin: { type: string, pattern: '^[A-Z0-9]{3,4}$' }
+            destination: { type: string, pattern: '^[A-Z0-9]{3,4}$' }
+            via: { type: array, maxItems: 10, items: { type: string, pattern: '^[A-Z0-9]{3,4}$' } }
+        geofence:
+          type: object
+          required: [type, coordinates]
+          additionalProperties: false
+          properties:
+            type: { const: Polygon }
+            coordinates: { type: array, minItems: 1, maxItems: 32, items: { type: array, minItems: 4, maxItems: 2000, items: { $ref: '#/components/schemas/GeoJSONPosition' } } }
+        flightPath:
+          type: object
+          required: [type, coordinates, widthMeters]
+          additionalProperties: false
+          properties:
+            type: { const: LineString }
+            coordinates: { type: array, minItems: 2, maxItems: 2000, items: { $ref: '#/components/schemas/GeoJSONPosition' } }
+            widthMeters: { type: number, exclusiveMinimum: 0, maximum: 100000 }
     IdentifierAssertion:
       type: object
       required: [kind, value, validFrom, source]
