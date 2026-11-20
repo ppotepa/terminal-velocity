@@ -1,15 +1,14 @@
 import { err, ok, type Result } from '../../../../../kernel/result.ts';
-import type { PositionParseError, PositionSourceId } from '../../../../flight-tracking/public/index.ts';
+import type { PositionParseError, PositionCapabilityError, PositionSourceId, PositionSourceCapabilities } from '../../../../flight-tracking/public/index.ts';
 import {
-  createPositionRequestBudget, processPositionRequestBudget, type PositionRequestBudget, type RequestBudgetOptions,
+  processPositionRequestBudget, type PositionRequestBudget,
 } from './request-budget.ts';
 import type { AdsbLolPositionQuery } from './query.ts';
-import { adsbLolPointUrl } from './query.ts';
+import { adsbLolPointUrl, adsbLolPositionQuery } from './query.ts';
 import { parseAdsbLolPositionSnapshot, type AdsbLolPositionBatch, type AdsbLolSnapshotError } from './parse-snapshot.ts';
 
 export const ADSB_LOL_REQUEST_TIMEOUT_MS = 8_000;
 export const ADSB_LOL_MAX_RESPONSE_BYTES = 1_000_000;
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export type AdsbLolTransportError =
   | { readonly code: 'MINIMUM_INTERVAL'; readonly retryAfterMs: number }
@@ -21,7 +20,7 @@ export type AdsbLolTransportError =
   | { readonly code: 'AUTHENTICATION_FAILURE'; readonly status: 401 | 403 }
   | { readonly code: 'INVALID_RESPONSE'; readonly field: string }
   | { readonly code: 'SOURCE_REPORTED_FAILURE'; readonly message: string }
-  | { readonly code: 'INVALID_AIRCRAFT'; readonly index: number; readonly error: PositionParseError }
+  | { readonly code: 'INVALID_AIRCRAFT'; readonly index: number; readonly error: PositionParseError | PositionCapabilityError }
   | { readonly code: 'DUPLICATE_OBSERVATION_ID'; readonly index: number }
   | { readonly code: 'ABORTED' };
 
@@ -32,10 +31,14 @@ export interface AdsbLolPositionTransport {
 export interface AdsbLolTransportOptions {
   readonly fetch?: typeof globalThis.fetch;
   readonly now?: () => number;
-  readonly requestBudget?: PositionRequestBudget;
-  readonly requestBudgetOptions?: RequestBudgetOptions;
   readonly timeoutMs?: number;
   readonly maximumResponseBytes?: number;
+}
+
+/** A prebuilt response has no network capability; fixture tests may use an isolated budget. */
+export interface AdsbLolTransportTestOptions extends Omit<AdsbLolTransportOptions, 'fetch'> {
+  readonly requestBudget: PositionRequestBudget;
+  readonly response: Response | 'REJECT' | 'WAIT_FOR_ABORT';
 }
 
 function retryAfterMs(header: string | null, nowMs: number): number {
@@ -104,16 +107,16 @@ async function readBoundedJson(
       if (!value) return err('response body chunk is empty');
       size += value.byteLength;
       if (size > maximumBytes) {
-        await reader.cancel().catch(() => undefined);
+        cancelReader(reader);
         return err('response body exceeds the configured byte limit');
       }
       chunks.push(value);
     }
   } catch {
-    await reader.cancel().catch(() => undefined);
+    cancelReader(reader);
     return err('response body could not be read');
   } finally {
-    if (signal.aborted) await reader.cancel().catch(() => undefined);
+    if (signal.aborted) cancelReader(reader);
     reader.releaseLock();
   }
   const bytes = new Uint8Array(size);
@@ -127,6 +130,15 @@ async function readBoundedJson(
     return ok(JSON.parse(text) as unknown);
   } catch {
     return err('response body is not valid UTF-8 JSON');
+  }
+}
+
+function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
+  // A source may never settle cancel(); cleanup must not extend a request timeout or stop.
+  try {
+    void reader.cancel().catch(() => undefined);
+  } catch {
+    // Cancellation is best effort after a failed, oversized, or aborted read.
   }
 }
 
@@ -155,26 +167,71 @@ function cancelResponseBody(response: Response): void {
 export function createAdsbLolPositionTransport(
   query: AdsbLolPositionQuery,
   sourceId: PositionSourceId,
+  capabilities: PositionSourceCapabilities,
   options: AdsbLolTransportOptions = {},
 ): AdsbLolPositionTransport {
+  if ('requestBudget' in options || 'requestBudgetOptions' in options)
+    throw new TypeError('Live transport budget cannot be overridden.');
+  return createTransport(query, sourceId, capabilities, options, processPositionRequestBudget, Date.now);
+}
+
+export function createAdsbLolPositionTransportForTest(
+  query: AdsbLolPositionQuery,
+  sourceId: PositionSourceId,
+  capabilities: PositionSourceCapabilities,
+  options: AdsbLolTransportTestOptions,
+): AdsbLolPositionTransport {
+  if ('fetch' in options) throw new TypeError('Fixture transport cannot accept a fetch function.');
+  if (!(options.response instanceof Response)
+    && options.response !== 'REJECT' && options.response !== 'WAIT_FOR_ABORT')
+    throw new TypeError('Fixture transport requires a prebuilt response or synthetic failure mode.');
+  const fixtureFetch: typeof globalThis.fetch = async (_url, init) => {
+    if (options.response === 'REJECT') throw new Error('Synthetic transport failure');
+    if (options.response === 'WAIT_FOR_ABORT') {
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal?.aborted) reject(new Error('Synthetic abort'));
+        else signal?.addEventListener('abort', () => reject(new Error('Synthetic abort')), { once: true });
+      });
+    }
+    return options.response;
+  };
+  return createTransport(query, sourceId, capabilities, { ...options, fetch: fixtureFetch }, options.requestBudget, options.now ?? Date.now);
+}
+
+function createTransport(
+  inputQuery: AdsbLolPositionQuery,
+  sourceId: PositionSourceId,
+  capabilities: PositionSourceCapabilities,
+  options: AdsbLolTransportOptions,
+  budget: PositionRequestBudget,
+  budgetClock: () => number,
+): AdsbLolPositionTransport {
+  const validated = adsbLolPositionQuery(inputQuery);
+  if (!validated.ok) throw new RangeError(`Invalid position query: ${validated.error.field}.`);
+  const query = validated.value;
+  if (!capabilities || capabilities.sourceId !== sourceId
+    || !Array.isArray(capabilities.measurementKinds) || !Array.isArray(capabilities.observedAtBases))
+    throw new TypeError('Reviewed source capabilities must match the transport source.');
+  const reviewedCapabilities: PositionSourceCapabilities = Object.freeze({
+    sourceId,
+    measurementKinds: Object.freeze([...capabilities.measurementKinds]),
+    observedAtBases: Object.freeze([...capabilities.observedAtBases]),
+  });
   const fetcher = options.fetch ?? globalThis.fetch;
   const clock = options.now ?? Date.now;
   const timeoutMs = options.timeoutMs ?? ADSB_LOL_REQUEST_TIMEOUT_MS;
   const maximumBytes = options.maximumResponseBytes ?? ADSB_LOL_MAX_RESPONSE_BYTES;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMER_DELAY_MS)
-    throw new RangeError('Request timeout must be a positive integer supported by the runtime timer.');
-  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1)
-    throw new RangeError('Maximum response size must be a positive safe integer.');
-  const budget = options.requestBudget
-    ?? (options.requestBudgetOptions
-      ? createPositionRequestBudget(options.requestBudgetOptions)
-      : processPositionRequestBudget);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > ADSB_LOL_REQUEST_TIMEOUT_MS)
+    throw new RangeError('Request timeout must be between 1 ms and the provider cap.');
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > ADSB_LOL_MAX_RESPONSE_BYTES)
+    throw new RangeError('Maximum response size must be between 1 byte and the provider cap.');
 
   return Object.freeze({
     async fetchNext(signal?: AbortSignal): Promise<Result<AdsbLolPositionBatch, AdsbLolTransportError>> {
       if (signal?.aborted) return err({ code: 'ABORTED' });
       const startedAt = clock();
-      const permitted = budget.tryAcquire(startedAt);
+      const permitted = budget.tryAcquire(budgetClock());
       if (!permitted.ok) return err(permitted.error);
       const controller = new AbortController();
       const onAbort = () => controller.abort(signal?.reason);
@@ -232,7 +289,7 @@ export function createAdsbLolPositionTransport(
         if (!body.ok) return err({ code: 'INVALID_RESPONSE', field: 'body' });
         const fetchedAt = toUtcIso(clock());
         if (!fetchedAt) return err({ code: 'INVALID_RESPONSE', field: 'local-clock' });
-        const parsed = parseAdsbLolPositionSnapshot(body.value, { sourceId, fetchedAt, query });
+        const parsed = parseAdsbLolPositionSnapshot(body.value, { sourceId, capabilities: reviewedCapabilities, fetchedAt, query });
         return parsed.ok ? ok(parsed.value) : err(snapshotError(parsed.error));
       } finally {
         clearTimeout(timeout);

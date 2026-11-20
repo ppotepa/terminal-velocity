@@ -52,6 +52,7 @@ const providerMessage = (overrides = {}) => ({
 test('source and external delivery identifiers are validated without rewriting opaque IDs', () => {
   assert.equal(sourceId('src_feed-1').ok, true);
   assert.equal(sourceId('feed-1').ok, false);
+  assert.equal(sourceId(['src_feed-1']).ok, false);
   assert.equal(externalDeliveryId('provider/id:42').value, 'provider/id:42');
   assert.equal(externalDeliveryId('  ').ok, false);
 });
@@ -229,4 +230,52 @@ test('source capabilities validate levels, coverage and sampling independently',
 test('the exported contract parser accepts unknown input and preserves typed failures', () => {
   assert.equal(sourceObservationContractParser.parse(providerMessage()).ok, true);
   assert.equal(sourceObservationContractParser.parse({}).error.code, 'INVALID_INPUT');
+});
+
+test('separate receivers retain independent deliveries for matching payloads', () => {
+  const receptions = ['north', 'south'].map(station => parseSourceObservation({
+    ...base(), dataLevel: 'RECEPTION', receiverId: station,
+    sourceDeliveryId: { ...base().sourceDeliveryId, externalId: `receipt-${station}` },
+  }));
+  assert.ok(receptions.every(result => result.ok));
+  const [north, south] = receptions.map(result => result.value);
+  assert.equal(north.payloadDigest, south.payloadDigest);
+  assert.notEqual(north.receiverId, south.receiverId);
+  assert.notDeepEqual(north.sourceDeliveryId, south.sourceDeliveryId);
+});
+
+const stationScope = {
+  revision: 1, supportedDataLevels: ['RECEPTION'],
+  coverage: { kind: 'STATION_SCOPED', receiverIds: ['station-a'] },
+  receiverCoverageCompleteness: 'INCOMPLETE', sampling: { kind: 'NOT_DECLARED' },
+  messageDirection: 'UNKNOWN', bearer: null, protocolStack: ['ACARS'],
+};
+
+test('a station-scoped feed can declare incomplete receiver coverage', () => {
+  const capabilities = sourceCapabilities(stationScope);
+  assert.equal(capabilities.ok, true);
+  assert.equal(capabilities.value.receiverCoverageCompleteness, 'INCOMPLETE');
+  assert.deepEqual(capabilities.value.coverage.receiverIds, ['station-a']);
+});
+
+test('nested lists reject accessors and custom iterators without invoking them', () => {
+  for (const [field, parse] of [
+    ['protocolStack', list => parseSourceObservation(providerMessage({ protocolStack: list }))],
+    ['protocolStack', list => sourceCapabilities({ ...stationScope, protocolStack: list })],
+    ['supportedDataLevels', list => sourceCapabilities({ ...stationScope, supportedDataLevels: list })],
+    ['coverage.receiverIds', list => sourceCapabilities({
+      ...stationScope, coverage: { kind: 'STATION_SCOPED', receiverIds: list },
+    })],
+  ]) {
+    let calls = 0;
+    const unexpectedCall = () => { calls++; throw new Error('Input callback executed'); };
+    const accessor = Object.defineProperty(['ACARS'], '0', { get: unexpectedCall });
+    const customIterator = Object.defineProperty(['ACARS'], Symbol.iterator, { value: unexpectedCall });
+    for (const input of [accessor, customIterator, Array(1)]) {
+      const result = parse(input);
+      assert.equal(result.ok, false);
+      assert.equal(result.error.field, field);
+      assert.equal(calls, 0);
+    }
+  }
 });

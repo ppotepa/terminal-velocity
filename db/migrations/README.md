@@ -1,10 +1,10 @@
 # PostgreSQL migrations and test isolation
 
-These migrations implement the durable synthetic Stage 2 message flow and the private, append-only Stage 4 position-history storage boundary. The larger DDL under `docs/architecture/persistence` remains a design reference. It is not executed by the application.
+These migrations implement the durable synthetic Stage 2 message flow, private Stage 3 delivery metadata, and private append-only Stage 4 position history. The larger DDL under `docs/architecture/persistence` remains a design reference. It is not executed by the application.
 
 ## Ownership and application permissions
 
-Each schema has its own `NOLOGIN` owner: `tv_ingestion_owner`, `tv_correlation_owner`, `tv_delivery_owner`, `tv_availability_owner`, and `tv_tracking_owner`. The `tv_runtime` permission role also has `NOLOGIN`. A separately provisioned application login inherits that role; it must not be a member of any owner role. Migrations reject unexpected privileged role attributes and inherited memberships when accepting existing roles.
+Each schema has its own `NOLOGIN` owner: `tv_ingestion_owner`, `tv_correlation_owner`, `tv_delivery_owner`, `tv_availability_owner`, `tv_source_ingestion_owner`, and `tv_tracking_owner`. The `tv_runtime` permission role also has `NOLOGIN`. A separately provisioned application login inherits that role; it must not be a member of any owner role. Migrations reject unexpected privileged role attributes and inherited memberships when accepting existing roles.
 
 The runtime can insert and read immutable messages, decisions, position observations, and outbox events. It can update the current decision head, delivery state, and availability contributions. Only `fanout_completed_at` is updateable on a correlation outbox event. Position history and its outbox have no runtime update or delete grants. Runtime grants do not include DDL or deletion. All tables are addressed through qualified schema names.
 
@@ -56,6 +56,48 @@ GitHub Actions uses an ephemeral `postgres:18.7` service and runs the integratio
 
 The suite exercises independent-process first-write contention, revision CAS, atomic decision/outbox writes, SQL rollback and capability lifetime, late-committing outbox records, `SKIP LOCKED` queue claims, lease token fencing, recovery, bounded retries, consumer-specific inbox deduplication, atomic projection rollback, contribution correction and tombstones, runtime grants, and migration drift. Application integration tests also restart the actual API process and read persisted state.
 
-The position table uses PostgreSQL's built-in `point` value with a GiST index; no PostGIS extension is required. Position history is keyed by `(source_id, source_observation_id)` and stores the canonical JSON fact so omitted, null, and zero optional fields remain distinct. Its generated ICAO24 hint is only a search hint; the temporal identity registry is added later. The history adapter can insert synthetic test observations, but S4-03 does not connect the live adsb.lol source to durable storage. ADR #0002 keeps real position-row retention gated on issue #46.
+The position table in migration 007 uses PostgreSQL's built-in `point` value with a GiST index; no PostGIS extension is required. Position history is keyed by `(source_id, source_observation_id)` and stores the canonical JSON fact so omitted, null, and zero optional fields remain distinct. Its generated ICAO24 hint is only a search hint; the temporal identity registry is added later. The history adapter can insert synthetic test observations, but S4-03 does not connect the live adsb.lol source to durable storage. ADR #0002 keeps real position-row retention gated on issue #46.
 
 The implemented message projection serves one fixed synthetic public scope. This schema does not implement multi-tenant authorization, real receiver ingestion, a broker, or the complete architecture catalog.
+The implemented projection serves one fixed synthetic public scope. This schema does not implement multi-tenant authorization, real receiver ingestion, a broker, or the complete architecture catalog.
+
+
+## Migration 002 and the S3-04 storage contract
+
+`002_source_deliveries.sql` creates the private `source_ingestion` schema. A scoped delivery key consists of the configured source, provider, account, source epoch and opaque external ID. The synthetic adapter supplies stable keys. A later provider adapter must establish the same guarantee before using its IDs. An insert collision raises PostgreSQL `23505`. S3-04 owns classifying replays and conflicts under concurrency.
+
+The delivery row records a digest, level, schema/decoder/capability versions, receipt and optional observation clock evidence, retrieval and ingestion times, and disposition with a quarantine reason when applicable. Provenance contains a parser version and a page URL stripped of credentials, query and fragment (credential-bearing URLs are rejected). Callers supply a public-safe page path. `METADATA_ONLY` excludes raw pages, decoded text and frame bytes. Source/time and partial quarantine indexes support bounded scans. Issue #6 still gates retaining real provider data.
+
+`postgresSourceDeliveryStore(executor)` inserts the delivery and optional provider direction/bearer or receiver ID/frequency/signal facts in one SQL statement. A lookup by scoped key returns those facts. Composite foreign keys enforce each detail table's data level. S3-04 can supply a transaction-bound executor and append a source outbox event in that transaction. The outbox has a separate event ID, a delivery-scoped stream revision, a reference-only payload and a fanout marker. Stage 2 consumer deliveries still reference the correlation outbox. S3-07 owns the consumer bridge.
+
+Rollback of the application can leave the additive schema in place. Preserve migration history and use a follow-up migration for any schema changes.
+
+## Migration 003 and source acceptance
+
+`acceptSourceDelivery` takes an operator-verified source scope and capability declaration separately from a v1 observation envelope and retrieval provenance. The PostgreSQL adapter locks the complete scoped key before reading under READ COMMITTED. A new delivery, its detail facts and the revision-1 source outbox event commit on one checked-out connection. Callers receive the durable delivery ID and first retrieval provenance only after commit. There is no HTTP endpoint or automatic import into correlation.
+
+Migration 003 adds `canonical_v1_sha256` to the source outbox. The v1 fingerprint is SHA-256 over a UTF-8 domain prefix (`source-acceptance-v1` followed by a NUL) and JSON encoding of `[parserVersion, validatedObservation]`. Object keys sort in ascending code-unit order at each level, arrays preserve order, and the observation uses the #5 contract's normalized times and identifiers. The provider digest remains an independently supplied fact. Page location, retrieval time and ingestion time describe the first sighting. A retry from another page or time can match that sighting. Original bytes, frame contents and decoded message text are excluded from persistent storage.
+
+For `DUPLICATE`, return the original receipt. For `CONFLICTED`, preserve the existing row and event. A pre-003 or storage-only delivery without a matching fingerprint cannot prove equivalence and yields a conflict. Invalid source scope, capability revision, level, envelope or provenance fails before SQL. An unavailable database or uncertain commit outcome yields `UNAVAILABLE`; retry with the same source key and canonical facts.
+
+The event type is `source.delivery-accepted.v1`, its stream key is the delivery UUID, its revision is 1 and its JSON payload is `{"deliveryId":"<uuid>"}`. For S3-07 the proposed consumer identity is `source-message-import.v1`, with inbox deduplication on (consumer identity, event ID). A receipt proves acceptance only. S3-07 owns that inbox and the import transaction.
+
+An application rollback can leave the additive nullable column in place. Preserve recorded fingerprints and the existing migration ledger.
+
+## Migration 006 — source replay checkpoints
+
+`source_ingestion.replay_checkpoints` stores one current replay range, opaque
+cursor, attempt/budget counters, redacted quarantine and health per exact source
+scope. Runtime can select, insert and update; it cannot delete. The existing
+source owner owns the table. There are no raw payload columns and no changes to
+message visibility. Cursor data remains private. Receipt/outbox transactions are
+unchanged; checkpoint advancement follows receipt commit so a lost acknowledgment
+repeats idempotent acceptance. See [source operations](../../docs/SOURCE_OPERATIONS.md)
+for concurrency, bounded review and non-destructive rollback. Migration execution
+is coordinator-verified in the isolated PostgreSQL suite, never by API startup.
+
+## Migration 007 — private tracking history
+
+`007_tracking_position_history.sql` follows the Stage 3 source migrations. It creates `tv_tracking_owner` and `tracking`, a source-scoped append-only observation table, and a producer outbox. The runtime role receives only `SELECT` and `INSERT` on these tables. Canonical JSON facts retain optional field presence while generated ICAO24 is only an unconfirmed search hint. Observed and ingestion times have distinct columns. Source delivery references are optional and opaque; they do not imply a foreign key to a permitted provider delivery. A unique source observation key and one event per fact make retries idempotent. Different sources retain independent facts. The application writer inserts both rows in one checked-out transaction. An outbox failure rolls back the observation.
+
+Coordinates use finite, bounded longitude and latitude validated by the application and database. PostgreSQL's built-in `point` and GiST index support private spatial bounding-box queries, with a split range when west exceeds east across the antimeridian. The time and ICAO24 indexes support bounded, deterministic keyset history. No extension or persistent service is installed by this migration. A rollback requires a new migration; do not edit an applied checksum or delete retained facts as an application rollback.

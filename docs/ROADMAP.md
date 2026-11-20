@@ -16,13 +16,13 @@ A PostgreSQL adapter behind the transaction port, decision history, an outbox, a
 
 ## Stage 3 — one real connector
 
-**Status: in progress — S3-01 source-observation contracts are in review; S3-02 source selection is blocked pending account-specific rights or a project-owned receiver.** Source selection must establish actual access and permitted usage before integration work begins. The durable Stage 2 adapters are the foundation; they do not establish rights to publish real radio messages.
+**Status: engineering in progress; real-source acceptance blocked.** Synthetic source contracts, private processing and bounded replay exist, but no authorized retained Airframes sample has been validated end to end. The durable Stage 2 adapters do not establish rights to collect, retain or publish real radio messages. See the [issue #13 source validation runbook](SOURCE_INTEGRATION_RUNBOOK.md).
 
 Select a source for which access and permitted usage are established. The adapter stores source deliveries, receptions, and message facts separately. It preserves provenance, timestamp uncertainty, bearer, and decoder version. It must not invent RF frames when a provider supplies only decoded messages. Add contract tests using anonymized source examples, retries, backoff, quarantine, and bounded backfill.
 
 ## Stage 4 — positions and map reads
 
-**Status: S4-01 provider-neutral position contracts are in review in PR #56.** Independent contract work may proceed while Stage 3 source access is blocked; no live source or public position feed is implied.
+**Status: position-contract implementation is under review in #14; source transport, storage, map reads and UI follow in later issues.**
 
 A separate position adapter, observations with timestamps and provenance, stable aircraft identity, and a map read model. The first map version may fetch a coherent snapshot over HTTP. Flight history and position freshness do not depend on the presence of radio messages. The frontend keeps the agreed minimal design: map, list, details, and clear statuses.
 

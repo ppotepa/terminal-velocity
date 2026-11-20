@@ -15,7 +15,7 @@ export function requireTestDatabaseUrl(value) {
 }
 
 /** Only the randomly named database and login created here are removed during cleanup. */
-export async function createTestDatabase(baseConnectionString) {
+export async function createTestDatabase(baseConnectionString, migrationDirectory) {
   const baseUrl = requireTestDatabaseUrl(baseConnectionString);
   const suffix = randomBytes(8).toString('hex');
   const database = `tv_test_${suffix}`;
@@ -43,7 +43,7 @@ export async function createTestDatabase(baseConnectionString) {
     createdDatabase = true;
     const migrationPool = new Pool({ connectionString: databaseUrl.href, max: 1 });
     migrationPool.on('error', () => {});
-    try { await applyMigrations(migrationPool); } finally { await migrationPool.end(); }
+    try { await applyMigrations(migrationPool, migrationDirectory); } finally { await migrationPool.end(); }
     // Both generated values contain only hexadecimal or fixed ASCII characters.
     await admin.query(`CREATE ROLE "${login}" LOGIN PASSWORD '${password}' IN ROLE tv_runtime`);
     createdLogin = true;

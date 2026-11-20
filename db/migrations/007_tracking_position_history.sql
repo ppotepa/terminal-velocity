@@ -29,14 +29,17 @@ REVOKE ALL ON SCHEMA tracking FROM PUBLIC;
 
 SET LOCAL ROLE tv_tracking_owner;
 CREATE TABLE tracking.position_observations (
+  observation_id uuid NOT NULL UNIQUE,
   source_id text NOT NULL CHECK (source_id ~ '^src_[A-Za-z0-9][A-Za-z0-9._-]{0,62}$'),
   source_observation_id text NOT NULL
     CHECK (length(source_observation_id) BETWEEN 1 AND 256
       AND source_observation_id = btrim(source_observation_id)
       AND source_observation_id !~ '[[:cntrl:]]'),
+  source_delivery_ref text CHECK (source_delivery_ref ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$'),
   observed_at_ms bigint NOT NULL CHECK (observed_at_ms BETWEEN 0 AND 9007199254740991),
   ingested_at_ms bigint NOT NULL CHECK (ingested_at_ms BETWEEN 0 AND 9007199254740991),
   measurement_kind text NOT NULL CHECK (measurement_kind IN ('ADS_B', 'MLAT', 'OTHER')),
+  quality jsonb CHECK (quality IS NULL OR jsonb_typeof(quality) = 'object'),
   latitude double precision NOT NULL CHECK (latitude BETWEEN -90 AND 90),
   longitude double precision NOT NULL CHECK (longitude BETWEEN -180 AND 180),
   fact jsonb NOT NULL CHECK (jsonb_typeof(fact) = 'object'),
@@ -49,7 +52,9 @@ CREATE TABLE tracking.position_observations (
   CHECK ((fact ->> 'schemaVersion' = '1') IS TRUE),
   CHECK ((fact ->> 'sourceId' = source_id) IS TRUE),
   CHECK ((fact ->> 'sourceObservationId' = source_observation_id) IS TRUE),
+  CHECK (source_delivery_ref IS NOT DISTINCT FROM (fact ->> 'sourceDeliveryRef')),
   CHECK ((fact ->> 'measurementKind' = measurement_kind) IS TRUE),
+  CHECK (quality IS NOT DISTINCT FROM (fact -> 'quality')),
   CHECK ((jsonb_typeof(fact -> 'latitude') = 'number'
     AND (fact ->> 'latitude')::double precision = latitude) IS TRUE),
   CHECK ((jsonb_typeof(fact -> 'longitude') = 'number'

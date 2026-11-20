@@ -16,19 +16,25 @@ import {
 } from '../src/modules/source-connectors/infrastructure/positions/adsb-lol/request-budget.ts';
 import {
   createAdsbLolPositionTransport,
+  createAdsbLolPositionTransportForTest,
 } from '../src/modules/source-connectors/infrastructure/positions/adsb-lol/transport.ts';
 import {
   createAdsbLolPositionPoller,
 } from '../src/modules/source-connectors/infrastructure/positions/adsb-lol/poller.ts';
 
 const SOURCE_ID = positionSourceId('src_adsblol-test').value;
+const CAPABILITIES = Object.freeze({
+  sourceId: SOURCE_ID,
+  measurementKinds: Object.freeze(['ADS_B', 'MLAT', 'OTHER']),
+  observedAtBases: Object.freeze(['SOURCE_AGE_FROM_REFERENCE']),
+});
 const FETCHED_AT = '2026-11-19T12:00:02.000Z';
 const QUERY = adsbLolPositionQuery({ latitude: 52.52, longitude: 13.405, radiusNm: 10 }).value;
 const FIXTURE = JSON.parse(await readFile(new URL('./fixtures/positions/adsb-lol-v2-synthetic.json', import.meta.url),
   'utf8'));
 
-function snapshot(input = FIXTURE) {
-  return parseAdsbLolPositionSnapshot(input, { sourceId: SOURCE_ID, fetchedAt: FETCHED_AT, query: QUERY });
+function snapshot(input = FIXTURE, capabilities = CAPABILITIES) {
+  return parseAdsbLolPositionSnapshot(input, { sourceId: SOURCE_ID, capabilities, fetchedAt: FETCHED_AT, query: QUERY });
 }
 
 function budget(options = {}) {
@@ -44,20 +50,54 @@ function jsonResponse(value, init = {}) {
   });
 }
 
-function transport(fetcher, options = {}) {
-  return createAdsbLolPositionTransport(QUERY, SOURCE_ID, {
-    fetch: fetcher,
+function transport(response, options = {}) {
+  const { capabilities = CAPABILITIES, ...transportOptions } = options;
+  return createAdsbLolPositionTransportForTest(QUERY, SOURCE_ID, capabilities, {
+    response,
     now: () => Date.parse(FETCHED_AT),
     requestBudget: budget(),
-    ...options,
+    ...transportOptions,
   });
+}
+
+function stalledBodyResponse() {
+  let cancelCalls = 0;
+  const response = new Response(new ReadableStream({
+    pull: () => new Promise(() => undefined),
+    cancel: () => {
+      cancelCalls += 1;
+      return new Promise(() => undefined);
+    },
+  }), { headers: { 'content-type': 'application/json' } });
+  return { response, cancelCalls: () => cancelCalls };
+}
+
+async function settlesWithin(promise, milliseconds = 250) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Operation did not settle after cancellation')), milliseconds);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function waitForBodyRead(response) {
+  await settlesWithin((async () => {
+    while (!response.body.locked) await new Promise(resolve => setTimeout(resolve, 0));
+  })());
 }
 
 test('synthetic provider fixture maps ADS-B, MLAT, source age, optional fields and incomplete coverage', () => {
   const parsed = snapshot();
   assert.equal(parsed.ok, true);
   assert.equal(parsed.value.provider, 'adsb.lol');
-  assert.equal(parsed.value.aircraftReturned, 4);
+  assert.equal(parsed.value.aircraftReturned, 5);
+  assert.equal(parsed.value.unresolvedIdentityCount, 1);
   assert.equal(parsed.value.noPositionCount, 1);
   assert.equal(parsed.value.observations.length, 3);
   assert.deepEqual(parsed.value.coverage.kind, 'SAMPLED');
@@ -83,20 +123,65 @@ test('synthetic provider fixture maps ADS-B, MLAT, source age, optional fields a
   assert.equal(adsb.groundSpeedKnots, 0);
   assert.equal(adsb.trackDegrees, 0);
   assert.equal(adsb.trackKind, 'TRUE_HEADING');
-  assert.deepEqual(adsb.altitude, { kind: 'SURFACE', valueFt: null });
+  assert.deepEqual(adsb.altitudes, [{ kind: 'SURFACE', valueFt: null }]);
   assert.deepEqual(adsb.quality, { nic: 8, nacP: 9, containmentRadiusMeters: 75 });
   assert.equal(mlat.measurementKind, 'MLAT');
-  assert.equal(mlat.identifierHints.sourceLocalId, 'adsb-lol:~synthetic-mlat-1');
+  assert.equal(mlat.identifierHints.icao24, 'A0B1C4');
+  assert.equal(mlat.observedAt, '2026-11-19T11:00:00.000Z');
+  assert.equal(mlat.ingestedAt, FETCHED_AT);
   assert.equal(mlat.groundSpeedKnots, null);
-  assert.equal(mlat.altitude, null);
+  assert.equal(mlat.altitudes, null);
   assert.equal('trackDegrees' in mlat, false);
   assert.equal('trackKind' in mlat, false);
   assert.equal(other.measurementKind, 'OTHER');
   assert.equal(other.measurementDetail, 'adsb.lol:future_source_type');
-  assert.equal(other.latitude, 13.405);
-  assert.equal(other.longitude, 52.52);
-  assert.equal('altitude' in other, false);
+  assert.equal(other.latitude, 52.523);
+  assert.equal(other.longitude, 13.408);
+  assert.equal('altitudes' in other, false);
   assert.equal('trackDegrees' in other, false);
+});
+
+test('ground barometric state intentionally takes precedence over simultaneous geometric altitude', () => {
+  const withGeometry = structuredClone(FIXTURE);
+  withGeometry.ac[0].alt_geom = 300;
+  assert.deepEqual(snapshot(withGeometry).value.observations[0].altitudes,
+    [{ kind: 'SURFACE', valueFt: null }]);
+});
+
+test('snapshot rejects provider measurements outside reviewed capabilities', async () => {
+  const restricted = { sourceId: SOURCE_ID, measurementKinds: ['ADS_B', 'MLAT'],
+    observedAtBases: ['SOURCE_AGE_FROM_REFERENCE'] };
+  const parsed = snapshot(FIXTURE, restricted);
+  assert.deepEqual(parsed.error, { code: 'INVALID_AIRCRAFT', index: 3,
+    error: { code: 'UNSUPPORTED_POSITION_CAPABILITY', field: 'measurementKind' } });
+  const result = await transport(jsonResponse(FIXTURE), { capabilities: restricted }).fetchNext();
+  assert.deepEqual(result.error, parsed.error);
+  const wrongTimeBasis = { ...CAPABILITIES, observedAtBases: ['SOURCE_TIMESTAMP'] };
+  assert.deepEqual(snapshot(FIXTURE, wrongTimeBasis).error, { code: 'INVALID_AIRCRAFT', index: 0,
+    error: { code: 'UNSUPPORTED_POSITION_CAPABILITY', field: 'observedAtBasis' } });
+  const configuredKinds = ['ADS_B', 'MLAT'];
+  const configured = transport(jsonResponse(FIXTURE), { capabilities: {
+    sourceId: SOURCE_ID, measurementKinds: configuredKinds,
+    observedAtBases: ['SOURCE_AGE_FROM_REFERENCE'],
+  } });
+  configuredKinds.push('OTHER');
+  assert.deepEqual((await configured.fetchNext()).error, parsed.error);
+});
+
+test('provider fields with wrong units or unit-bearing shapes are rejected', () => {
+  for (const [field, value] of [
+    ['gs', { value: 240, unit: 'km/h' }],
+    ['track', { value: 1.57, unit: 'radians' }],
+    ['alt_baro', { value: 1000, unit: 'meters' }],
+    ['alt_geom', '300 meters'],
+    ['rc', { value: 75, unit: 'feet' }],
+  ]) {
+    const malformed = structuredClone(FIXTURE);
+    malformed.ac[0][field] = value;
+    const parsed = snapshot(malformed);
+    assert.equal(parsed.ok, false, field);
+    assert.equal(parsed.error.code, 'INVALID_AIRCRAFT', field);
+  }
 });
 
 test('query constructor enforces the local geographic cap and creates only the provider point URL', () => {
@@ -111,8 +196,26 @@ test('query constructor enforces the local geographic cap and creates only the p
   assert.equal(adsbLolPointUrl(QUERY), 'https://api.adsb.lol/v2/lat/52.52/lon/13.405/dist/10');
 });
 
+test('transport validates a JavaScript caller query before it can make a request', () => {
+  for (const input of [
+    { latitude: 52.52, longitude: 13.405, radiusNm: 51 },
+    { latitude: 92, longitude: 13.405, radiusNm: 10 },
+    { latitude: 52.52, longitude: Number.NaN, radiusNm: 10 },
+  ]) assert.throws(() => createAdsbLolPositionTransport(input, SOURCE_ID, CAPABILITIES), RangeError);
+  assert.throws(() => createAdsbLolPositionTransport(QUERY, SOURCE_ID, CAPABILITIES, {
+    requestBudget: budget(),
+  }), /cannot be overridden/u);
+  assert.throws(() => createAdsbLolPositionTransportForTest(QUERY, SOURCE_ID, CAPABILITIES, {
+    fetch: globalThis.fetch, response: jsonResponse(FIXTURE), requestBudget: budget(),
+  }), /cannot accept a fetch function/u);
+  for (const options of [
+    { timeoutMs: 8_001 }, { timeoutMs: 2_147_483_647 },
+    { maximumResponseBytes: 1_000_001 }, { maximumResponseBytes: Number.MAX_SAFE_INTEGER },
+  ]) assert.throws(() => createAdsbLolPositionTransport(QUERY, SOURCE_ID, CAPABILITIES, options), RangeError);
+});
+
 test('snapshot parser rejects malformed envelope, source errors, coordinate pairs and time evidence', () => {
-  assert.equal(snapshot({ ...FIXTURE, total: 5 }).error.field, 'total');
+  assert.equal(snapshot({ ...FIXTURE, total: 6 }).error.field, 'total');
   assert.equal(snapshot({ ...FIXTURE, msg: 'provider unavailable' }).error.code, 'SOURCE_REPORTED_FAILURE');
   assert.equal(snapshot({ ...FIXTURE, now: '1795089600000' }).error.field, 'now');
   assert.equal(snapshot({ ...FIXTURE, ptime: -1 }).error.field, 'ptime');
@@ -125,9 +228,21 @@ test('snapshot parser rejects malformed envelope, source errors, coordinate pair
   const invalidCoordinate = structuredClone(FIXTURE);
   invalidCoordinate.ac[0].lat = 90.1;
   assert.equal(snapshot(invalidCoordinate).error.code, 'INVALID_AIRCRAFT');
+  const swappedCoordinates = structuredClone(FIXTURE);
+  [swappedCoordinates.ac[0].lat, swappedCoordinates.ac[0].lon] =
+    [swappedCoordinates.ac[0].lon, swappedCoordinates.ac[0].lat];
+  assert.equal(snapshot(swappedCoordinates).error.error.field, 'query-area');
   const invalidTrack = structuredClone(FIXTURE);
   invalidTrack.ac[0].track = 360;
   assert.equal(snapshot(invalidTrack).error.code, 'INVALID_AIRCRAFT');
+  const invalidHex = structuredClone(FIXTURE);
+  invalidHex.ac[0].hex = 'not-icao';
+  assert.equal(snapshot(invalidHex).error.error.field, 'hex');
+  const unresolvedOnly = structuredClone(FIXTURE);
+  unresolvedOnly.ac = [structuredClone(FIXTURE.ac[4])];
+  unresolvedOnly.total = 1;
+  assert.equal(snapshot(unresolvedOnly).value.observations.length, 0);
+  assert.equal(snapshot(unresolvedOnly).value.unresolvedIdentityCount, 1);
   const duplicate = structuredClone(FIXTURE);
   duplicate.ac[1].hex = duplicate.ac[0].hex;
   assert.equal(snapshot(duplicate).error.code, 'DUPLICATE_OBSERVATION_ID');
@@ -144,19 +259,14 @@ test('request budget enforces minimum spacing and a rolling request ceiling', ()
 });
 
 test('transport reads one bounded JSON snapshot and charges every attempted request', async () => {
-  const calls = [];
-  const adapter = transport(async (url, init) => {
-    calls.push({ url, method: init.method, accept: init.headers.accept, redirect: init.redirect });
-    return jsonResponse(FIXTURE);
-  });
+  const adapter = transport(jsonResponse(FIXTURE));
   const first = await adapter.fetchNext();
   assert.equal(first.ok, true);
-  assert.deepEqual(calls, [{ url: adsbLolPointUrl(QUERY), method: 'GET', accept: 'application/json', redirect: 'error' }]);
 
   const limited = createPositionRequestBudget({ minimumIntervalMs: 1, rollingWindowMs: 60_000, maxRequestsPerWindow: 1 });
   const requestTimes = [Date.parse(FETCHED_AT), Date.parse(FETCHED_AT), Date.parse(FETCHED_AT),
     Date.parse(FETCHED_AT) + 2];
-  const onlyOne = transport(async () => jsonResponse(FIXTURE), {
+  const onlyOne = transport(jsonResponse(FIXTURE), {
     requestBudget: limited,
     now: () => requestTimes.shift() ?? Date.parse(FETCHED_AT) + 2,
   });
@@ -166,52 +276,90 @@ test('transport reads one bounded JSON snapshot and charges every attempted requ
 });
 
 test('transport shares its default in-process budget across independently created transports', async () => {
-  const left = createAdsbLolPositionTransport(QUERY, SOURCE_ID, {
+  const left = createAdsbLolPositionTransport(QUERY, SOURCE_ID, CAPABILITIES, {
     fetch: async () => jsonResponse(FIXTURE), now: () => Date.now(),
   });
-  const right = createAdsbLolPositionTransport(QUERY, SOURCE_ID, {
+  const right = createAdsbLolPositionTransport(QUERY, SOURCE_ID, CAPABILITIES, {
     fetch: async () => jsonResponse(FIXTURE), now: () => Date.now(),
+  });
+  const forgedClock = createAdsbLolPositionTransport(QUERY, SOURCE_ID, CAPABILITIES, {
+    fetch: async () => jsonResponse(FIXTURE), now: () => Date.now() + 86_400_000,
   });
   assert.equal((await left.fetchNext()).ok, true);
   assert.equal((await right.fetchNext()).error.code, 'MINIMUM_INTERVAL');
+  assert.equal((await forgedClock.fetchNext()).error.code, 'MINIMUM_INTERVAL');
 });
 
 test('transport categorizes 429, Retry-After, temporary, authentication and invalid responses', async () => {
-  const rateLimited = transport(async () => new Response('', { status: 429, headers: { 'retry-after': '17' } }));
+  const rateLimited = transport(new Response('', { status: 429, headers: { 'retry-after': '17' } }));
   assert.deepEqual((await rateLimited.fetchNext()).error, { code: 'RATE_LIMITED', retryAfterMs: 17_000 });
-  const temporary = transport(async () => new Response('', { status: 503, headers: { 'retry-after': '30' } }));
+  const temporary = transport(new Response('', { status: 503, headers: { 'retry-after': '30' } }));
   assert.deepEqual((await temporary.fetchNext()).error,
     { code: 'TEMPORARY_FAILURE', status: 503, retryAfterMs: 30_000 });
-  const unauthenticated = transport(async () => new Response('', { status: 403 }));
+  const unauthenticated = transport(new Response('', { status: 403 }));
   assert.deepEqual((await unauthenticated.fetchNext()).error, { code: 'AUTHENTICATION_FAILURE', status: 403 });
-  const wrongMime = transport(async () => new Response('<html/>', { headers: { 'content-type': 'text/html' } }));
+  const wrongMime = transport(new Response('<html/>', { headers: { 'content-type': 'text/html' } }));
   assert.deepEqual((await wrongMime.fetchNext()).error, { code: 'INVALID_RESPONSE', field: 'content-type' });
-  const invalidJson = transport(async () => new Response('{', { headers: { 'content-type': 'application/json' } }));
+  const invalidJson = transport(new Response('{', { headers: { 'content-type': 'application/json' } }));
   assert.deepEqual((await invalidJson.fetchNext()).error, { code: 'INVALID_RESPONSE', field: 'body' });
-  const tooLarge = transport(async () => new Response('123456', {
+  const tooLarge = transport(new Response('123456', {
     headers: { 'content-type': 'application/json', 'content-length': '6' },
   }), { maximumResponseBytes: 5 });
   assert.deepEqual((await tooLarge.fetchNext()).error, { code: 'INVALID_RESPONSE', field: 'body' });
 });
 
 test('transport distinguishes timeout and caller cancellation', async () => {
-  const timedOut = transport((_url, init) => new Promise((_, reject) => {
-    init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
-  }), { timeoutMs: 5 });
+  const timedOut = transport('WAIT_FOR_ABORT', { timeoutMs: 5 });
   assert.deepEqual((await timedOut.fetchNext()).error, { code: 'TIMEOUT', retryAfterMs: 60_000 });
 
-  const cancelled = transport((_url, init) => new Promise((_, reject) => {
-    init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
-  }));
+  const cancelled = transport('WAIT_FOR_ABORT');
   const controller = new AbortController();
   const pending = cancelled.fetchNext(controller.signal);
   controller.abort();
   assert.deepEqual((await pending).error, { code: 'ABORTED' });
 
-  const timedOutBody = transport(async () => new Response(new ReadableStream({
+  const timedOutBody = transport(new Response(new ReadableStream({
     pull: () => new Promise(() => undefined),
   }), { headers: { 'content-type': 'application/json' } }), { timeoutMs: 5 });
   assert.deepEqual((await timedOutBody.fetchNext()).error, { code: 'TIMEOUT', retryAfterMs: 60_000 });
+});
+
+test('a stalled response cancellation cannot block timeout, caller abort, or poller stop', async () => {
+  const timeoutBody = stalledBodyResponse();
+  assert.deepEqual((await settlesWithin(transport(timeoutBody.response, { timeoutMs: 5 }).fetchNext())).error,
+    { code: 'TIMEOUT', retryAfterMs: 60_000 });
+  assert.equal(timeoutBody.cancelCalls(), 1);
+
+  const callerBody = stalledBodyResponse();
+  const caller = new AbortController();
+  const callerResult = transport(callerBody.response).fetchNext(caller.signal);
+  await waitForBodyRead(callerBody.response);
+  caller.abort();
+  assert.deepEqual((await settlesWithin(callerResult)).error, { code: 'ABORTED' });
+  assert.equal(callerBody.cancelCalls(), 1);
+
+  const pollerBody = stalledBodyResponse();
+  const poller = createAdsbLolPositionPoller(transport(pollerBody.response));
+  const loop = poller.start(() => undefined);
+  await waitForBodyRead(pollerBody.response);
+  await settlesWithin(poller.stop());
+  await settlesWithin(loop);
+  assert.equal(pollerBody.cancelCalls(), 1);
+  assert.equal(poller.health().status, 'STOPPED');
+});
+
+test('an oversized streamed body returns an error even when cancellation never settles', async () => {
+  let cancelCalls = 0;
+  const response = new Response(new ReadableStream({
+    start(controller) { controller.enqueue(new TextEncoder().encode('123456')); },
+    cancel() {
+      cancelCalls += 1;
+      return new Promise(() => undefined);
+    },
+  }), { headers: { 'content-type': 'application/json' } });
+  assert.deepEqual((await settlesWithin(transport(response, { maximumResponseBytes: 5 }).fetchNext())).error,
+    { code: 'INVALID_RESPONSE', field: 'body' });
+  assert.equal(cancelCalls, 1);
 });
 
 test('poller honors Retry-After, applies capped backoff and emits snapshots and errors', async () => {
@@ -242,6 +390,24 @@ test('poller honors Retry-After, applies capped backoff and emits snapshots and 
   assert.equal(calls, 4);
   await poller.stop();
   assert.throws(() => poller.start(() => undefined), /only once/u);
+});
+
+test('poller reconnects after a disconnected transport and reports recovered health', async () => {
+  let calls = 0;
+  const events = [];
+  const poller = createAdsbLolPositionPoller({ fetchNext: async () => {
+    calls += 1;
+    if (calls === 1) return { ok: false, error: { code: 'TEMPORARY_FAILURE', retryAfterMs: 0 } };
+    return { ok: true, value: snapshot().value };
+  } }, { wait: async () => undefined });
+  await poller.start(event => {
+    events.push(event.type);
+    if (event.type === 'snapshot') void poller.stop();
+  });
+  assert.deepEqual(events, ['error', 'snapshot']);
+  assert.equal(calls, 2);
+  assert.equal(poller.health().consecutiveFailures, 0);
+  assert.equal(poller.health().lastErrorCode, null);
 });
 
 test('poller stop cancels an in-flight request and a pending wait without leaving a timer', async () => {

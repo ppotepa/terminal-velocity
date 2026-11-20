@@ -26,8 +26,16 @@ host address. The API documentation pages disagree about whether the daily
 window resets at midnight UTC or is a fixed 24-hour bucket. We will not assume a
 reset time: the local budget uses a rolling window and the 10-minute interval.
 HTTP 429 must honor `Retry-After` and must not trigger an immediate retry.
-Every transport in one Node process shares the default budget; callers can
-inject an isolated budget for tests or a separately coordinated runtime.
+Every live transport in one Node process shares the default budget. Only the
+explicit fixture transport factory accepts an isolated budget and a prebuilt
+synthetic response or failure mode; it cannot accept a fetch function. The live
+factory cannot replace or weaken the process policy, and its budget uses the
+real process clock even when a caller injects a clock for response timestamps.
+Live requests have an 8-second maximum timeout and a 1 MB maximum response
+body, including when callers supply options. The batch reports that
+live policy. This in-memory limit does not coordinate multiple processes or
+other clients sharing one IP address, so an operator must account for those
+before enabling more than one preview process.
 
 No key is required for the documented unauthenticated tier. API keys are
 optional for higher tiers; no key/account is configured or owned for this
@@ -41,10 +49,10 @@ calls `start` and stops on an explicit abort or non-retryable provider error.
 |---|---|
 | top-level `now` | Provider snapshot-generation reference time in Unix milliseconds. |
 | `seen_pos` | Seconds since the most recent position update. Derive `observedAt = now - seen_pos` and set `observedAtBasis: SOURCE_AGE_FROM_REFERENCE`, `sourceTimeReferenceAt: now`, `sourceAgeSeconds: seen_pos`, precision `UNKNOWN`, uncertainty `null`. The provider does not document a timestamp error bound. |
-| `hex` | ICAO24 only when exactly six hex digits; `~`/non-ICAO addresses remain source-local identifier hints. It is not temporal identity confirmation. |
+| `hex` | ICAO24 only when exactly six hex digits; `~`/non-ICAO addresses are source-local hints. Without an independent trusted identity decision, positioned rows with only these hints are counted as unresolved and omitted from canonical observations. An ICAO24 is a hint, not temporal identity confirmation. |
 | `type` | `mlat` maps to `MLAT`; `adsb_*` maps to `ADS_B`; other declared source types map to `OTHER` with the source type preserved in `measurementDetail`. |
-| `lat`, `lon` | Decimal degrees. A row with both absent/null has no position and is skipped; a half-present or invalid coordinate rejects the snapshot. Missing aircraft are never treated as negative observations. |
-| `alt_baro`, `alt_geom` | Barometric and geometric values in feet remain separately tagged. `alt_baro: "ground"` maps to the explicit `SURFACE` altitude kind. |
+| `lat`, `lon` | Decimal degrees. A row with both absent/null has no position and is skipped; a half-present or invalid coordinate rejects the snapshot. A positioned row without a resolvable identity is counted separately and omitted. Missing aircraft are never treated as negative observations. |
+| `alt_baro`, `alt_geom` | Barometric and geometric values in feet remain separately tagged when numeric. `alt_baro: "ground"` maps to the explicit `SURFACE` altitude kind. If a numeric `alt_geom` is simultaneously present, it is omitted because canonical schema v1 forbids a surface state combined with numeric altitude; a synthetic regression test fixes this precedence. |
 | `gs`, `track` | Ground speed in knots and true track degrees. `track` is true heading while on the ground; preserve `trackKind` accordingly. Null and zero remain distinct. |
 | `nic`, `nac_p`, `rc` | Preserve provider-reported NIC/NACp and containment radius in meters as quality metadata; no accuracy guarantee is inferred. |
 | `now` + `hex` | The API has no per-position delivery ID. Create a deterministic local observation key from this exact snapshot reference and the aircraft address; do not hash coordinates or round time. This identifies a snapshot row, not an upstream immutable event. |
@@ -62,6 +70,28 @@ The returned batch includes the configured request limits and declares
 `CONNECTED`, `DEGRADED`, and `STOPPED` transport states, the last successful
 fetch time, consecutive failures, and the last error category. Those health
 fields do not refresh or override per-observation source time.
+
+The live transport requires an explicit reviewed `PositionSourceCapabilities`
+configuration for its source ID. Each positioned row passes through
+`acceptPositionObservation`, which revalidates the canonical observation and
+checks its measurement kind and time basis against that configuration. A
+provider type mapped to `OTHER` is rejected when `OTHER` is outside the
+configured capabilities. The private preview currently allows `ADS_B`, `MLAT`,
+and `OTHER` with `SOURCE_AGE_FROM_REFERENCE`; the configured capability set is
+local to that preview and does not grant public publication rights. Provider
+numeric fields are interpreted only in the documented units. Unit-bearing
+objects or strings in those fields are rejected; a bare but plausible number
+in an undocumented unit cannot be detected from the response alone.
+
+The explicit `npm run positions:preview -- --live --lat 52.52 --lon 13.405 --radius-nm 10`
+command starts an independent position poller and a JSON preview at
+`127.0.0.1:3001/positions`. It serves only canonical batches, binds only to
+loopback, retains the latest batch in memory, and drops it on SIGINT or SIGTERM.
+The route is private to this separate process; the demo API and message
+ingestion do not start it. Use `--port` to select another local port. Starting
+the process makes a live provider request, so it is an explicit local action
+subject to the source decision and quota. This command has not been run against
+the live provider in the current review iteration.
 
 No source data is persisted by S4-02. Tests use synthetic fixtures shaped from
 the OpenAPI contract; no live aircraft payload is stored in Git. On 2026-11-19,

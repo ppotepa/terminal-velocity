@@ -7,10 +7,10 @@ import { Pool } from 'pg';
 const migrationDirectory = fileURLToPath(new URL('../../db/migrations/', import.meta.url));
 
 /** Apply checked-in SQL once, under a database-wide lock, using an administrative connection. */
-export async function applyMigrations(pool) {
-  const files = (await readdir(migrationDirectory)).filter(name => /^\d{3}_[a-z0-9_]+\.sql$/.test(name)).sort();
+export async function applyMigrations(pool, directory = migrationDirectory) {
+  const files = (await readdir(directory)).filter(name => /^\d{3}_[a-z0-9_]+\.sql$/.test(name)).sort();
   const migrations = await Promise.all(files.map(async name => {
-    const sql = await readFile(resolve(migrationDirectory, name), 'utf8');
+    const sql = await readFile(resolve(directory, name), 'utf8');
     return { name, sql, checksum: createHash('sha256').update(sql).digest('hex') };
   }));
   const client = await pool.connect();
