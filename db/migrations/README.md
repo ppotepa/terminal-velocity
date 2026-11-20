@@ -178,3 +178,19 @@ revision, aircraft, time window and final observed fact key; a later page return
 mix versions. No immutable observation or link history is rewritten. The index
 uses `C` collation for the source key. Application rollback must retain the
 revision and index; a schema correction requires a forward migration.
+
+## Migration 018 — private map snapshot
+
+`018_private_map_snapshot.sql` adds a compact position row with a GiST spatial
+index, a per-aircraft/per-protocol synthetic demo status row, and a monotonic map
+revision. Triggers update the row and revision inside current-position head and
+demo contribution transactions. An unknown position removes its marker. A
+synthetic message correction recomputes the latest eligible protocol observation.
+The migration seeds rows from existing current heads and Stage 2 demo
+contributions; it never reads `source_ingestion.private_contributions` or message
+contents. This initial seed runs during migration and should be scheduled during
+a quiet local maintenance window if the private prototype has many existing
+records. No real-source publication rights follow from this schema. Application
+rollback retains map tables and triggers; any schema correction needs a forward
+migration. Stage 5 must replace the demo-only status boundary with explicit
+scope-qualified publication decisions before any public map access.

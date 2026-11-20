@@ -56,6 +56,24 @@ test('position and synthetic message status use independent observation times an
   assert.equal((await reader.read(query([19,49,21,51]))).data[0].messages.freshness, 'NONE');
 });
 
+test('concurrent synthetic contributions keep the latest observation after correction', async () => {
+  await marker('ac_demo-001', 50, 20);
+  await Promise.all([
+    pools.runtime.query(`INSERT INTO availability.contributions
+      (message_id,revision,aircraft_id,observed_at_ms,bearer)
+      VALUES ('msg_older',1,'ac_demo-001',$1,'VDL2')`, [now - 50_000]),
+    pools.runtime.query(`INSERT INTO availability.contributions
+      (message_id,revision,aircraft_id,observed_at_ms,bearer)
+      VALUES ('msg_newer',1,'ac_demo-001',$1,'VDL2')`, [now - 1_000]),
+  ]);
+  assert.equal((await reader.read(query([19,49,21,51]))).data[0].messages.lastMessageAt,
+    new Date(now - 1_000).toISOString());
+  await pools.runtime.query(`UPDATE availability.contributions SET revision=2,
+    aircraft_id=NULL,observed_at_ms=NULL,bearer=NULL WHERE message_id='msg_newer'`);
+  assert.equal((await reader.read(query([19,49,21,51]))).data[0].messages.lastMessageAt,
+    new Date(now - 50_000).toISOString());
+});
+
 test('bounded keyset pages reject a changed checkpoint and never exceed the limit', async () => {
   await pools.admin.query(`INSERT INTO tracking.map_aircraft_positions
     (aircraft_id,latitude,longitude,observed_at_ms,source_id,measurement_kind,
@@ -98,4 +116,13 @@ test('a confirmed current-position head updates the denormalized map row in its 
   const indexes = await pools.admin.query(`SELECT indexname FROM pg_indexes
     WHERE schemaname='tracking' AND tablename='map_aircraft_positions'`);
   assert.ok(indexes.rows.some(row => row.indexname === 'map_aircraft_positions_gist'));
+  const client = await pools.admin.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SET LOCAL enable_seqscan=off');
+    const plan = await client.query(`EXPLAIN SELECT aircraft_id FROM tracking.map_aircraft_positions
+      WHERE position <@ box(point(20,51),point(22,53))`);
+    assert.match(plan.rows.map(row => row['QUERY PLAN']).join('\n'), /map_aircraft_positions_gist/);
+    await client.query('ROLLBACK');
+  } finally { client.release(); }
 });

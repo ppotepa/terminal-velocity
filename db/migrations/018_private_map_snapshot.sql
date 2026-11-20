@@ -64,6 +64,10 @@ RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $
 DECLARE latest bigint;
 BEGIN
   IF affected_aircraft IS NULL OR affected_bearer IS NULL THEN RETURN; END IF;
+  -- Serialize competing corrections for the same aircraft/protocol before
+  -- reading max(), including when distinct message rows are being changed.
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(affected_aircraft || ':' || affected_bearer, 0));
   SELECT max(observed_at_ms) INTO latest FROM availability.contributions
     WHERE aircraft_id=affected_aircraft AND bearer=affected_bearer;
   IF latest IS NULL THEN
@@ -79,13 +83,21 @@ END $function$;
 
 CREATE FUNCTION tracking.on_demo_contribution_change() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $function$
+DECLARE old_aircraft text; old_bearer text; new_aircraft text; new_bearer text;
+  affected record;
 BEGIN
   IF TG_OP <> 'INSERT' THEN
-    PERFORM tracking.refresh_map_demo_status(OLD.aircraft_id,OLD.bearer);
+    old_aircraft := OLD.aircraft_id; old_bearer := OLD.bearer;
   END IF;
   IF TG_OP <> 'DELETE' THEN
-    PERFORM tracking.refresh_map_demo_status(NEW.aircraft_id,NEW.bearer);
+    new_aircraft := NEW.aircraft_id; new_bearer := NEW.bearer;
   END IF;
+  FOR affected IN SELECT DISTINCT aircraft_id,bearer FROM
+    (VALUES (old_aircraft,old_bearer),(new_aircraft,new_bearer)) AS changed(aircraft_id,bearer)
+    WHERE aircraft_id IS NOT NULL AND bearer IS NOT NULL
+    ORDER BY aircraft_id,bearer LOOP
+    PERFORM tracking.refresh_map_demo_status(affected.aircraft_id,affected.bearer);
+  END LOOP;
   UPDATE tracking.map_state SET revision=revision+1 WHERE singleton;
   RETURN NULL;
 END $function$;

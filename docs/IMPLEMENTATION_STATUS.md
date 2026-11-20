@@ -1,6 +1,20 @@
 # Terminal Velocity — implementation status, Stage 2
 
-### S4-06 observed aircraft tracks (issue #19, in progress)
+### S4-07 private bbox map snapshot (issue #20, in progress)
+
+Migration 018 maintains compact map coordinates from confirmed current-position
+heads and per-protocol status from synthetic Stage 2 contributions. The private
+loopback API validates bounded bboxes, antimeridian crossing, keyset pages and
+exact status/protocol filters. PostgreSQL pages hold a shared map checkpoint
+lock; a committed position or synthetic message status change invalidates a
+prior page cursor. Position freshness, synthetic message freshness, coverage
+and real-feed health remain independent. No message contents or private
+provider contribution statuses enter the map row or response. The original six
+demo endpoints remain intact. This is a local prototype without authentication
+or publication policy; Stage 5 owns those controls. Local verification and
+review are in progress.
+
+### S4-06 observed aircraft tracks (issue #19, merged PR #69)
 
 The private track reader pages matched, immutable position facts by observed time,
 source ID and observation UUID, with a seven-day query window and at most 500
@@ -14,7 +28,9 @@ its observed-time basis and separate ingestion time. Deterministic
 endpoint-preserving simplification respects a point budget or returns an explicit
 budget error when it cannot preserve every segment. These segments are observed
 history only: no planned route, origin airport, destination or flight number is
-inferred. Synthetic PostgreSQL and pure verification remain in progress.
+inferred. PR #69 merged as `bb8fd7f`; exact head and merge SHA passed local
+Node 24 checks, 130 PostgreSQL tests, 41 message tests, 26 browser tests, demo
+and API smoke. Hosted CI remains a separate #49 gate.
 
 ### S4-05 private current-position projection (issue #18, merged PR #68)
 

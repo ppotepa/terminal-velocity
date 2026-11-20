@@ -98,6 +98,10 @@ test('unauthenticated demo endpoints reveal neither private provider records nor
   assert.ok((await accept(pipeline)).ok);
   await pipeline.drain();
   const privateId = (await pools.admin.query('SELECT message_id FROM source_ingestion.message_revisions')).rows[0].message_id;
+  await pools.admin.query(`INSERT INTO tracking.map_aircraft_positions
+    (aircraft_id,latitude,longitude,observed_at_ms,source_id,measurement_kind,
+     timestamp_precision,timestamp_uncertainty_ms)
+    VALUES ('ac_demo-001',52,21,$1,'src_synthetic','ADS_B','SECOND',0)`, [Date.now() - 1000]);
   const api = await launch(t);
   assert.equal((await request(api.base, '/api/v1/messages/' + privateId)).status, 404);
   const list = await request(api.base, '/api/v1/aircraft/ac_demo-001/messages');
@@ -106,6 +110,11 @@ test('unauthenticated demo endpoints reveal neither private provider records nor
   const aircraft = await request(api.base, '/api/v1/aircraft/ac_demo-001');
   assert.equal(aircraft.body.data.availability.freshness, 'NONE');
   assert.equal(aircraft.body.data.availability.lastMessageAt, null);
+  const map = await request(api.base, '/api/v1/internal/map/aircraft?bbox=20,51,22,53');
+  assert.equal(map.status, 200);
+  assert.equal(map.body.data[0].messages.freshness, 'NONE');
+  assert.equal(map.body.data[0].messages.lastMessageAt, null);
+  assert.equal(JSON.stringify(map.body).includes(privateId), false);
   const demo = { messageId: uniqueId('msg'), observedAt: new Date(Date.now() - 1000).toISOString(),
     bearer: 'VDL2', text: 'Synthetic public fixture', icao24: 'D00001' };
   assert.equal((await request(api.base, '/api/v1/demo/messages', demo)).status, 201);
