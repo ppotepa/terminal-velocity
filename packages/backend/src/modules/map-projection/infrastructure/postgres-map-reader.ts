@@ -59,8 +59,6 @@ ORDER BY aircraft_id COLLATE "C" LIMIT $10`;
 export function createPostgresMapReader(pool: SqlPool, now: () => number = Date.now): MapReader {
   return { async read(input) {
     const query = mapViewportQuery(input);
-    const asOf = query.cursor?.asOf ?? new Date(now()).toISOString();
-    const nowMs = Date.parse(asOf);
     return runSqlTransaction(pool, async sql => {
       await sql.query(`SET LOCAL statement_timeout = '1000ms'`);
       const state = await sql.query<{ revision: string }>(
@@ -69,6 +67,8 @@ export function createPostgresMapReader(pool: SqlPool, now: () => number = Date.
       if (!Number.isSafeInteger(revision)) throw new Error('The map checkpoint is missing.');
       if (query.cursor && query.cursor.revision !== revision)
         throw new RangeError('STALE_MAP_CURSOR');
+      const asOf = query.cursor?.asOf ?? new Date(now()).toISOString();
+      const nowMs = Date.parse(asOf);
       const { west, south, east, north } = query.bbox;
       const selected = await sql.query<MapRow>(mapSql,
         [west,south,east,north,query.cursor?.after ?? '',nowMs,
