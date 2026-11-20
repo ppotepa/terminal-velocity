@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Synthetic Airframes messages fixture</title></head>
+<body>
+  <table>
+    <thead><tr>
+      <th>ID</th><th>Timestamp</th><th>Flight</th><th>Tail</th><th>Label</th><th>Text</th>
+      <th>Source</th><th>Protocol</th><th>From Hex</th><th>To Hex</th><th>Mode</th>
+      <th>Decode Errors</th><th>Frequency</th><th>Channel</th><th>Decoder</th>
+    </tr></thead>
+    <tbody>
+      <tr data-message-id="synthetic-1001">
+        <td>synthetic-1001</td><td><time datetime="2026-11-20T09:41:22Z">09:41:22 UTC</time></td>
+        <td>TVX101</td><td>N123TV</td><td>H1</td><td>Position report (synthetic only)</td>
+        <td>fixture-station-1</td><td>ACARS</td><td>A1B2C3</td><td>000000</td><td>2</td>
+        <td>0</td><td>131.550</td><td>1</td><td>synthetic-decoder</td>
+      </tr>
+      <tr data-message-id="synthetic-1002">
+        <td>synthetic-1002</td><td><time datetime="2026-11-20T09:42:00Z">09:42:00 UTC</time></td>
+        <td>TVX202</td><td>N456TV</td><td>SA</td><td>Unrelated target row (synthetic only)</td>
+        <td>fixture-station-2</td><td>VDL2</td><td>ABCDEF</td><td>000000</td><td>2</td>
+        <td>1</td><td>136.975</td><td>2</td><td>synthetic-decoder</td>
+      </tr>
+    </tbody>
+  </table>
+</body>
+</html>
