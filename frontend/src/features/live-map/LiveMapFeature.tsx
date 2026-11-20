@@ -17,7 +17,8 @@ type Props = { client?: ApiClient; onSelectAircraft?: (aircraftId: string) => vo
 const fallbackStyle: StyleSpecification = { version: 8, sources: {}, layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#e8efec' } }] };
 const styleURL = import.meta.env.VITE_MAP_STYLE_URL || 'https://tiles.openfreemap.org/styles/liberty';
 
-export function LiveMapFeature({ client = createApiClient(), onSelectAircraft, selectedAircraftId, onMapReady }: Props) {
+export function LiveMapFeature({ client: suppliedClient, onSelectAircraft, selectedAircraftId, onMapReady }: Props) {
+  const client = useMemo(() => suppliedClient ?? createApiClient(), [suppliedClient]);
   const container = useRef<HTMLDivElement>(null); const mapRef = useRef<MapLibreMap | null>(null); const markersRef = useRef<Marker[]>([]); const fallbackUsed = useRef(false);
   const onMapReadyRef = useRef(onMapReady);
   useEffect(() => { onMapReadyRef.current = onMapReady; }, [onMapReady]);
