@@ -379,6 +379,21 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AlertEventPage' }
               example: { items: [{ id: ae-synthetic-1, ruleId: ar-synthetic-1, condition: flight_started, aircraftId: ac-synthetic-1, flightId: fl-synthetic-1, observedAt: '2025-01-01T00:00:00Z', emittedAt: '2025-01-01T00:00:01Z', backfill: false, evidence: observed_track_started }], nextCursor: null }
+  /alert-events/{eventId}/acknowledge:
+    parameters:
+      - name: eventId
+        in: path
+        required: true
+        schema: { type: string, pattern: '^[a-fA-F0-9]{64}$' }
+    post:
+      tags: [alerts]
+      summary: Acknowledge an alert event
+      operationId: acknowledgeAlertEvent
+      responses:
+        '204': { description: Alert event acknowledged }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /sources:
     get:
       tags: [sources]
@@ -390,7 +405,7 @@ paths:
           content:
             application/json:
               schema: { type: array, items: { $ref: '#/components/schemas/SourceHealth' } }
-              example: [{ id: fixture-adsb, status: synthetic, lastSuccessAt: '2025-01-01T00:04:58Z', lastErrorAt: null, freshness: fresh, budget: { remainingRequests: 10, resetsAt: '2025-01-01T01:00:00Z' }, enabled: true }, { id: airframes, status: inactive, lastSuccessAt: null, lastErrorAt: null, freshness: unknown, budget: null, enabled: false }]
+              example: [{ id: synthetic-fixture, status: synthetic, lastSuccessAt: '2025-01-01T00:04:58Z', lastErrorAt: null, freshness: fresh, budget: { remainingRequests: 10, resetsAt: '2025-01-01T01:00:00Z' }, enabled: true }, { id: airframes, status: not_configured, lastSuccessAt: null, lastErrorAt: null, freshness: unknown, budget: null, enabled: false }, { id: opensky, status: blocked, lastSuccessAt: null, lastErrorAt: null, freshness: unknown, budget: null, enabled: false }]
   /events:
     get:
       tags: [realtime]
@@ -417,6 +432,8 @@ paths:
               examples:
                 position:
                   value: "id: cursor-42\nevent: position_updated\ndata: {\"eventId\":\"cursor-42\",\"type\":\"position_updated\",\"occurredAt\":\"2025-01-01T00:04:58Z\",\"sourceObservedAt\":\"2025-01-01T00:04:58Z\",\"data\":{\"aircraftId\":\"ac-synthetic-1\"}}\n\n"
+                watchlist:
+                  value: "id: cursor-43\nevent: watchlist_changed\ndata: {\"eventId\":\"cursor-43\",\"type\":\"watchlist_changed\",\"occurredAt\":\"2025-01-01T00:04:59Z\",\"sourceObservedAt\":null,\"data\":{\"watchRuleId\":\"wr-synthetic-1\",\"action\":\"created\"}}\n\n"
                 snapshotRequired:
                   value: "event: snapshot_required\ndata: {\"eventId\":null,\"type\":\"snapshot_required\",\"occurredAt\":\"2025-01-01T00:05:00Z\",\"sourceObservedAt\":null,\"data\":{\"reason\":\"cursor_expired\",\"refresh\":[\"/map/snapshot\",\"/flights\",\"/messages\",\"/alert-events\"]}}\n\n"
                 heartbeat:
@@ -720,7 +737,7 @@ components:
       required: [id, status, lastSuccessAt, lastErrorAt, freshness, budget, enabled]
       properties:
         id: { type: string }
-        status: { type: string, enum: [ok, degraded, inactive, synthetic, error] }
+        status: { type: string, enum: [ok, degraded, inactive, not_configured, blocked, synthetic, error] }
         lastSuccessAt: { type: [string, 'null'], format: date-time }
         lastErrorAt: { type: [string, 'null'], format: date-time }
         freshness: { type: string, enum: [fresh, stale, unknown] }
@@ -745,7 +762,7 @@ components:
       required: [eventId, type, occurredAt, sourceObservedAt, data]
       properties:
         eventId: { type: [string, 'null'] }
-        type: { type: string, enum: [position_updated, flight_started, flight_ended, message_observed, message_decoded, alert_triggered, source_status_changed, snapshot_required] }
+        type: { type: string, enum: [position_updated, flight_started, flight_ended, message_observed, message_decoded, alert_triggered, watchlist_changed, source_status_changed, snapshot_required] }
         occurredAt: { type: string, format: date-time }
         sourceObservedAt: { type: [string, 'null'], format: date-time }
         data: { type: object, additionalProperties: true }
