@@ -5,6 +5,12 @@
 
 All project-authored issue descriptions, updates, tests, comments, commits, PRs, and documentation use **English**.
 
+## Temporary code-first delivery mode (2026-11-20)
+
+[The Master Code Implementation Plan](MASTER_IMPLEMENTATION_PLAN.md) is the consolidated agent implementation workbook. The owner wants locally functioning code and an observable synthetic/private MVP **before any CI/CD or deployment work**. Hosted GitHub Actions status, runner billing, CI branch rules and deployment pipelines are deferred to release issues #49–#52; do not treat missing hosted CI as proof that code failed, nor claim it passed. Run and record local unit, type, boundary, PostgreSQL and browser/API tests when relevant.
+
+**Sequential work still applies to code issues.** When a predecessor has verified engineering work but is `BLOCKED` on source permission, real data access or external owner approval, keep that issue open; EPIC #4 explicitly permits moving to the next technically independent *local synthetic* work package. Record the exception and dependency in both issue bodies/EPIC before advancing. Never bypass a real code dependency or use unlicensed real messages/positions in an internal or public database. Only one code implementation issue should be `IN PROGRESS` or `IN REVIEW` at a time.
+
 ## One issue, one complete outcome
 
 - Treat a child issue as one independently demonstrable deliverable. It owns its objective, exact steps, intended modules/files, interface constraints, validation, acceptance criteria and explicit non-goals.
