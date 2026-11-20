@@ -10,8 +10,10 @@ filters. Registration is not present in the state-vector response.
 OpenSky's current REST documentation says its REST API does not provide MLAT
 state vectors. This implementation maps the documented `position_source`
 field when present, but an `mlat` value is not expected from this endpoint.
-Use of REST in an operational automated system requires a written OpenSky
-license. The adapter therefore refuses all provider calls unless
+The general data license is limited to non-profit research and education;
+operational REST use in an automated system requires prior written permission,
+and commercial use requires a written license. No applicable permission has
+been established for this project. The adapter therefore refuses all provider calls unless
 `LicenseConfirmed` is explicitly true and an OAuth token provider is
 configured. That flag is an operator assertion; it is not evidence that a
 license exists. Live use remains disabled until that external permission is
