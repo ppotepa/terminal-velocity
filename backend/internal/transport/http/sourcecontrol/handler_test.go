@@ -20,16 +20,16 @@ type healthProvider struct {
 }
 
 func (p healthProvider) ListSourceHealth(context.Context) ([]Health, error) { return p.items, p.err }
-func TestListSourcesReturnsConfiguredHealthAndInactiveSource(t *testing.T) {
+func TestListSourcesReturnsConfiguredHealthAndExplicitUnconfiguredOrBlockedStates(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	handler := NewHandler(healthProvider{items: []Health{{ID: "fixture-adsb", Status: "synthetic", LastSuccessAt: &now, Freshness: "fresh", Budget: &Budget{RemainingRequests: 5, ResetsAt: now.Add(time.Hour)}, Enabled: true}, {ID: "airframes-api", Status: "inactive", Freshness: "unknown", Enabled: false}}})
+	handler := NewHandler(healthProvider{items: []Health{{ID: "fixture-adsb", Status: "synthetic", LastSuccessAt: &now, Freshness: "fresh", Budget: &Budget{RemainingRequests: 5, ResetsAt: now.Add(time.Hour)}, Enabled: true}, {ID: "airframes-api", Status: "not_configured", Freshness: "unknown", Enabled: false}, {ID: "opensky", Status: "blocked", Freshness: "unknown", Enabled: false}}})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/sources", nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
 	body := response.Body.String()
-	for _, expected := range []string{`"id":"fixture-adsb"`, `"status":"synthetic"`, `"remainingRequests":5`, `"id":"airframes-api"`, `"status":"inactive"`, `"enabled":false`} {
+	for _, expected := range []string{`"id":"fixture-adsb"`, `"status":"synthetic"`, `"remainingRequests":5`, `"id":"airframes-api"`, `"status":"not_configured"`, `"id":"opensky"`, `"status":"blocked"`, `"enabled":false`} {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("response missing %s: %s", expected, body)
 		}
