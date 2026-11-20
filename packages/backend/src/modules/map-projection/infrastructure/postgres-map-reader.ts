@@ -61,8 +61,9 @@ export function createPostgresMapReader(pool: SqlPool, now: () => number = Date.
     const query = mapViewportQuery(input);
     return runSqlTransaction(pool, async sql => {
       await sql.query(`SET LOCAL statement_timeout = '1000ms'`);
+      await sql.query('SELECT pg_advisory_xact_lock_shared(712004, 1)');
       const state = await sql.query<{ revision: string }>(
-        'SELECT revision FROM tracking.map_state WHERE singleton FOR SHARE');
+        'SELECT revision FROM tracking.map_state WHERE singleton');
       const revision = Number(state.rows[0]?.revision);
       if (!Number.isSafeInteger(revision)) throw new Error('The map checkpoint is missing.');
       if (query.cursor && query.cursor.revision !== revision)

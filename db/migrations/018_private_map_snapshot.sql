@@ -35,6 +35,8 @@ CREATE FUNCTION tracking.refresh_map_position() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $function$
 DECLARE selected record;
 BEGIN
+  -- Readers hold the matching shared transaction lock through their page read.
+  PERFORM pg_catalog.pg_advisory_xact_lock(712004, 1);
   SELECT p.latitude,p.longitude,p.observed_at_ms,p.source_id,p.measurement_kind,
     p.fact ->> 'timestampPrecision' AS timestamp_precision,
     (p.fact ->> 'timestampUncertaintyMs')::bigint AS timestamp_uncertainty_ms
@@ -64,10 +66,6 @@ RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $
 DECLARE latest bigint;
 BEGIN
   IF affected_aircraft IS NULL OR affected_bearer IS NULL THEN RETURN; END IF;
-  -- Serialize competing corrections for the same aircraft/protocol before
-  -- reading max(), including when distinct message rows are being changed.
-  PERFORM pg_catalog.pg_advisory_xact_lock(
-    pg_catalog.hashtextextended(affected_aircraft || ':' || affected_bearer, 0));
   SELECT max(observed_at_ms) INTO latest FROM availability.contributions
     WHERE aircraft_id=affected_aircraft AND bearer=affected_bearer;
   IF latest IS NULL THEN
@@ -86,6 +84,9 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $function$
 DECLARE old_aircraft text; old_bearer text; new_aircraft text; new_bearer text;
   affected record;
 BEGIN
+  -- One map writer at a time; this also makes max() correction reads safe
+  -- across distinct contribution rows without granting direct map writes.
+  PERFORM pg_catalog.pg_advisory_xact_lock(712004, 1);
   IF TG_OP <> 'INSERT' THEN
     old_aircraft := OLD.aircraft_id; old_bearer := OLD.bearer;
   END IF;
