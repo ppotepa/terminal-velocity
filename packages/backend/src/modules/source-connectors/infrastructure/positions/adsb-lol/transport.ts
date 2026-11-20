@@ -9,7 +9,6 @@ import { parseAdsbLolPositionSnapshot, type AdsbLolPositionBatch, type AdsbLolSn
 
 export const ADSB_LOL_REQUEST_TIMEOUT_MS = 8_000;
 export const ADSB_LOL_MAX_RESPONSE_BYTES = 1_000_000;
-const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export type AdsbLolTransportError =
   | { readonly code: 'MINIMUM_INTERVAL'; readonly retryAfterMs: number }
@@ -36,9 +35,10 @@ export interface AdsbLolTransportOptions {
   readonly maximumResponseBytes?: number;
 }
 
-/** Offline contract tests may replace the process budget; never pass this from a live composition root. */
-export interface AdsbLolTransportTestOptions extends AdsbLolTransportOptions {
+/** A prebuilt response has no network capability; fixture tests may use an isolated budget. */
+export interface AdsbLolTransportTestOptions extends Omit<AdsbLolTransportOptions, 'fetch'> {
   readonly requestBudget: PositionRequestBudget;
+  readonly response: Response | 'REJECT' | 'WAIT_FOR_ABORT';
 }
 
 function retryAfterMs(header: string | null, nowMs: number): number {
@@ -162,7 +162,7 @@ export function createAdsbLolPositionTransport(
 ): AdsbLolPositionTransport {
   if ('requestBudget' in options || 'requestBudgetOptions' in options)
     throw new TypeError('Live transport budget cannot be overridden.');
-  return createTransport(query, sourceId, options, processPositionRequestBudget);
+  return createTransport(query, sourceId, options, processPositionRequestBudget, Date.now);
 }
 
 export function createAdsbLolPositionTransportForTest(
@@ -170,8 +170,22 @@ export function createAdsbLolPositionTransportForTest(
   sourceId: PositionSourceId,
   options: AdsbLolTransportTestOptions,
 ): AdsbLolPositionTransport {
-  if (!options.fetch) throw new Error('Test transport requires an injected fixture fetch.');
-  return createTransport(query, sourceId, options, options.requestBudget);
+  if ('fetch' in options) throw new TypeError('Fixture transport cannot accept a fetch function.');
+  if (!(options.response instanceof Response)
+    && options.response !== 'REJECT' && options.response !== 'WAIT_FOR_ABORT')
+    throw new TypeError('Fixture transport requires a prebuilt response or synthetic failure mode.');
+  const fixtureFetch: typeof globalThis.fetch = async (_url, init) => {
+    if (options.response === 'REJECT') throw new Error('Synthetic transport failure');
+    if (options.response === 'WAIT_FOR_ABORT') {
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        if (signal?.aborted) reject(new Error('Synthetic abort'));
+        else signal?.addEventListener('abort', () => reject(new Error('Synthetic abort')), { once: true });
+      });
+    }
+    return options.response;
+  };
+  return createTransport(query, sourceId, { ...options, fetch: fixtureFetch }, options.requestBudget, options.now ?? Date.now);
 }
 
 function createTransport(
@@ -179,6 +193,7 @@ function createTransport(
   sourceId: PositionSourceId,
   options: AdsbLolTransportOptions,
   budget: PositionRequestBudget,
+  budgetClock: () => number,
 ): AdsbLolPositionTransport {
   const validated = adsbLolPositionQuery(inputQuery);
   if (!validated.ok) throw new RangeError(`Invalid position query: ${validated.error.field}.`);
@@ -187,16 +202,16 @@ function createTransport(
   const clock = options.now ?? Date.now;
   const timeoutMs = options.timeoutMs ?? ADSB_LOL_REQUEST_TIMEOUT_MS;
   const maximumBytes = options.maximumResponseBytes ?? ADSB_LOL_MAX_RESPONSE_BYTES;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > MAX_TIMER_DELAY_MS)
-    throw new RangeError('Request timeout must be a positive integer supported by the runtime timer.');
-  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1)
-    throw new RangeError('Maximum response size must be a positive safe integer.');
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > ADSB_LOL_REQUEST_TIMEOUT_MS)
+    throw new RangeError('Request timeout must be between 1 ms and the provider cap.');
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > ADSB_LOL_MAX_RESPONSE_BYTES)
+    throw new RangeError('Maximum response size must be between 1 byte and the provider cap.');
 
   return Object.freeze({
     async fetchNext(signal?: AbortSignal): Promise<Result<AdsbLolPositionBatch, AdsbLolTransportError>> {
       if (signal?.aborted) return err({ code: 'ABORTED' });
       const startedAt = clock();
-      const permitted = budget.tryAcquire(startedAt);
+      const permitted = budget.tryAcquire(budgetClock());
       if (!permitted.ok) return err(permitted.error);
       const controller = new AbortController();
       const onAbort = () => controller.abort(signal?.reason);

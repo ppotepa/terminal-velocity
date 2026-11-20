@@ -285,9 +285,29 @@ from the S4-02 diff; both crawler files again match merged S4-01. Node 24
 offline `npm ci`, `npm run test:messages`, and the focused provider and position
 contract tests passed after the removal. `npm run test:browser` could
 not run to completion in this authoring shell because its synthetic loopback
-server receives `listen EPERM` on `127.0.0.1`. The coordinator's earlier
-exact-SHA CI result applies to the prior head only; this correction needs a new
-isolated CI run before review. No new live provider request or independent
+server receives `listen EPERM` on `127.0.0.1`. The coordinator supplied a
+passing isolated CI result for the corrected exact head
+`e8e0d7ee27c81825a48d9af30173ffa3279871ab`. No new live provider request or independent
 source-rights approval was obtained for this correction. The earlier
 aggregate-only source smoke remains historical evidence, not a live acceptance
 result for the corrected head.
+
+The subsequent quota review removes the fixture factory's fetch-function input,
+uses the real process clock for every live quota decision, and caps caller-supplied
+timeout and response size at 8 seconds and 1 MB. The passing isolated CI result
+above predates these edits; coordinator CI must verify their exact commit. No
+live provider check was performed for this follow-up. There is no migration or
+durable data change; rollback is a code revert and an in-memory preview is lost
+on shutdown.
+
+The supplied #15 issue body still labels its current status `BACKLOG` while
+also recording PR #57 in review. The coordinator owns reconciling that issue
+body and its status label; this checkout update does not change GitHub state.
+
+For this quota follow-up, Node 24.22.3 passed offline `npm ci`, type checking,
+architecture boundaries (232 source files, 832 dependencies), the focused
+provider suite, all 17 backend test files, `npm run test:messages`, and
+`git diff --check`. `npm run check` stopped at the private preview's loopback
+test, and `npm run test:browser` also could not bind synthetic loopback servers:
+direct execution showed `listen EPERM` on `127.0.0.1`. These are authoring-shell
+results, not a passing exact-head isolated CI run.

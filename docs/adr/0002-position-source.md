@@ -27,8 +27,12 @@ window resets at midnight UTC or is a fixed 24-hour bucket. We will not assume a
 reset time: the local budget uses a rolling window and the 10-minute interval.
 HTTP 429 must honor `Retry-After` and must not trigger an immediate retry.
 Every live transport in one Node process shares the default budget. Only the
-explicit fixture transport factory accepts an isolated budget; the live
-factory cannot replace or weaken the process policy. The batch reports that
+explicit fixture transport factory accepts an isolated budget and a prebuilt
+synthetic response or failure mode; it cannot accept a fetch function. The live
+factory cannot replace or weaken the process policy, and its budget uses the
+real process clock even when a caller injects a clock for response timestamps.
+Live requests have an 8-second maximum timeout and a 1 MB maximum response
+body, including when callers supply options. The batch reports that
 live policy. This in-memory limit does not coordinate multiple processes or
 other clients sharing one IP address, so an operator must account for those
 before enabling more than one preview process.

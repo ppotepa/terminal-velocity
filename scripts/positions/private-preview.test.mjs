@@ -10,12 +10,11 @@ const fixture = JSON.parse(await readFile(new URL('../../packages/backend/tests/
 const query = { latitude: 52.52, longitude: 13.405, radiusNm: 10 };
 
 test('private preview starts on loopback, serves canonical observations only, and shuts down', async () => {
-  let calls = 0;
   const preview = await startPrivatePositionPreview({ query, transportFactory: (positionQuery, sourceId) =>
     createAdsbLolPositionTransportForTest(positionQuery, sourceId, {
-      fetch: async () => { calls += 1; return new Response(JSON.stringify(fixture), {
+      response: new Response(JSON.stringify(fixture), {
         headers: { 'content-type': 'application/json' },
-      }); },
+      }),
       now: () => Date.parse('2026-11-19T12:00:02.000Z'),
       requestBudget: createPositionRequestBudget(),
     }),
@@ -31,7 +30,7 @@ test('private preview starts on loopback, serves canonical observations only, an
       if (response.status === 200) break;
       await new Promise(resolve => setTimeout(resolve, 10));
     }
-    assert.equal(calls, 1);
+    assert.equal(preview.health().status, 'CONNECTED');
     assert.equal(body.batch.observations.length, 3);
     assert.equal(body.batch.provider, 'adsb.lol');
     assert.equal(body.batch.ac, undefined);

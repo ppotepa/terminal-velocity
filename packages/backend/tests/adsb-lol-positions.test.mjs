@@ -45,9 +45,9 @@ function jsonResponse(value, init = {}) {
   });
 }
 
-function transport(fetcher, options = {}) {
+function transport(response, options = {}) {
   return createAdsbLolPositionTransportForTest(QUERY, SOURCE_ID, {
-    fetch: fetcher,
+    response,
     now: () => Date.parse(FETCHED_AT),
     requestBudget: budget(),
     ...options,
@@ -131,6 +131,13 @@ test('transport validates a JavaScript caller query before it can make a request
   assert.throws(() => createAdsbLolPositionTransport(QUERY, SOURCE_ID, {
     requestBudget: budget(),
   }), /cannot be overridden/u);
+  assert.throws(() => createAdsbLolPositionTransportForTest(QUERY, SOURCE_ID, {
+    fetch: globalThis.fetch, response: jsonResponse(FIXTURE), requestBudget: budget(),
+  }), /cannot accept a fetch function/u);
+  for (const options of [
+    { timeoutMs: 8_001 }, { timeoutMs: 2_147_483_647 },
+    { maximumResponseBytes: 1_000_001 }, { maximumResponseBytes: Number.MAX_SAFE_INTEGER },
+  ]) assert.throws(() => createAdsbLolPositionTransport(QUERY, SOURCE_ID, options), RangeError);
 });
 
 test('snapshot parser rejects malformed envelope, source errors, coordinate pairs and time evidence', () => {
@@ -178,19 +185,14 @@ test('request budget enforces minimum spacing and a rolling request ceiling', ()
 });
 
 test('transport reads one bounded JSON snapshot and charges every attempted request', async () => {
-  const calls = [];
-  const adapter = transport(async (url, init) => {
-    calls.push({ url, method: init.method, accept: init.headers.accept, redirect: init.redirect });
-    return jsonResponse(FIXTURE);
-  });
+  const adapter = transport(jsonResponse(FIXTURE));
   const first = await adapter.fetchNext();
   assert.equal(first.ok, true);
-  assert.deepEqual(calls, [{ url: adsbLolPointUrl(QUERY), method: 'GET', accept: 'application/json', redirect: 'error' }]);
 
   const limited = createPositionRequestBudget({ minimumIntervalMs: 1, rollingWindowMs: 60_000, maxRequestsPerWindow: 1 });
   const requestTimes = [Date.parse(FETCHED_AT), Date.parse(FETCHED_AT), Date.parse(FETCHED_AT),
     Date.parse(FETCHED_AT) + 2];
-  const onlyOne = transport(async () => jsonResponse(FIXTURE), {
+  const onlyOne = transport(jsonResponse(FIXTURE), {
     requestBudget: limited,
     now: () => requestTimes.shift() ?? Date.parse(FETCHED_AT) + 2,
   });
@@ -206,43 +208,43 @@ test('transport shares its default in-process budget across independently create
   const right = createAdsbLolPositionTransport(QUERY, SOURCE_ID, {
     fetch: async () => jsonResponse(FIXTURE), now: () => Date.now(),
   });
+  const forgedClock = createAdsbLolPositionTransport(QUERY, SOURCE_ID, {
+    fetch: async () => jsonResponse(FIXTURE), now: () => Date.now() + 86_400_000,
+  });
   assert.equal((await left.fetchNext()).ok, true);
   assert.equal((await right.fetchNext()).error.code, 'MINIMUM_INTERVAL');
+  assert.equal((await forgedClock.fetchNext()).error.code, 'MINIMUM_INTERVAL');
 });
 
 test('transport categorizes 429, Retry-After, temporary, authentication and invalid responses', async () => {
-  const rateLimited = transport(async () => new Response('', { status: 429, headers: { 'retry-after': '17' } }));
+  const rateLimited = transport(new Response('', { status: 429, headers: { 'retry-after': '17' } }));
   assert.deepEqual((await rateLimited.fetchNext()).error, { code: 'RATE_LIMITED', retryAfterMs: 17_000 });
-  const temporary = transport(async () => new Response('', { status: 503, headers: { 'retry-after': '30' } }));
+  const temporary = transport(new Response('', { status: 503, headers: { 'retry-after': '30' } }));
   assert.deepEqual((await temporary.fetchNext()).error,
     { code: 'TEMPORARY_FAILURE', status: 503, retryAfterMs: 30_000 });
-  const unauthenticated = transport(async () => new Response('', { status: 403 }));
+  const unauthenticated = transport(new Response('', { status: 403 }));
   assert.deepEqual((await unauthenticated.fetchNext()).error, { code: 'AUTHENTICATION_FAILURE', status: 403 });
-  const wrongMime = transport(async () => new Response('<html/>', { headers: { 'content-type': 'text/html' } }));
+  const wrongMime = transport(new Response('<html/>', { headers: { 'content-type': 'text/html' } }));
   assert.deepEqual((await wrongMime.fetchNext()).error, { code: 'INVALID_RESPONSE', field: 'content-type' });
-  const invalidJson = transport(async () => new Response('{', { headers: { 'content-type': 'application/json' } }));
+  const invalidJson = transport(new Response('{', { headers: { 'content-type': 'application/json' } }));
   assert.deepEqual((await invalidJson.fetchNext()).error, { code: 'INVALID_RESPONSE', field: 'body' });
-  const tooLarge = transport(async () => new Response('123456', {
+  const tooLarge = transport(new Response('123456', {
     headers: { 'content-type': 'application/json', 'content-length': '6' },
   }), { maximumResponseBytes: 5 });
   assert.deepEqual((await tooLarge.fetchNext()).error, { code: 'INVALID_RESPONSE', field: 'body' });
 });
 
 test('transport distinguishes timeout and caller cancellation', async () => {
-  const timedOut = transport((_url, init) => new Promise((_, reject) => {
-    init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
-  }), { timeoutMs: 5 });
+  const timedOut = transport('WAIT_FOR_ABORT', { timeoutMs: 5 });
   assert.deepEqual((await timedOut.fetchNext()).error, { code: 'TIMEOUT', retryAfterMs: 60_000 });
 
-  const cancelled = transport((_url, init) => new Promise((_, reject) => {
-    init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
-  }));
+  const cancelled = transport('WAIT_FOR_ABORT');
   const controller = new AbortController();
   const pending = cancelled.fetchNext(controller.signal);
   controller.abort();
   assert.deepEqual((await pending).error, { code: 'ABORTED' });
 
-  const timedOutBody = transport(async () => new Response(new ReadableStream({
+  const timedOutBody = transport(new Response(new ReadableStream({
     pull: () => new Promise(() => undefined),
   }), { headers: { 'content-type': 'application/json' } }), { timeoutMs: 5 });
   assert.deepEqual((await timedOutBody.fetchNext()).error, { code: 'TIMEOUT', retryAfterMs: 60_000 });
