@@ -61,15 +61,15 @@ export function postgresPositionLinker(pool: SqlPool): PositionLinker {
   }
   return { reevaluate, async replayAlias(alias, from, until, limit, after) {
     const parsed = icao24(alias);
-    if (!parsed.ok || !Number.isSafeInteger(from) || from < 0 || !Number.isSafeInteger(until)
-      || until <= from || !Number.isSafeInteger(limit) || limit < 1 || limit > 500
+    if (!parsed.ok || !Number.isSafeInteger(from) || from < 0 || (until !== null &&
+      (!Number.isSafeInteger(until) || until <= from)) || !Number.isSafeInteger(limit) || limit < 1 || limit > 500
       || (after !== undefined && (!Number.isSafeInteger(after.observedAt) || after.observedAt < from
-        || after.observedAt >= until || typeof after.sourceId !== 'string'
+        || (until !== null && after.observedAt >= until) || typeof after.sourceId !== 'string'
         || typeof after.sourceObservationId !== 'string')))
       throw new RangeError('Invalid bounded alias replay.');
     const result = await pool.query<{ observed_at_ms: string; source_id: string; source_observation_id: string }>(`
       SELECT observed_at_ms,source_id,source_observation_id FROM tracking.position_observations
-      WHERE icao24_hint=$1 AND observed_at_ms >= $2 AND observed_at_ms < $3
+      WHERE icao24_hint=$1 AND observed_at_ms >= $2 AND ($3::bigint IS NULL OR observed_at_ms < $3)
         AND ($4::bigint IS NULL OR (observed_at_ms,source_id,source_observation_id) > ($4,$5,$6))
       ORDER BY observed_at_ms,source_id,source_observation_id LIMIT $7`,
     [parsed.value, from, until, after?.observedAt ?? null, after?.sourceId ?? null,

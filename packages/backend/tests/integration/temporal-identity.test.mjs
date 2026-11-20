@@ -8,6 +8,9 @@ import { postgresIdentityCommitter } from '../../src/modules/fleet-identity/infr
 import { postgresPositionLinker } from '../../src/modules/fleet-identity/infrastructure/postgres/postgres-position-linker.ts';
 import { postgresReplayRequestReader } from '../../src/modules/fleet-identity/infrastructure/postgres/postgres-replay-request-reader.ts';
 import { postgresPositionHistoryWriter } from '../../src/modules/flight-tracking/infrastructure/postgres/append-position.ts';
+import { createSyntheticProviderPipeline } from '../../src/modules/source-connectors/composition/create-synthetic-provider-pipeline.ts';
+import { createIdentityReplayWorker } from '../../src/modules/source-connectors/composition/create-identity-replay-worker.ts';
+import { fixture, accept, NOW } from './helpers/provider-fixture.mjs';
 
 const pools = createTestPools();
 beforeEach(() => resetTestData(pools.admin));
@@ -126,4 +129,98 @@ test('an upstream confirmed position can link to an existing stable aircraft wit
   assert.equal((await postgresPositionHistoryWriter(pools.runtime).append(raw, upstream)).ok, true);
   assert.equal((await postgresPositionLinker(pools.runtime).reevaluate(raw.sourceId,
     raw.sourceObservationId)).aircraftId, 'ac_confirmed');
+});
+
+test('permitted synthetic message resolves through registry at observation time and correction preserves facts', async () => {
+  const commit = postgresIdentityCommitter(pools.runtime);
+  await commit.createAircraft('ac_old'); await commit.createAircraft('ac_new');
+  const raw = fixture();
+  const observed = Date.parse(raw.sourceObservedAt.at);
+  const first = await commit.append(claim('ac_old', hex('D00001'), 0));
+  await commit.append(claim('ac_old', tail('DEMO-001'), 0));
+  const pipeline = createSyntheticProviderPipeline(pools.runtime, undefined, () => NOW);
+  assert.ok((await accept(pipeline, raw)).ok);
+  await pipeline.drain();
+  const message = (await pools.runtime.query('SELECT message_id,canonical FROM source_ingestion.message_revisions')).rows[0];
+  const original = JSON.stringify(message.canonical);
+  let decisions = (await pools.runtime.query(`SELECT revision,decision FROM correlation.aircraft_link_revisions
+    WHERE message_id=$1 ORDER BY revision`, [message.message_id])).rows;
+  assert.equal(decisions.length, 1);
+  assert.equal(decisions[0].decision.aircraftId, 'ac_old');
+  assert.equal(observed < NOW, true);
+  await commit.append(claim('ac_new', hex('D00001'), 0), first.assertionId);
+  const badClock = createIdentityReplayWorker(pools.runtime, () => -1);
+  await badClock(1);
+  await assert.rejects(badClock(1), /COMMIT_FAILED|Invalid replay clock/);
+  assert.equal((await pools.runtime.query(`SELECT phase,cursor_message_id FROM fleet_identity.replay_requests
+    ORDER BY request_id DESC LIMIT 1`)).rows[0].cursor_message_id, null);
+  await pipeline.drain();
+  decisions = (await pools.runtime.query(`SELECT revision,decision FROM correlation.aircraft_link_revisions
+    WHERE message_id=$1 ORDER BY revision`, [message.message_id])).rows;
+  assert.deepEqual(decisions.map(row => row.decision.status), ['MATCHED', 'CONFLICTED']);
+  assert.equal(JSON.stringify((await pools.runtime.query(`SELECT canonical FROM source_ingestion.message_revisions
+    WHERE message_id=$1`, [message.message_id])).rows[0].canonical), original);
+  assert.equal((await pools.runtime.query(`SELECT revision FROM correlation.aircraft_link_heads
+    WHERE message_id=$1`, [message.message_id])).rows[0].revision, '2');
+  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM correlation.outbox
+    WHERE stream_key=$1`, [message.message_id])).rows[0].n, '2');
+  assert.equal((await pipeline.readPrivateStatus('ac_old')).freshness, 'NONE');
+});
+
+test('bounded replay resumes open-ended ranges and competing position owners without rewriting prior links', async () => {
+  const commit = postgresIdentityCommitter(pools.runtime);
+  await commit.createAircraft('ac_a'); await commit.createAircraft('ac_b');
+  await commit.append(claim('ac_a', hex('A0B1C2'), 0));
+  const writer = postgresPositionHistoryWriter(pools.runtime);
+  const at = Date.parse('2026-11-19T10:00:00Z');
+  for (let i = 0; i < 3; i++) assert.ok((await writer.append(position(`page-${i}`, at + i * 1000))).ok);
+  const linker = postgresPositionLinker(pools.runtime);
+  for (let i = 0; i < 3; i++) assert.equal((await linker.reevaluate('src_synthetic',
+    `epoch:synthetic-1:page-${i}`)).aircraftId, 'ac_a');
+  await commit.append(claim('ac_b', hex('A0B1C2'), 0));
+  const work = createIdentityReplayWorker(pools.runtime);
+  const pages = [];
+  for (let i = 0; i < 20; i++) {
+    const page = await work(1);
+    if (!page) break;
+    pages.push(page);
+  }
+  assert.ok(pages.length > 3);
+  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.replay_requests
+    WHERE phase <> 'DONE'`)).rows[0].n, '0');
+  const links = (await pools.runtime.query(`SELECT source_observation_id,revision,status,aircraft_id,candidate_ids
+    FROM fleet_identity.position_link_revisions ORDER BY source_observation_id,revision`)).rows;
+  for (let i = 0; i < 3; i++) {
+    const history = links.filter(row => row.source_observation_id.endsWith(`page-${i}`));
+    assert.deepEqual(history.map(row => row.status), ['MATCHED','AMBIGUOUS']);
+    assert.equal(history[0].aircraft_id, 'ac_a');
+    assert.equal(history[1].aircraft_id, null);
+    assert.deepEqual(history[1].candidate_ids, ['ac_a','ac_b']);
+  }
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM tracking.position_observations')).rows[0].n, '3');
+  assert.equal(await work(1), null);
+});
+
+test('registration correction re-evaluates a historical provider message without changing its source revision', async () => {
+  const commit = postgresIdentityCommitter(pools.runtime);
+  await commit.createAircraft('ac_first'); await commit.createAircraft('ac_second');
+  const originalClaim = await commit.append(claim('ac_first', tail('N123AB'), 0));
+  const raw = fixture();
+  raw.aircraft = { registration: 'n123ab' };
+  const pipeline = createSyntheticProviderPipeline(pools.runtime, undefined, () => NOW);
+  assert.ok((await accept(pipeline, raw)).ok);
+  await pipeline.drain();
+  const message = (await pools.runtime.query('SELECT message_id,canonical FROM source_ingestion.message_revisions')).rows[0];
+  assert.equal((await pools.runtime.query(`SELECT decision->>'aircraftId' AS aircraft_id
+    FROM correlation.aircraft_link_revisions WHERE message_id=$1`, [message.message_id])).rows[0].aircraft_id, 'ac_first');
+  await commit.append(claim('ac_second', tail('N123AB'), 0), originalClaim.assertionId);
+  await pipeline.drain();
+  const decisions = (await pools.runtime.query(`SELECT revision,decision FROM correlation.aircraft_link_revisions
+    WHERE message_id=$1 ORDER BY revision`, [message.message_id])).rows;
+  assert.deepEqual(decisions.map(row => row.decision.aircraftId), ['ac_first','ac_second']);
+  assert.equal((await pipeline.readPrivateStatus('ac_first')).freshness, 'NONE');
+  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM source_ingestion.message_revisions
+    WHERE message_id=$1`, [message.message_id])).rows[0].n, '1');
+  assert.deepEqual((await pools.runtime.query(`SELECT canonical FROM source_ingestion.message_revisions
+    WHERE message_id=$1`, [message.message_id])).rows[0].canonical, message.canonical);
 });
