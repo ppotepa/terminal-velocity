@@ -242,16 +242,16 @@ test('an oversized owner set blocks only its replay request and resumes after co
     SELECT 'ac_bulk-'||lpad(n::text,4,'0'),'ICAO24','D00001',0,'synthetic','test',n+1
     FROM generate_series(1,2000) n`);
   await pools.admin.query('UPDATE fleet_identity.registry_state SET revision=2001 WHERE singleton');
-  await pools.admin.query(`INSERT INTO fleet_identity.replay_requests
+  const insertedRequests = await pools.admin.query(`INSERT INTO fleet_identity.replay_requests
     (assertion_id,kind,normalized_alias,valid_from_ms,phase)
-    VALUES ($1,'ICAO24','FFFFFF',0,'MESSAGES')`, [original.assertionId]);
-  const requests = (await pools.runtime.query(`SELECT request_id FROM fleet_identity.replay_requests
-    WHERE phase <> 'DONE' ORDER BY request_id`)).rows.map(row => Number(row.request_id));
+    VALUES ($1,'ICAO24','D00001',0,'MESSAGES'),
+      ($1,'ICAO24','FFFFFF',0,'MESSAGES') RETURNING request_id`, [original.assertionId]);
+  const requests = insertedRequests.rows.map(row => Number(row.request_id));
   const work = createIdentityReplayWorker(pools.runtime);
   for (let i = 0; i < 10; i++) {
     await work(1);
     const phases = (await pools.runtime.query(`SELECT phase FROM fleet_identity.replay_requests
-      ORDER BY request_id`)).rows.map(row => row.phase);
+      WHERE request_id = ANY($1::bigint[]) ORDER BY request_id`, [requests])).rows.map(row => row.phase);
     if (phases[0] === 'BLOCKED' && phases[1] === 'DONE') break;
   }
   const blocked = (await pools.runtime.query(`SELECT phase,blocked_revision,cursor_message_id
