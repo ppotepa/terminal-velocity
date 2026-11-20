@@ -7,6 +7,7 @@ import { createCorrelateMessage, icao24, registration, type StrongIdentifier } f
 import { createPostgresDecisionReader } from '../../aircraft-correlation/infrastructure/postgres/create-postgres-decision-reader.ts';
 import { createPostgresDecisionWriteSet } from '../../aircraft-correlation/infrastructure/postgres/create-postgres-decision-write-set.ts';
 import { runDecisionWork } from '../../aircraft-correlation/infrastructure/postgres/run-decision-work.ts';
+import { replayWorkOrder, replayWorkSuccessor, type ReplayWorkKind } from '../domain/replay-work-order.ts';
 import { createRegistryCandidateDirectory, createPostgresRegistryReader,
   reevaluatePositionOnConnection, expandReplayAliases } from '../../fleet-identity/public/index.ts';
 
@@ -38,7 +39,7 @@ export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Da
     return runSqlTransaction(pool, async sql => {
       // The durable turn is locked with the selected page. A failed page rolls
       // back both its cursor and the turn, including across worker restarts.
-      const scheduler = await sql.query<{ next_kind: 'JOBS' | 'CORRECTIONS' }>(`
+      const scheduler = await sql.query<{ next_kind: ReplayWorkKind }>(`
         SELECT next_kind FROM fleet_identity.replay_scheduler WHERE singleton FOR UPDATE`);
       const turn = scheduler.rows[0]?.next_kind;
       if (!turn) throw new Error('Identity replay scheduler is missing.');
@@ -55,25 +56,28 @@ export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Da
         FOR UPDATE SKIP LOCKED LIMIT 1`)).rows[0];
       let job: Awaited<ReturnType<typeof selectJob>>;
       let request: Awaited<ReturnType<typeof selectRequest>>;
-      if (turn === 'JOBS') {
-        job = await selectJob();
-        if (!job) {
+      // The scheduler row is locked until commit. Rotate by the class that
+      // actually made progress, not the originally preferred class. Each
+      // continuously nonempty queue is served at least once every three turns.
+      for (const kind of replayWorkOrder(turn)) {
+        if (kind === 'JOBS') {
+          job = await selectJob();
+          if (job) break;
+        } else if (kind === 'EXPANSIONS') {
           const expansion = await expandReplayAliases(sql, limit);
-          if (expansion) return expansion;
+          if (expansion) {
+            await sql.query('UPDATE fleet_identity.replay_scheduler SET next_kind=$1 WHERE singleton',
+              [replayWorkSuccessor('EXPANSIONS')]);
+            return expansion;
+          }
+        } else {
           request = await selectRequest();
+          if (request) break;
         }
-      } else {
-        const expansion = await expandReplayAliases(sql, limit);
-        if (expansion) {
-          await sql.query("UPDATE fleet_identity.replay_scheduler SET next_kind='JOBS' WHERE singleton");
-          return expansion;
-        }
-        request = await selectRequest();
-        if (!request) job = await selectJob();
       }
       if (!job && !request) return null;
       await sql.query('UPDATE fleet_identity.replay_scheduler SET next_kind=$1 WHERE singleton',
-        [job ? 'CORRECTIONS' : 'JOBS']);
+        [replayWorkSuccessor(job ? 'JOBS' : 'CORRECTIONS')]);
       if (job) {
         await reevaluatePositionOnConnection(sql, job.source_id, job.source_observation_id);
         await sql.query(`UPDATE fleet_identity.position_link_jobs SET completed_at=clock_timestamp()

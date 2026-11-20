@@ -31,3 +31,17 @@ In the authoring shell, offline `npm ci`, `npm run typecheck`, `npm run check:bo
 ## External gates
 
 All implementation evidence uses synthetic data. Provider rights, real-source retention, publication policy, deployment, and owner acceptance remain external decisions. This change adds no public map or flight-session recognition. The coordinator should run exact-SHA CI, review the migration and correction, then update #17 and epic #4 according to the issue workflow. Only after merge and verification can #17 be marked `DONE` and the next issue activated.
+
+
+## Fair scheduling follow-up on PR #66
+
+Review of the pushed `bb05057c` head identified a starvation risk: a
+continuously nonempty alias-expansion queue could monopolize CORRECTIONS turns
+and prevent queued message/position correction requests from executing.
+Migration 015 extends the durable scheduler to three work classes. A pure
+round-robin policy selects the next nonempty class and advances the persisted
+turn after the class that actually ran. Added pure and real-PostgreSQL
+regressions for this condition. Only the three pure policy tests have been
+executed in the current environment (Node 22 experimental TS stripping);
+full Node 24/PostgreSQL and browser suites require independent execution
+for the new head before marking #17 complete.

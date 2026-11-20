@@ -652,6 +652,46 @@ test('correction replay receives work while new position jobs remain pending', a
     WHERE completed_at IS NULL`)).rows[0].n, '0');
 });
 
+test('three replay classes make progress under simultaneous continuing workloads', async () => {
+  const commit = postgresIdentityCommitter(pools.runtime);
+  await commit.createAircraft('ac_fair');
+  const assertion = await commit.append(claim('ac_fair', hex('A0B1C2'), 0));
+  const writer = postgresPositionHistoryWriter(pools.runtime);
+  const at = Date.parse('2026-11-19T10:00:00Z');
+  for (let i = 0; i < 6; i++) {
+    assert.ok((await writer.append(position(`round-robin-${i}`, at + i * 1000))).ok);
+  }
+  await pools.admin.query(`INSERT INTO fleet_identity.replay_expansions
+    (assertion_id,aircraft_id,valid_from_ms)
+    SELECT $1,'ac_fair',0 FROM generate_series(1,6)`, [assertion.assertionId]);
+  await pools.admin.query(`INSERT INTO fleet_identity.replay_requests
+    (assertion_id,kind,normalized_alias,valid_from_ms,phase)
+    SELECT $1,'ICAO24','FFFFFF',0,'POSITIONS' FROM generate_series(1,6)`,
+  [assertion.assertionId]);
+  const work = createIdentityReplayWorker(pools.runtime);
+  const observedNextKinds = [];
+  for (let i = 0; i < 9; i++) {
+    assert.ok(await work(1));
+    const state = await pools.runtime.query('SELECT next_kind FROM fleet_identity.replay_scheduler WHERE singleton');
+    observedNextKinds.push(state.rows[0].next_kind);
+  }
+  assert.deepEqual(observedNextKinds, [
+    'EXPANSIONS', 'CORRECTIONS', 'JOBS',
+    'EXPANSIONS', 'CORRECTIONS', 'JOBS',
+    'EXPANSIONS', 'CORRECTIONS', 'JOBS',
+  ]);
+  const counts = (await pools.runtime.query(`SELECT
+    (SELECT count(*)::int FROM fleet_identity.position_link_jobs
+      WHERE completed_at IS NOT NULL) AS jobs_done,
+    (SELECT count(*)::int FROM fleet_identity.replay_expansions
+      WHERE completed_at IS NOT NULL) AS expansions_done,
+    (SELECT count(*)::int FROM fleet_identity.replay_requests
+      WHERE cursor_observation_id IS NOT NULL) AS corrections_progressed`)).rows[0];
+  assert.equal(counts.jobs_done, 3);
+  assert.equal(counts.expansions_done, 3);
+  assert.ok(counts.corrections_progressed >= 1);
+});
+
 test('position backfill commits bounded pages and resumes without duplicate jobs', async () => {
   await pools.admin.query('ALTER TABLE tracking.position_observations DISABLE TRIGGER enqueue_position_link');
   try {
