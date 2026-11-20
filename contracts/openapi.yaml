@@ -1,0 +1,751 @@
+openapi: 3.1.0
+info:
+  title: Terminal Velocity API
+  version: 1.0.0
+  description: >-
+    Local aircraft watch, observed-position history, communications, decoder,
+    alert and source-health API. Live source availability and data rights are
+    deployment-specific; examples in this contract are synthetic.
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local development server
+tags:
+  - { name: system, description: Process health and readiness. }
+  - { name: watch-rules, description: User-selected acquisition criteria and collection preferences. }
+  - { name: aircraft, description: Stable aircraft identities associated with selected rules. }
+  - { name: flights, description: Flights and actual observed position history. }
+  - { name: map, description: Current snapshots of observed positions. }
+  - { name: messages, description: Permitted provider messages and provenance. }
+  - { name: decoders, description: Versioned decoder capabilities and declarative settings. }
+  - { name: alerts, description: Alert rules and emitted transitions. }
+  - { name: sources, description: Source freshness and bounded acquisition budgets. }
+  - { name: realtime, description: Server-sent event stream and reconnect behavior. }
+paths:
+  /api/health:
+    get:
+      tags: [system]
+      operationId: getHealth
+      summary: Process health and readiness
+      description: Unversioned health endpoint for local startup and readiness checks.
+      servers:
+        - url: http://localhost:8080
+          description: Local server root; health remains available at /api/health.
+      responses:
+        '200':
+          description: Process is available
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+              example: { status: ok, version: 1.0.0, dependencies: { mongo: ok } }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /watch-rules:
+    get:
+      tags: [watch-rules]
+      summary: List watch rules
+      operationId: listWatchRules
+      parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200': { $ref: '#/components/responses/WatchRulePage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    post:
+      tags: [watch-rules]
+      summary: Create a watch rule
+      operationId: createWatchRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WatchRuleInput' }
+            example:
+              name: Synthetic UAL watch
+              status: active
+              scope: targeted
+              groups:
+                - mode: any
+                  criteria: [{ kind: callsign, value: UAL* }, { kind: icao24, value: A1B2C3 }]
+              collection: { positions: true, messages: false, decoderIds: [] }
+      responses:
+        '201':
+          description: Watch rule created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WatchRule' }
+              example: { id: wr-synthetic-1, name: Synthetic UAL watch, status: active, scope: targeted, groups: [{ mode: any, criteria: [{ kind: callsign, value: UAL* }] }], collection: { positions: true, messages: false, decoderIds: [] }, createdAt: '2025-01-01T00:00:00Z', updatedAt: '2025-01-01T00:00:00Z' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /watch-rules/{ruleId}:
+    parameters: [{ $ref: '#/components/parameters/RuleId' }]
+    get:
+      tags: [watch-rules]
+      summary: Get a watch rule
+      operationId: getWatchRule
+      responses:
+        '200':
+          description: Watch rule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WatchRule' }
+              example: { id: wr-synthetic-1, name: Synthetic UAL watch, status: active, scope: targeted, groups: [{ mode: any, criteria: [{ kind: callsign, value: UAL* }] }], collection: { positions: true, messages: false, decoderIds: [] }, createdAt: '2025-01-01T00:00:00Z', updatedAt: '2025-01-01T00:00:00Z' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [watch-rules]
+      summary: Replace a watch rule
+      operationId: updateWatchRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WatchRuleInput' }
+      responses:
+        '200':
+          description: Updated watch rule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WatchRule' }
+              example: { id: wr-synthetic-1, name: Synthetic UAL watch, status: paused, scope: targeted, groups: [{ mode: any, criteria: [{ kind: callsign, value: UAL* }] }], collection: { positions: true, messages: false, decoderIds: [] }, createdAt: '2025-01-01T00:00:00Z', updatedAt: '2025-01-02T00:00:00Z' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [watch-rules]
+      summary: Delete a watch rule
+      operationId: deleteWatchRule
+      responses:
+        '204': { description: Watch rule deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /map/snapshot:
+    get:
+      tags: [map]
+      operationId: getMapSnapshot
+      summary: Current positions for active selected aircraft only
+      responses:
+        '200':
+          description: Current observed position snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MapSnapshot' }
+              examples:
+                withPosition:
+                  value: { generatedAt: '2025-01-01T00:05:00Z', sourceFreshness: fresh, aircraft: [{ aircraftId: ac-synthetic-1, callsign: { value: UAL52, certainty: observed, source: fixture-adsb, observedAt: '2025-01-01T00:04:58Z' }, position: { latitude: 51.47, longitude: -0.45, observedAt: '2025-01-01T00:04:58Z', source: fixture-adsb, altitudeMeters: { value: 10058, certainty: observed }, groundSpeedMps: { value: 230, certainty: observed } }, noPositionReason: null, flightId: fl-synthetic-1 }] }
+                noPosition:
+                  value: { generatedAt: '2025-01-01T00:05:00Z', sourceFreshness: stale, aircraft: [{ aircraftId: ac-synthetic-2, callsign: { value: TEST42, certainty: observed, source: fixture-adsb, observedAt: '2025-01-01T00:00:00Z' }, position: null, noPositionReason: no_recent_observation, flightId: null }] }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /aircraft:
+    get:
+      tags: [aircraft]
+      summary: List aircraft selected by active watch rules
+      operationId: listWatchedAircraft
+      parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200':
+          description: Aircraft associated with active watch rules
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AircraftPage' }
+              example: { items: [{ id: ac-synthetic-1, identifiers: [{ kind: icao24, value: A1B2C3, validFrom: '2024-01-01T00:00:00Z', source: fixture-registry }], callsign: { value: UAL52, certainty: observed, source: fixture-adsb, observedAt: '2025-01-01T00:04:58Z' }, currentPosition: { latitude: 51.47, longitude: -0.45, observedAt: '2025-01-01T00:04:58Z', source: fixture-adsb } }], nextCursor: null }
+  /aircraft/{aircraftId}:
+    parameters: [{ $ref: '#/components/parameters/AircraftId' }]
+    get:
+      tags: [aircraft]
+      summary: Get an aircraft identity and latest observed state
+      operationId: getAircraft
+      responses:
+        '200':
+          description: Aircraft identity and latest observed state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Aircraft' }
+              example: { id: ac-synthetic-1, identifiers: [{ kind: icao24, value: A1B2C3, validFrom: '2024-01-01T00:00:00Z', source: fixture-registry }], callsign: { value: UAL52, certainty: observed, source: fixture-adsb, observedAt: '2025-01-01T00:04:58Z' }, currentPosition: { latitude: 51.47, longitude: -0.45, observedAt: '2025-01-01T00:04:58Z', source: fixture-adsb } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /flights:
+    get:
+      tags: [flights]
+      summary: List observed flights
+      operationId: listFlights
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: aircraftId, in: query, schema: { type: string } }
+        - { name: startedAfter, in: query, schema: { type: string, format: date-time } }
+        - { name: startedBefore, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: Observed flights only
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FlightPage' }
+              example: { items: [{ id: fl-synthetic-1, aircraftId: ac-synthetic-1, callsign: { value: UAL52, certainty: observed, source: fixture-adsb }, startedAt: { observedAt: '2025-01-01T00:00:00Z', certainty: inferred, source: track-segment }, endedAt: null, origin: null, destination: null }], nextCursor: null }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /flights/{flightId}:
+    parameters: [{ $ref: '#/components/parameters/FlightId' }]
+    get:
+      tags: [flights]
+      summary: Get a flight summary
+      operationId: getFlight
+      responses:
+        '200':
+          description: Observed flight summary
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Flight' }
+              example: { id: fl-synthetic-1, aircraftId: ac-synthetic-1, callsign: { value: UAL52, certainty: observed, source: fixture-adsb }, startedAt: { observedAt: '2025-01-01T00:00:00Z', certainty: inferred, source: track-segment }, endedAt: null, origin: null, destination: null }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /flights/{flightId}/track:
+    parameters: [{ $ref: '#/components/parameters/FlightId' }]
+    get:
+      tags: [flights]
+      summary: Get a flight's observed track segments
+      operationId: getFlightTrack
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 5000, default: 1000 } }
+      responses:
+        '200':
+          description: Observed points grouped into gap-preserving segments; no route interpolation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Track' }
+              example: { flightId: fl-synthetic-1, segments: [[{ latitude: 51.47, longitude: -0.45, observedAt: '2025-01-01T00:00:00Z', source: fixture-adsb }, { latitude: 51.5, longitude: -0.3, observedAt: '2025-01-01T00:00:05Z', source: fixture-adsb }], [{ latitude: 52.0, longitude: 1.0, observedAt: '2025-01-01T00:10:00Z', source: fixture-adsb }]], truncated: false }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /messages:
+    get:
+      tags: [messages]
+      summary: List permitted observed messages
+      operationId: listMessages
+      parameters:
+        - { $ref: '#/components/parameters/Cursor' }
+        - { $ref: '#/components/parameters/Limit' }
+        - { name: aircraftId, in: query, schema: { type: string } }
+        - { name: flightId, in: query, schema: { type: string } }
+        - { name: protocol, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Messages acquired under selected watch rules
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessagePage' }
+              examples:
+                ambiguousAssociation:
+                  value: { items: [{ id: msg-synthetic-1, source: fixture-airframes, sourceMessageRef: synthetic-ref-1, observedAt: '2025-01-01T00:04:00Z', collectedAt: '2025-01-01T00:04:03Z', direction: downlink, bearer: vhf, protocol: ACARS, contentStatus: provider_decoded, originalText: 'SYNTHETIC TEST ONLY', hints: { callsign: { value: UAL52, certainty: observed, source: fixture-airframes } }, association: { outcome: ambiguous, aircraftId: null, flightId: null, candidates: [ac-synthetic-1, ac-synthetic-2], evidence: [{ reason: conflicting source assertions }] }, reception: null, decoderResults: [] }], nextCursor: null }
+                noMessages:
+                  value: { items: [], nextCursor: null }
+  /messages/{messageId}:
+    parameters: [{ name: messageId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }]
+    get:
+      tags: [messages]
+      summary: Get a message and its decode outcomes
+      operationId: getMessage
+      responses:
+        '200':
+          description: Logical message and decode outcomes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AircraftMessage' }
+              example: { id: msg-synthetic-1, source: fixture-airframes, sourceMessageRef: synthetic-ref-1, observedAt: '2025-01-01T00:04:00Z', collectedAt: '2025-01-01T00:04:03Z', direction: downlink, bearer: vhf, protocol: ACARS, contentStatus: provider_decoded, originalText: 'SYNTHETIC TEST ONLY', hints: {}, association: { outcome: unmatched, aircraftId: null, flightId: null, candidates: [], evidence: [] }, reception: null, decoderResults: [{ status: unknown, reason: encrypted_content_is_unreadable, fields: [] }] }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /decoders:
+    get:
+      tags: [decoders]
+      summary: List decoder capabilities and settings
+      operationId: listDecoders
+      responses:
+        '200':
+          description: Available decoder descriptors and current configuration
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Decoder' } }
+              example: [{ id: acars-basic, version: 1.0.0, name: Basic ACARS, enabled: false, capabilities: { bearers: [vhf], protocols: [ACARS] }, fields: [{ name: message_type, type: string, required: true }], rules: [] }]
+  /decoders/{decoderId}:
+    parameters: [{ name: decoderId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }]
+    put:
+      tags: [decoders]
+      summary: Update declarative decoder settings
+      operationId: updateDecoderConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecoderConfig' }
+            example: { version: 1.0.0, enabled: true, rules: [{ field: message_type, operator: prefix, value: Q }] }
+      responses:
+        '200':
+          description: Updated declarative decoder configuration
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Decoder' }
+              example: { id: acars-basic, version: 1.0.0, name: Basic ACARS, enabled: true, capabilities: { bearers: [vhf], protocols: [ACARS] }, fields: [{ name: message_type, type: string, required: true }], rules: [{ field: message_type, operator: prefix, value: Q }] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /decoders/{decoderId}/preview:
+    parameters: [{ name: decoderId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }]
+    post:
+      tags: [decoders]
+      summary: Preview a decoder against an unpersisted payload
+      operationId: previewDecoder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [payload], properties: { payload: { type: string, maxLength: 65536 }, protocol: { type: string, maxLength: 64 }, bearer: { type: string, maxLength: 32 } }, additionalProperties: false }
+            example: { payload: 'SYNTHETIC Q0 TEST', protocol: ACARS, bearer: vhf }
+      responses:
+        '200':
+          description: Preview output, never persisted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DecodeResult' }
+              example: { status: partial, decoderId: acars-basic, decoderVersion: 1.0.0, original: 'SYNTHETIC Q0 TEST', fields: [{ name: message_type, type: string, value: Q0 }], reason: parser_returned_partial_fields }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /alert-rules:
+    get:
+      tags: [alerts]
+      summary: List alert rules
+      operationId: listAlertRules
+      responses:
+        '200':
+          description: Alert rule configurations
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AlertRule' } }
+              example: [{ id: ar-synthetic-1, name: Synthetic flight start, enabled: true, condition: flight_started, cooldownSeconds: 60, includeBackfill: false, parameters: {} }]
+    post:
+      tags: [alerts]
+      summary: Create an alert rule
+      operationId: createAlertRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlertRuleInput' }
+            example: { name: Synthetic flight start, enabled: true, condition: flight_started, cooldownSeconds: 60, includeBackfill: false, parameters: {} }
+      responses:
+        '201':
+          description: Created alert rule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertRule' }
+              example: { id: ar-synthetic-1, name: Synthetic flight start, enabled: true, condition: flight_started, cooldownSeconds: 60, includeBackfill: false, parameters: {} }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /alert-rules/{alertRuleId}:
+    parameters: [{ name: alertRuleId, in: path, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }]
+    get:
+      tags: [alerts]
+      summary: Get an alert rule
+      operationId: getAlertRule
+      responses:
+        '200':
+          description: Alert rule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertRule' }
+              example: { id: ar-synthetic-1, name: Synthetic flight start, enabled: true, condition: flight_started, cooldownSeconds: 60, includeBackfill: false, parameters: {} }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [alerts]
+      summary: Replace an alert rule
+      operationId: updateAlertRule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlertRuleInput' }
+      responses:
+        '200':
+          description: Updated alert rule
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertRule' }
+              example: { id: ar-synthetic-1, name: Synthetic flight start, enabled: false, condition: flight_started, cooldownSeconds: 60, includeBackfill: false, parameters: {} }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [alerts]
+      summary: Delete an alert rule
+      operationId: deleteAlertRule
+      responses:
+        '204': { description: Alert rule deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /alert-events:
+    get:
+      tags: [alerts]
+      summary: List emitted alert events
+      operationId: listAlertEvents
+      parameters: [{ $ref: '#/components/parameters/Cursor' }, { $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200':
+          description: Persisted alert events
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertEventPage' }
+              example: { items: [{ id: ae-synthetic-1, ruleId: ar-synthetic-1, condition: flight_started, aircraftId: ac-synthetic-1, flightId: fl-synthetic-1, observedAt: '2025-01-01T00:00:00Z', emittedAt: '2025-01-01T00:00:01Z', backfill: false, evidence: observed_track_started }], nextCursor: null }
+  /sources:
+    get:
+      tags: [sources]
+      summary: List source health and acquisition budgets
+      operationId: listSources
+      responses:
+        '200':
+          description: Configured adapter health, freshness and bounded budgets
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/SourceHealth' } }
+              example: [{ id: fixture-adsb, status: synthetic, lastSuccessAt: '2025-01-01T00:04:58Z', lastErrorAt: null, freshness: fresh, budget: { remainingRequests: 10, resetsAt: '2025-01-01T01:00:00Z' }, enabled: true }, { id: airframes, status: inactive, lastSuccessAt: null, lastErrorAt: null, freshness: unknown, budget: null, enabled: false }]
+  /events:
+    get:
+      tags: [realtime]
+      summary: Subscribe to live updates
+      operationId: subscribeEvents
+      description: >-
+        Send `Last-Event-ID` to resume. If the cursor is older than retained
+        history, the server emits `snapshot_required`; clients must fetch
+        `/map/snapshot` and relevant history endpoints before applying live
+        events. Event data is an EventEnvelope JSON document. Heartbeats use
+        comments and do not advance the event cursor.
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema: { type: string, maxLength: 256 }
+      responses:
+        '200':
+          description: Server-sent event stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+              x-event-envelope-schema: { $ref: '#/components/schemas/EventEnvelope' }
+              examples:
+                position:
+                  value: "id: cursor-42\nevent: position_updated\ndata: {\"eventId\":\"cursor-42\",\"type\":\"position_updated\",\"occurredAt\":\"2025-01-01T00:04:58Z\",\"sourceObservedAt\":\"2025-01-01T00:04:58Z\",\"data\":{\"aircraftId\":\"ac-synthetic-1\"}}\n\n"
+                snapshotRequired:
+                  value: "event: snapshot_required\ndata: {\"eventId\":null,\"type\":\"snapshot_required\",\"occurredAt\":\"2025-01-01T00:05:00Z\",\"sourceObservedAt\":null,\"data\":{\"reason\":\"cursor_expired\",\"refresh\":[\"/map/snapshot\",\"/flights\",\"/messages\",\"/alert-events\"]}}\n\n"
+                heartbeat:
+                  value: ": keepalive\n\n"
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+security: []
+components:
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: { type: string, maxLength: 256 }
+      description: Opaque cursor from a previous page; stable ordering is by event/creation time then ID.
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    RuleId:
+      name: ruleId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    AircraftId:
+      name: aircraftId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    FlightId:
+      name: flightId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+  responses:
+    BadRequest:
+      description: Invalid request or domain validation failure
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          example: { error: { code: invalid_input, message: 'criteria group cannot be empty', requestId: req-synthetic-1, details: [] } }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          example: { error: { code: not_found, message: 'resource not found', requestId: req-synthetic-1, details: [] } }
+    Conflict:
+      description: Conflicting resource state
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          example: { error: { code: conflict, message: 'identifier is already assigned', requestId: req-synthetic-1, details: [] } }
+    ServiceUnavailable:
+      description: Required local dependency is unavailable
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+          example: { error: { code: dependency_unavailable, message: 'storage is unavailable', requestId: req-synthetic-1, details: [] } }
+    WatchRulePage:
+      description: Watch rule page
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/WatchRulePage' }
+          example: { items: [], nextCursor: null }
+  schemas:
+    ApiError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code: { type: string, enum: [invalid_input, not_found, conflict, dependency_unavailable, rate_limited, internal] }
+            message: { type: string, maxLength: 1024 }
+            requestId: { type: string }
+            details: { type: array, items: { type: object, properties: { field: { type: string }, reason: { type: string } }, additionalProperties: false } }
+    EvidenceValue:
+      type: object
+      required: [value, certainty]
+      properties:
+        value: {}
+        certainty: { type: string, enum: [observed, inferred, unknown] }
+        source: { type: [string, 'null'] }
+        observedAt: { type: [string, 'null'], format: date-time }
+        uncertaintySeconds: { type: [number, 'null'], minimum: 0 }
+    Position:
+      type: object
+      required: [latitude, longitude, observedAt, source]
+      properties:
+        latitude: { type: number, minimum: -90, maximum: 90 }
+        longitude: { type: number, minimum: -180, maximum: 180 }
+        observedAt: { type: string, format: date-time }
+        source: { type: string }
+        altitudeMeters: { $ref: '#/components/schemas/EvidenceValue' }
+        groundSpeedMps: { $ref: '#/components/schemas/EvidenceValue' }
+        headingDegrees: { $ref: '#/components/schemas/EvidenceValue' }
+    Criterion:
+      type: object
+      required: [kind, value]
+      properties:
+        kind: { type: string, enum: [callsign, icao24, registration, operator, origin, destination, area, protocol] }
+        value: { type: string, minLength: 1, maxLength: 128, description: Callsign prefix wildcard may appear once as the final character only. }
+    CriteriaGroup:
+      type: object
+      required: [mode, criteria]
+      properties:
+        mode: { type: string, enum: [any, all] }
+        criteria: { type: array, minItems: 1, maxItems: 64, items: { $ref: '#/components/schemas/Criterion' } }
+    CollectionPreferences:
+      type: object
+      required: [positions, messages, decoderIds]
+      properties:
+        positions: { type: boolean }
+        messages: { type: boolean }
+        decoderIds: { type: array, maxItems: 32, uniqueItems: true, items: { type: string } }
+    WatchRuleInput:
+      type: object
+      required: [name, status, scope, groups, collection]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        status: { type: string, enum: [active, paused, deleted] }
+        scope: { type: string, enum: [targeted, area_discovery] }
+        groups: { type: array, maxItems: 32, items: { $ref: '#/components/schemas/CriteriaGroup' } }
+        window: { type: [object, 'null'], properties: { start: { type: string, format: date-time }, end: { type: string, format: date-time } }, required: [start, end], additionalProperties: false }
+        discovery: { type: [object, 'null'], properties: { areaId: { type: string }, maxCandidates: { type: integer, minimum: 1, maximum: 1000 } }, required: [areaId, maxCandidates], additionalProperties: false }
+        collection: { $ref: '#/components/schemas/CollectionPreferences' }
+    WatchRule:
+      allOf:
+        - { $ref: '#/components/schemas/WatchRuleInput' }
+        - type: object
+          required: [id, createdAt, updatedAt]
+          properties:
+            id: { type: string }
+            createdAt: { type: string, format: date-time }
+            updatedAt: { type: string, format: date-time }
+    WatchRulePage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/WatchRule' } }
+        nextCursor: { type: [string, 'null'] }
+    IdentifierAssertion:
+      type: object
+      required: [kind, value, validFrom, source]
+      properties:
+        kind: { type: string, enum: [icao24, registration] }
+        value: { type: string }
+        validFrom: { type: string, format: date-time }
+        validUntil: { type: [string, 'null'], format: date-time }
+        source: { type: string }
+    Aircraft:
+      type: object
+      required: [id, identifiers, currentPosition]
+      properties:
+        id: { type: string }
+        identifiers: { type: array, items: { $ref: '#/components/schemas/IdentifierAssertion' } }
+        callsign: { oneOf: [{ $ref: '#/components/schemas/EvidenceValue' }, { type: 'null' }] }
+        currentPosition: { oneOf: [{ $ref: '#/components/schemas/Position' }, { type: 'null' }] }
+    AircraftPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Aircraft' } }
+        nextCursor: { type: [string, 'null'] }
+    BoundaryEvidence:
+      type: object
+      required: [observedAt, certainty, source]
+      properties:
+        observedAt: { type: string, format: date-time }
+        certainty: { type: string, enum: [observed, inferred, unknown] }
+        source: { type: string }
+    AirportAssertion:
+      type: object
+      required: [code, source]
+      properties:
+        code: { type: string, pattern: '^[A-Z]{3,4}$' }
+        source: { type: string }
+    Flight:
+      type: object
+      required: [id, aircraftId, callsign, startedAt, endedAt, origin, destination]
+      properties:
+        id: { type: string }
+        aircraftId: { type: [string, 'null'] }
+        callsign: { oneOf: [{ $ref: '#/components/schemas/EvidenceValue' }, { type: 'null' }] }
+        startedAt: { oneOf: [{ $ref: '#/components/schemas/BoundaryEvidence' }, { type: 'null' }] }
+        endedAt: { oneOf: [{ $ref: '#/components/schemas/BoundaryEvidence' }, { type: 'null' }] }
+        origin: { oneOf: [{ $ref: '#/components/schemas/AirportAssertion' }, { type: 'null' }] }
+        destination: { oneOf: [{ $ref: '#/components/schemas/AirportAssertion' }, { type: 'null' }] }
+    FlightPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Flight' } }
+        nextCursor: { type: [string, 'null'] }
+    Track:
+      type: object
+      required: [flightId, segments, truncated]
+      properties:
+        flightId: { type: string }
+        segments: { type: array, items: { type: array, items: { $ref: '#/components/schemas/Position' } } }
+        truncated: { type: boolean }
+    Association:
+      type: object
+      required: [outcome, aircraftId, flightId, candidates, evidence]
+      properties:
+        outcome: { type: string, enum: [matched, unmatched, ambiguous, conflicted] }
+        aircraftId: { type: [string, 'null'] }
+        flightId: { type: [string, 'null'] }
+        candidates: { type: array, items: { type: string } }
+        evidence: { type: array, items: { type: object, properties: { reason: { type: string } }, additionalProperties: true } }
+    DecodeResult:
+      type: object
+      required: [status, reason, fields]
+      properties:
+        status: { type: string, enum: [decoded, partial, unknown, unsupported] }
+        decoderId: { type: [string, 'null'] }
+        decoderVersion: { type: [string, 'null'] }
+        original: { type: [string, 'null'] }
+        reason: { type: string }
+        fields: { type: array, items: { type: object, required: [name, type], properties: { name: { type: string }, type: { type: string, enum: [string, integer, number, boolean, time] }, value: {}, unit: { type: [string, 'null'] } } } }
+    AircraftMessage:
+      type: object
+      required: [id, source, observedAt, collectedAt, direction, bearer, protocol, contentStatus, hints, association, reception, decoderResults]
+      properties:
+        id: { type: string }
+        source: { type: string }
+        sourceMessageRef: { type: [string, 'null'] }
+        observedAt: { type: [string, 'null'], format: date-time }
+        collectedAt: { type: string, format: date-time }
+        direction: { type: string, enum: [uplink, downlink, unknown] }
+        bearer: { type: string, enum: [hf, vhf, satcom, unknown] }
+        protocol: { type: string }
+        contentStatus: { type: string, enum: [provider_decoded, raw, encrypted, unavailable] }
+        originalText: { type: [string, 'null'] }
+        hints: { type: object, additionalProperties: true }
+        association: { $ref: '#/components/schemas/Association' }
+        reception: { type: [object, 'null'], description: Present only with actual RF frame and receiver evidence., properties: { receiverId: { type: string }, frameBase64: { type: string, contentEncoding: base64 }, receivedAt: { type: string, format: date-time }, frequencyHz: { type: [integer, 'null'], minimum: 1 } } }
+        decoderResults: { type: array, items: { $ref: '#/components/schemas/DecodeResult' } }
+    MessagePage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AircraftMessage' } }
+        nextCursor: { type: [string, 'null'] }
+    DecoderConfig:
+      type: object
+      required: [version, enabled, rules]
+      properties:
+        version: { type: string, pattern: '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$' }
+        enabled: { type: boolean }
+        rules: { type: array, maxItems: 64, items: { type: object, required: [field, operator, value], properties: { field: { type: string }, operator: { type: string, enum: [equals, prefix, contains] }, value: { type: string, minLength: 1, maxLength: 256 } }, additionalProperties: false } }
+    Decoder:
+      allOf:
+        - { $ref: '#/components/schemas/DecoderConfig' }
+        - type: object
+          required: [id, name, capabilities, fields]
+          properties:
+            id: { type: string }
+            name: { type: string }
+            capabilities: { type: object, required: [bearers, protocols], properties: { bearers: { type: array, items: { type: string } }, protocols: { type: array, items: { type: string } } } }
+            fields: { type: array, items: { type: object, required: [name, type, required], properties: { name: { type: string }, type: { type: string }, required: { type: boolean }, unit: { type: [string, 'null'] } } } }
+    AlertRuleInput:
+      type: object
+      required: [name, enabled, condition, cooldownSeconds, includeBackfill, parameters]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        enabled: { type: boolean }
+        condition: { type: string, enum: [aircraft_detected, flight_started, flight_ended, country_entered, geofence_entered, threshold, message_observed, message_decoded, feed_error] }
+        cooldownSeconds: { type: integer, minimum: 0, maximum: 31536000 }
+        includeBackfill: { type: boolean, default: false }
+        parameters: { type: object, additionalProperties: true }
+    AlertRule:
+      allOf:
+        - { $ref: '#/components/schemas/AlertRuleInput' }
+        - type: object
+          required: [id]
+          properties: { id: { type: string } }
+    AlertEvent:
+      type: object
+      required: [id, ruleId, condition, observedAt, emittedAt, backfill, evidence]
+      properties:
+        id: { type: string }
+        ruleId: { type: string }
+        condition: { type: string }
+        aircraftId: { type: [string, 'null'] }
+        flightId: { type: [string, 'null'] }
+        observedAt: { type: string, format: date-time }
+        emittedAt: { type: string, format: date-time }
+        backfill: { type: boolean }
+        evidence: { type: string }
+    AlertEventPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AlertEvent' } }
+        nextCursor: { type: [string, 'null'] }
+    SourceHealth:
+      type: object
+      required: [id, status, lastSuccessAt, lastErrorAt, freshness, budget, enabled]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [ok, degraded, inactive, synthetic, error] }
+        lastSuccessAt: { type: [string, 'null'], format: date-time }
+        lastErrorAt: { type: [string, 'null'], format: date-time }
+        freshness: { type: string, enum: [fresh, stale, unknown] }
+        enabled: { type: boolean }
+        budget: { oneOf: [{ type: object, required: [remainingRequests, resetsAt], properties: { remainingRequests: { type: integer, minimum: 0 }, resetsAt: { type: string, format: date-time } } }, { type: 'null' }] }
+    Health:
+      type: object
+      required: [status, version, dependencies]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        version: { type: string }
+        dependencies: { type: object, additionalProperties: { type: string, enum: [ok, unavailable, not_configured] } }
+    MapSnapshot:
+      type: object
+      required: [generatedAt, sourceFreshness, aircraft]
+      properties:
+        generatedAt: { type: string, format: date-time }
+        sourceFreshness: { type: string, enum: [fresh, stale, unknown] }
+        aircraft: { type: array, items: { type: object, required: [aircraftId, position, noPositionReason, flightId], properties: { aircraftId: { type: string }, callsign: { oneOf: [{ $ref: '#/components/schemas/EvidenceValue' }, { type: 'null' }] }, position: { oneOf: [{ $ref: '#/components/schemas/Position' }, { type: 'null' }] }, noPositionReason: { type: [string, 'null'], enum: [no_recent_observation, source_unavailable, null] }, flightId: { type: [string, 'null'] } } } }
+    EventEnvelope:
+      type: object
+      required: [eventId, type, occurredAt, sourceObservedAt, data]
+      properties:
+        eventId: { type: [string, 'null'] }
+        type: { type: string, enum: [position_updated, flight_started, flight_ended, message_observed, message_decoded, alert_triggered, source_status_changed, snapshot_required] }
+        occurredAt: { type: string, format: date-time }
+        sourceObservedAt: { type: [string, 'null'], format: date-time }
+        data: { type: object, additionalProperties: true }

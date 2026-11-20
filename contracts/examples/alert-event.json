@@ -1,0 +1,11 @@
+{
+  "id": "ae-synthetic-1",
+  "ruleId": "ar-synthetic-1",
+  "condition": "flight_started",
+  "aircraftId": "ac-synthetic-1",
+  "flightId": "fl-synthetic-1",
+  "observedAt": "2025-01-01T00:00:00Z",
+  "emittedAt": "2025-01-01T00:00:01Z",
+  "backfill": false,
+  "evidence": "observed_track_started"
+}

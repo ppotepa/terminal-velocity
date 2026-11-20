@@ -1,0 +1,18 @@
+{
+  "generatedAt": "2025-01-01T00:05:00Z",
+  "sourceFreshness": "stale",
+  "aircraft": [
+    {
+      "aircraftId": "ac-synthetic-2",
+      "callsign": {
+        "value": "TEST42",
+        "certainty": "observed",
+        "source": "fixture-adsb",
+        "observedAt": "2025-01-01T00:00:00Z"
+      },
+      "position": null,
+      "noPositionReason": "no_recent_observation",
+      "flightId": null
+    }
+  ]
+}
