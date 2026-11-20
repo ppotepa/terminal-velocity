@@ -15,6 +15,14 @@ CREATE TABLE fleet_identity.position_link_jobs (
 CREATE INDEX position_link_jobs_pending ON fleet_identity.position_link_jobs (job_id)
   WHERE completed_at IS NULL;
 
+-- Serialize the choice of work class, so a continuous position feed cannot
+-- postpone correction replay indefinitely (and vice versa).
+CREATE TABLE fleet_identity.replay_scheduler (
+  singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+  next_kind text NOT NULL CHECK (next_kind IN ('JOBS', 'CORRECTIONS'))
+);
+INSERT INTO fleet_identity.replay_scheduler (singleton, next_kind) VALUES (true, 'JOBS');
+
 CREATE FUNCTION fleet_identity.enqueue_position_link() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$
 BEGIN
@@ -36,4 +44,5 @@ INSERT INTO fleet_identity.position_link_jobs (source_id, source_observation_id)
 
 GRANT SELECT ON fleet_identity.position_link_jobs TO tv_runtime;
 GRANT UPDATE (completed_at) ON fleet_identity.position_link_jobs TO tv_runtime;
+GRANT SELECT, UPDATE (next_kind) ON fleet_identity.replay_scheduler TO tv_runtime;
 RESET ROLE;

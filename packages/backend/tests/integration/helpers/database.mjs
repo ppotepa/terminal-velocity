@@ -47,4 +47,5 @@ export async function resetTestData(admin) {
     availability.contributions, correlation.outbox, correlation.aircraft_link_heads,
     correlation.aircraft_link_revisions, message_ingestion.messages`);
   await admin.query('UPDATE fleet_identity.registry_state SET revision=0 WHERE singleton');
+  await admin.query("UPDATE fleet_identity.replay_scheduler SET next_kind='JOBS' WHERE singleton");
 }

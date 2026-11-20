@@ -316,3 +316,26 @@ test('insertion during replay and concurrent workers complete with a one-connect
       WHERE completed_at IS NULL`)).rows[0].n, '0');
   } finally { await one.end(); }
 });
+
+test('correction replay receives work while new position jobs remain pending', async () => {
+  const commit = postgresIdentityCommitter(pools.runtime);
+  await commit.createAircraft('ac_a');
+  await commit.append(claim('ac_a', hex('A0B1C2'), 0));
+  const writer = postgresPositionHistoryWriter(pools.runtime);
+  const at = Date.parse('2026-11-19T10:00:00Z');
+  for (let i = 0; i < 4; i++) assert.ok((await writer.append(position(`fair-${i}`, at + i * 1000))).ok);
+  const work = createIdentityReplayWorker(pools.runtime);
+  assert.equal((await work(1)).requestId, null);
+  const correction = await work(1);
+  assert.equal(typeof correction?.requestId, 'number');
+  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.position_link_jobs
+    WHERE completed_at IS NULL`)).rows[0].n, '3');
+  assert.ok((await pools.runtime.query(`SELECT cursor_observation_id FROM fleet_identity.replay_requests
+    ORDER BY request_id LIMIT 1`)).rows[0].cursor_observation_id);
+  for (let i = 0; i < 30; i++) if (await work(1) === null) break;
+  assert.equal(await work(1), null);
+  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.replay_requests
+    WHERE phase <> 'DONE'`)).rows[0].n, '0');
+  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.position_link_jobs
+    WHERE completed_at IS NULL`)).rows[0].n, '0');
+});

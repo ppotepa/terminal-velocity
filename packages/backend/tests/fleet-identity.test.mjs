@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { icao24, registration, decideAircraftMatch } from '../src/modules/aircraft-correlation/public/index.ts';
-import { resolveIdentityAt, validateIdentityAssertion, createRegistryCandidateDirectory } from '../src/modules/fleet-identity/public/index.ts';
+import { resolveIdentityAt, validateIdentityAssertion, createRegistryCandidateDirectory, createResolveAircraft } from '../src/modules/fleet-identity/public/index.ts';
 
 const hex = value => ({ kind: 'ICAO24', value: icao24(value).value });
 const tail = value => ({ kind: 'REGISTRATION', value: registration(value).value });
@@ -51,6 +51,13 @@ test('a second simultaneous ICAO24 vetoes a position match until its validity en
     { status: 'CONFLICTED', candidateIds: ['ac_a'], revision: 2 });
   assert.equal(resolveIdentityAt([hex('A0B1C2')], 9, assertions, 2).status, 'MATCHED');
   assert.equal(resolveIdentityAt([hex('A0B1C2')], 20, assertions, 2).status, 'MATCHED');
+});
+
+test('registry lookup failure is explicitly incomplete while invalid input still fails validation', async () => {
+  const resolve = createResolveAircraft({ async find() { throw new Error('database unavailable'); } });
+  assert.deepEqual(await resolve([hex('A0B1C2')], 10),
+    { status: 'INCOMPLETE', reason: 'LOOKUP_FAILED', revision: 0 });
+  await assert.rejects(() => resolve([hex('A0B1C2')], -1), /Invalid observation time/);
 });
 
 test('registry candidate adapter preserves partial snapshots and correlation veto', async () => {

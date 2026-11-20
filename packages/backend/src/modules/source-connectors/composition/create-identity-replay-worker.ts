@@ -24,22 +24,39 @@ export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Da
   return async (limit = 100): Promise<{ requestId: number | null; processed: number; complete: boolean } | null> => {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new RangeError('Invalid replay page size.');
     return runSqlTransaction(pool, async sql => {
-      const jobs = await sql.query<{ job_id: string; source_id: string; source_observation_id: string }>(`
+      // The durable turn is locked with the selected page. A failed page rolls
+      // back both its cursor and the turn, including across worker restarts.
+      const scheduler = await sql.query<{ next_kind: 'JOBS' | 'CORRECTIONS' }>(`
+        SELECT next_kind FROM fleet_identity.replay_scheduler WHERE singleton FOR UPDATE`);
+      const turn = scheduler.rows[0]?.next_kind;
+      if (!turn) throw new Error('Identity replay scheduler is missing.');
+      const selectJob = async () => (await sql.query<{ job_id: string; source_id: string;
+        source_observation_id: string }>(`
         SELECT job_id,source_id,source_observation_id FROM fleet_identity.position_link_jobs
-        WHERE completed_at IS NULL ORDER BY job_id FOR UPDATE SKIP LOCKED LIMIT 1`);
-      const job = jobs.rows[0];
+        WHERE completed_at IS NULL ORDER BY job_id FOR UPDATE SKIP LOCKED LIMIT 1`)).rows[0];
+      const selectRequest = async () => (await sql.query<RequestRow>(`SELECT request_id,kind,normalized_alias,valid_from_ms,
+        valid_until_ms,phase,cursor_time_ms,cursor_source_id,cursor_observation_id,cursor_message_id
+        FROM fleet_identity.replay_requests WHERE phase <> 'DONE' ORDER BY request_id
+        FOR UPDATE SKIP LOCKED LIMIT 1`)).rows[0];
+      let job: Awaited<ReturnType<typeof selectJob>>;
+      let request: Awaited<ReturnType<typeof selectRequest>>;
+      if (turn === 'JOBS') {
+        job = await selectJob();
+        if (!job) request = await selectRequest();
+      } else {
+        request = await selectRequest();
+        if (!request) job = await selectJob();
+      }
+      if (!job && !request) return null;
+      await sql.query('UPDATE fleet_identity.replay_scheduler SET next_kind=$1 WHERE singleton',
+        [job ? 'CORRECTIONS' : 'JOBS']);
       if (job) {
         await reevaluatePositionOnConnection(sql, job.source_id, job.source_observation_id);
         await sql.query(`UPDATE fleet_identity.position_link_jobs SET completed_at=clock_timestamp()
           WHERE job_id=$1`, [job.job_id]);
         return { requestId: null, processed: 1, complete: true };
       }
-      const selected = await sql.query<RequestRow>(`SELECT request_id,kind,normalized_alias,valid_from_ms,
-        valid_until_ms,phase,cursor_time_ms,cursor_source_id,cursor_observation_id,cursor_message_id
-        FROM fleet_identity.replay_requests WHERE phase <> 'DONE' ORDER BY request_id
-        FOR UPDATE SKIP LOCKED LIMIT 1`);
-      const request = selected.rows[0];
-      if (!request) return null;
+      if (!request) throw new Error('Identity replay request is missing.');
       const from = Number(request.valid_from_ms);
       const until = request.valid_until_ms === null ? null : Number(request.valid_until_ms);
       const cursor = request.cursor_time_ms === null ? null : Number(request.cursor_time_ms);
