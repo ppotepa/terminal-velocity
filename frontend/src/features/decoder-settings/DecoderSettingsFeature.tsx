@@ -51,7 +51,7 @@ export function DecoderSettingsFeature({ client: suppliedClient }: Props) {
     const decoderIds = enabled ? [...new Set([...rule.collection.decoderIds, selected.id])] : rule.collection.decoderIds.filter((id) => id !== selected.id);
     setAssignmentSaving(rule.id); setAssignmentError(undefined);
     try {
-      const result = await client.PUT('/watch-rules/{ruleId}', { params: { path: { ruleId: rule.id } }, body: { name: rule.name, status: rule.status, scope: rule.scope, groups: rule.groups, window: rule.window, discovery: rule.discovery, collection: { ...rule.collection, decoderIds } } });
+      const result = await client.PUT('/watch-rules/{ruleId}', { params: { path: { ruleId: rule.id } }, body: { name: rule.name, status: rule.status, scope: rule.scope, groups: rule.groups, window: rule.window, discovery: rule.discovery, filters: rule.filters, collection: { ...rule.collection, decoderIds } } });
       if (result.error) throw normalizeApiFailure(result.error, result.response.status);
       setWatchRules((current) => current.map((item) => item.id === rule.id ? result.data! : item));
     } catch (failure) { setAssignmentError(normalizeApiFailure(failure).message); }
