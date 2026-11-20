@@ -389,3 +389,32 @@ assertions were exercised by coordinator isolated CI at `e362998a8847e02137c7c03
 ### S4-03 confirmed-identity persistence correction (2026-11-20)
 
 The write boundary now accepts the trusted upstream `PositionIdentityDecision` and validates it against the confirmed aircraft ID, source observation key, resolver evidence, and ICAO24 hint on first receipt. A missing or conflicting decision rejects the write. Retry and history reads validate facts loaded from the private immutable table through a separate stored-fact path; persisted identity evidence is retained as provenance and cannot authorize a fresh write. A synthetic PostgreSQL regression covers the rejected first receipts, confirmed insertion, restart retry with the original receipt and event ID, and history read. Migration 007 is unchanged and additive. It has no destructive down migration: reverting application code leaves the schema, migration ledger, and recorded rows in place; a schema correction requires a new migration. Real position retention remains gated by ADR #0002 and issue #46. The coordinator's passing isolated CI at `e362998a8847e02137c7c03330283144ade07da4` predates this correction, so the changed checkout requires a new exact-SHA run. In this authoring shell, Node 24.22.3 offline `npm ci`, type checking, architecture boundaries, all 18 backend test files, `npm run test:messages`, and `git diff --check` passed. `npm run check` stopped at the existing private-preview test in this shell; `npm run test:postgres:local` could not start because `initdb` requires an unprivileged user. The new PostgreSQL test has not yet run here. No live provider operation or deployment acceptance is claimed.
+
+### S4-03 confirmed-identity replay review correction (2026-11-20)
+
+The coordinator supplied a passing isolated CI result for exact SHA `4e69ecf`,
+including 92 PostgreSQL integration tests. That result verifies migration 007,
+restricted role and index checks, concurrent first writes, and outbox-failure
+rollback at the tested head. Its confirmed-identity restart test supplied the
+upstream decision again, so it did not cover a replay when that decision is
+unavailable.
+
+The writer now compares an existing stored fact before requiring an upstream
+decision. A first receipt with confirmed identity still requires the matching
+trusted decision; a matching replay returns the original receipt and event ID.
+The PostgreSQL reader validates the 31-day window and 500-row limit at its own
+entry point. A synthetic 20,000-row EXPLAIN regression checks spatial, ICAO24/time,
+and time-key index selection without changing planner settings. These edits
+follow `4e69ecf` and need a new unprivileged exact-SHA PostgreSQL run.
+
+Node 24.22.3 offline `npm ci`, type checking, architecture boundaries, all 18
+backend test files, focused position contract and query tests, and
+`git diff --check` passed. `npm run check` stopped at the existing
+private-preview loopback test. `npm run test:postgres:local` stopped before
+startup because `initdb` cannot run as root; the new PostgreSQL regressions
+are not claimed passing here. No SQL
+changed in this correction. Migration 007 is additive, has no down migration,
+and an applied schema correction requires a new migration. Reverting code
+leaves its schema and rows. Real retention remains gated by ADR #0002 and
+issue #46. Synthetic CI establishes no provider rights, live operation,
+deployment, merge, or issue closure.

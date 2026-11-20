@@ -1,10 +1,23 @@
 import type { SqlPool } from '../../../../contracts/database/index.ts';
 import { parseStoredPositionObservation } from '../../domain/position-observation.ts';
-import type { PositionHistoryQuery } from '../../domain/position-history-query.ts';
+import {
+  positionHistoryByIcao24Query, positionHistoryWithinBoundsQuery, type PositionHistoryQuery,
+} from '../../domain/position-history-query.ts';
 import type { PositionHistoryPage, PositionHistoryReader } from '../../ports/position-history-reader.ts';
 
 export function postgresPositionHistoryReader(pool: SqlPool): PositionHistoryReader {
   async function read(query: PositionHistoryQuery): Promise<PositionHistoryPage> {
+    const window = {
+      fromObservedAtMs: query.fromObservedAtMs, toObservedAtMs: query.toObservedAtMs,
+      limit: query.limit, ...(query.after === undefined ? {} : { after: query.after }),
+    };
+    const validated = query.kind === 'ICAO24'
+      ? positionHistoryByIcao24Query({ ...window, icao24Hint: query.icao24Hint })
+      : query.kind === 'BOUNDS'
+        ? positionHistoryWithinBoundsQuery({ ...window, bounds: query.bounds })
+        : null;
+    if (!validated?.ok) throw new RangeError(`Invalid position history query: ${validated?.error.field ?? 'query'}`);
+    query = validated.value;
     const values: unknown[] = [query.fromObservedAtMs, query.toObservedAtMs,
       query.after?.observedAtMs ?? null, query.after?.sourceId ?? null,
       query.after?.sourceObservationId ?? null, query.limit + 1];

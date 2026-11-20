@@ -51,19 +51,33 @@ test('confirmed identity requires an upstream decision on first write and surviv
   const restarted = await execute(process.execPath,
     [new URL('./helpers/position-worker.mjs', import.meta.url).pathname],
     { env: { ...process.env, TV_SYNTHETIC_POSITION: JSON.stringify(laterReceipt),
-      TV_SYNTHETIC_IDENTITY_DECISION: JSON.stringify(decision) } });
+      TV_SYNTHETIC_IDENTITY_DECISION: 'null' } });
   const replay = JSON.parse(restarted.stdout);
   assert.equal(replay.value.status, 'ALREADY_PRESENT');
   assert.equal(replay.value.eventId, inserted.value.eventId);
   assert.equal(replay.value.observation.ingestedAt, '2026-11-19T11:00:01.000Z');
   assert.equal(replay.value.observation.sourceDeliveryRef, 'delivery:confirmed');
   assert.deepEqual(replay.value.observation.identityEvidence, confirmed.identityEvidence);
+  assert.deepEqual((await writer.append({ ...laterReceipt, latitude: 51.6 })).error,
+    { code: 'SOURCE_OBSERVATION_CONFLICT' });
   const history = await postgresPositionHistoryReader(pools.runtime).byIcao24(query());
   assert.equal(history.observations.length, 1);
   assert.equal(history.observations[0].confirmedAircraftId, confirmed.confirmedAircraftId);
   assert.deepEqual(history.observations[0].identityEvidence, confirmed.identityEvidence);
   assert.equal((await pools.runtime.query('SELECT * FROM tracking.position_observations')).rowCount, 1);
   assert.equal((await pools.runtime.query('SELECT * FROM tracking.position_observation_outbox')).rowCount, 1);
+});
+
+test('PostgreSQL reader rejects unvalidated bounds and limits before querying', async () => {
+  const reader = postgresPositionHistoryReader(pools.runtime);
+  for (const invalid of [
+    { ...query(), limit: 501 },
+    { ...query(), toObservedAtMs: query().fromObservedAtMs + 32 * 24 * 60 * 60 * 1000 },
+    { ...query(), after: { observedAtMs: -1, sourceId: 'src_synthetic-a', sourceObservationId: 'epoch:synthetic-1:x' } },
+  ]) await assert.rejects(() => reader.byIcao24(invalid), RangeError);
+  await assert.rejects(() => reader.withinBounds({
+    ...query(), kind: 'BOUNDS', bounds: { west: -181, east: 1, south: 0, north: 1 },
+  }), RangeError);
 });
 
 test('concurrent first writes and restart retries create one immutable fact and event', async () => {
@@ -163,12 +177,44 @@ test('tracking runtime cannot mutate facts and required indexes and owner exist'
   const names = new Set(indexes.rows.map(row => row.indexname));
   assert.ok(names.has('position_observations_icao24_time'));
   assert.ok(names.has('position_observations_position_gist'));
-  const client = await pools.admin.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query('SET LOCAL enable_seqscan=off');
-    const plan = await client.query(`EXPLAIN SELECT source_observation_id
-      FROM tracking.position_observations WHERE position <@ box(point(179,50),point(180,52))`);
-    assert.match(plan.rows.map(row => row['QUERY PLAN']).join(' '), /position_observations_position_gist/);
-  } finally { await client.query('ROLLBACK'); client.release(); }
+});
+
+test('planner uses spatial and time indexes on representative synthetic history', async () => {
+  await pools.admin.query(`INSERT INTO tracking.position_observations
+    (observation_id,source_id,source_observation_id,observed_at_ms,ingested_at_ms,
+     measurement_kind,latitude,longitude,fact)
+    SELECT md5(n::text)::uuid, 'src_synthetic-b', 'epoch:synthetic-1:bulk-' || n,
+      1795046400000::bigint + n * 1000, 1795046401000::bigint + n * 1000,
+      'ADS_B', ((n * 37) % 160) - 79.5, (n % 360) - 179.5,
+      jsonb_build_object('schemaVersion',1,'sourceId','src_synthetic-b',
+        'sourceObservationId','epoch:synthetic-1:bulk-' || n,
+        'observedAt',to_char(timestamp '2026-11-19 00:00:00' + n * interval '1 second',
+          'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+        'ingestedAt',to_char(timestamp '2026-11-19 00:00:01' + n * interval '1 second',
+          'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+        'measurementKind','ADS_B','latitude',((n * 37) % 160) - 79.5,
+        'longitude',(n % 360) - 179.5,
+        'identifierHints',jsonb_build_object('icao24',CASE WHEN n % 100 = 0 THEN 'A0B1C2' ELSE 'FFFFFF' END))
+    FROM generate_series(1,20000) AS n`);
+  await pools.admin.query('ANALYZE tracking.position_observations');
+  const indexNames = async statement => {
+    const { rows } = await pools.admin.query(`EXPLAIN (FORMAT JSON) ${statement}`);
+    const found = [];
+    const visit = node => {
+      if (node['Index Name']) found.push(node['Index Name']);
+      for (const child of node.Plans ?? []) visit(child);
+    };
+    visit(rows[0]['QUERY PLAN'][0].Plan);
+    return found;
+  };
+  assert.ok((await indexNames(`SELECT source_observation_id FROM tracking.position_observations
+    WHERE position <@ box(point(10,10),point(11,11))`)).includes('position_observations_position_gist'));
+  assert.ok((await indexNames(`SELECT source_observation_id FROM tracking.position_observations
+    WHERE icao24_hint='A0B1C2' AND observed_at_ms >= 1795050000000
+    AND observed_at_ms < 1795050060000 ORDER BY observed_at_ms,source_id,source_observation_id LIMIT 10`))
+    .includes('position_observations_icao24_time'));
+  assert.ok((await indexNames(`SELECT source_observation_id FROM tracking.position_observations
+    WHERE observed_at_ms >= 1795050000000 AND observed_at_ms < 1795050060000
+    ORDER BY observed_at_ms,source_id,source_observation_id LIMIT 10`))
+    .includes('position_observations_time_key'));
 });
