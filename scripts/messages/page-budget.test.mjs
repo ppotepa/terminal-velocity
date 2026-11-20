@@ -196,17 +196,3 @@ test('a handshake with visible refusal headers passes through its cooldown', asy
     response: { status: 429, headers: { 'Retry-After': '60' } } });
   assert.deepEqual(failures, [{ status: 429, retryAfter: '60', stopAfterResponse: true }]);
 });
-
-test('a routed socket close frame ends the window even when creation preceded routing', async () => {
-  const { open, session, failures, dispose } = await fixture();
-  const url = 'wss://ws.airframes.io/socket.io/?transport=websocket';
-  session.emit('Network.webSocketCreated', { requestId: 'active', url });
-  const client = Object.assign(peer(), { url: () => url, connectToServer: peer });
-  open(client);
-  session.emit('Network.webSocketHandshakeResponseReceived', { requestId: 'active', response: { status: 101 } });
-  session.emit('Network.webSocketFrameReceived', { requestId: 'other', response: { opcode: 8 } });
-  assert.deepEqual(failures, []);
-  session.emit('Network.webSocketFrameReceived', { requestId: 'active', response: { opcode: 8 } });
-  assert.deepEqual(failures, [{ status: 503 }]);
-  await dispose();
-});

@@ -123,9 +123,7 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
   // Chromium owns the upgrade. It exposes rejected status codes in the frame
   // error but can withhold response headers, including a provider cooldown.
   let socketId, upgraded = false;
-  const createdSockets = new Map();
   session.on('Network.webSocketCreated', ({ requestId, url }) => {
-    createdSockets.set(url, requestId);
     if (socket && url === socket.url()) socketId = requestId;
   });
   session.on('Network.webSocketHandshakeResponseReceived', ({ requestId, response }) => {
@@ -148,10 +146,6 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
     if (!closed && requestId === socketId)
       cancel(upgraded ? { status: 503 } : { status: 503, stopAfterResponse: true });
   });
-  session.on('Network.webSocketFrameReceived', ({ requestId, response }) => {
-    if (!closed && requestId === socketId && upgraded && response.opcode === 8)
-      cancel({ status: 503 });
-  });
   await session.send('Network.enable');
   await session.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
 
@@ -163,7 +157,6 @@ export async function boundPage(context, page, liveUrl, cancel, syntheticShell) 
       return route.close();
     }
     socket = route;
-    socketId = createdSockets.get(route.url()) ?? socketId;
     server = route.connectToServer();
     function forward(destination, message) {
       const size = Buffer.byteLength(message);

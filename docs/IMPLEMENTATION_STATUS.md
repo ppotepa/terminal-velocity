@@ -278,3 +278,16 @@ public listener was made for this follow-up. The private preview test uses only
 the synthetic provider fixture. Rollback is a code revert; no database rollback
 is needed. The source-rights decision remains repository-owner evidence, not
 independent confirmation by this follow-up.
+
+The subsequent review found that a message-crawler change associated CDP socket
+events by URL. Multiple sockets can share that URL, so the change was removed
+from the S4-02 diff; both crawler files again match merged S4-01. Node 24
+offline `npm ci`, `npm run test:messages`, and the focused provider and position
+contract tests passed after the removal. `npm run test:browser` could
+not run to completion in this authoring shell because its synthetic loopback
+server receives `listen EPERM` on `127.0.0.1`. The coordinator's earlier
+exact-SHA CI result applies to the prior head only; this correction needs a new
+isolated CI run before review. No new live provider request or independent
+source-rights approval was obtained for this correction. The earlier
+aggregate-only source smoke remains historical evidence, not a live acceptance
+result for the corrected head.
