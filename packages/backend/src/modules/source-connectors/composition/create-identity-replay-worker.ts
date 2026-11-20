@@ -1,0 +1,159 @@
+import { randomUUID } from 'node:crypto';
+import type { SqlPool } from '../../../contracts/database/index.ts';
+import { eventId, messageId } from '../../../contracts/identity/index.ts';
+import { epochMillis } from '../../../kernel/time/epoch-millis.ts';
+import { runSqlTransaction } from '../../database-transactions/public/index.ts';
+import { createCorrelateMessage, icao24, registration, type StrongIdentifier } from '../../aircraft-correlation/public/index.ts';
+import { createPostgresDecisionReader } from '../../aircraft-correlation/infrastructure/postgres/create-postgres-decision-reader.ts';
+import { createPostgresDecisionWriteSet } from '../../aircraft-correlation/infrastructure/postgres/create-postgres-decision-write-set.ts';
+import { runDecisionWork } from '../../aircraft-correlation/infrastructure/postgres/run-decision-work.ts';
+import { replayWorkOrder, replayWorkSuccessor, type ReplayWorkKind } from '../domain/replay-work-order.ts';
+import { createRegistryCandidateDirectory, createPostgresRegistryReader,
+  reevaluatePositionOnConnection, expandReplayAliases } from '../../fleet-identity/public/index.ts';
+
+interface RequestRow {
+  [key: string]: unknown;
+  request_id: string; kind: 'ICAO24' | 'REGISTRATION'; normalized_alias: string;
+  valid_from_ms: string; valid_until_ms: string | null; phase: 'POSITIONS' | 'MESSAGES' | 'BLOCKED';
+  cursor_time_ms: string | null; cursor_source_id: string | null;
+  cursor_observation_id: string | null; cursor_message_id: string | null;
+}
+
+/** Fixed JSON paths match migration 009's expression indexes exactly. */
+export function identityMessageReplayQuery(kind: 'ICAO24' | 'REGISTRATION'): string {
+  const alias = kind === 'ICAO24' ? "canonical #>> '{aircraftHints,icao24}'"
+    : "canonical #>> '{aircraftHints,registration}'";
+  return `SELECT message_id,(canonical #>> '{observation,observedAt,at}')::bigint AS observed_at_ms,canonical
+    FROM source_ingestion.message_revisions WHERE revision=1
+      AND ${alias} = $1
+      AND (canonical #>> '{observation,observedAt,at}')::bigint >= $2
+      AND ($3::bigint IS NULL OR (canonical #>> '{observation,observedAt,at}')::bigint < $3)
+      AND ($4::bigint IS NULL OR ((canonical #>> '{observation,observedAt,at}')::bigint,message_id) > ($4,$5))
+    ORDER BY observed_at_ms,message_id LIMIT $6`;
+}
+
+/** One locked, bounded page per call. A failed page leaves its cursor unchanged for retry. */
+export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Date.now) {
+  return async (limit = 100): Promise<{ requestId: number | null; processed: number; complete: boolean } | null> => {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new RangeError('Invalid replay page size.');
+    return runSqlTransaction(pool, async sql => {
+      // The durable turn is locked with the selected page. A failed page rolls
+      // back both its cursor and the turn, including across worker restarts.
+      const scheduler = await sql.query<{ next_kind: ReplayWorkKind }>(`
+        SELECT next_kind FROM fleet_identity.replay_scheduler WHERE singleton FOR UPDATE`);
+      const turn = scheduler.rows[0]?.next_kind;
+      if (!turn) throw new Error('Identity replay scheduler is missing.');
+      const selectJob = async () => (await sql.query<{ job_id: string; source_id: string;
+        source_observation_id: string }>(`
+        SELECT job_id,source_id,source_observation_id FROM fleet_identity.position_link_jobs
+        WHERE completed_at IS NULL ORDER BY job_id FOR UPDATE SKIP LOCKED LIMIT 1`)).rows[0];
+      const selectRequest = async () => (await sql.query<RequestRow>(`SELECT request_id,kind,normalized_alias,valid_from_ms,
+        valid_until_ms,phase,cursor_time_ms,cursor_source_id,cursor_observation_id,cursor_message_id
+        FROM fleet_identity.replay_requests WHERE phase IN ('POSITIONS','MESSAGES')
+          OR (phase='BLOCKED' AND blocked_revision <
+            (SELECT revision FROM fleet_identity.registry_state WHERE singleton))
+        ORDER BY request_id
+        FOR UPDATE SKIP LOCKED LIMIT 1`)).rows[0];
+      let job: Awaited<ReturnType<typeof selectJob>>;
+      let request: Awaited<ReturnType<typeof selectRequest>>;
+      // The scheduler row is locked until commit. Rotate by the class that
+      // actually made progress, not the originally preferred class. Each
+      // continuously nonempty queue is served at least once every three turns.
+      for (const kind of replayWorkOrder(turn)) {
+        if (kind === 'JOBS') {
+          job = await selectJob();
+          if (job) break;
+        } else if (kind === 'EXPANSIONS') {
+          const expansion = await expandReplayAliases(sql, limit);
+          if (expansion) {
+            await sql.query('UPDATE fleet_identity.replay_scheduler SET next_kind=$1 WHERE singleton',
+              [replayWorkSuccessor('EXPANSIONS')]);
+            return expansion;
+          }
+        } else {
+          request = await selectRequest();
+          if (request) break;
+        }
+      }
+      if (!job && !request) return null;
+      await sql.query('UPDATE fleet_identity.replay_scheduler SET next_kind=$1 WHERE singleton',
+        [replayWorkSuccessor(job ? 'JOBS' : 'CORRECTIONS')]);
+      if (job) {
+        await reevaluatePositionOnConnection(sql, job.source_id, job.source_observation_id);
+        await sql.query(`UPDATE fleet_identity.position_link_jobs SET completed_at=clock_timestamp()
+          WHERE job_id=$1`, [job.job_id]);
+        return { requestId: null, processed: 1, complete: true };
+      }
+      if (!request) throw new Error('Identity replay request is missing.');
+      if (request.phase === 'BLOCKED') {
+        await sql.query(`UPDATE fleet_identity.replay_requests
+          SET phase='MESSAGES',blocked_revision=NULL WHERE request_id=$1`, [request.request_id]);
+      }
+      const from = Number(request.valid_from_ms);
+      const until = request.valid_until_ms === null ? null : Number(request.valid_until_ms);
+      const cursor = request.cursor_time_ms === null ? null : Number(request.cursor_time_ms);
+      if (request.phase === 'POSITIONS') {
+        const rows = request.kind === 'ICAO24' ? await sql.query<{ observed_at_ms: string; source_id: string;
+          source_observation_id: string }>(`SELECT observed_at_ms,source_id,source_observation_id
+          FROM tracking.position_observations WHERE icao24_hint=$1 AND observed_at_ms >= $2
+            AND ($3::bigint IS NULL OR observed_at_ms < $3)
+            AND ($4::bigint IS NULL OR (observed_at_ms,source_id,source_observation_id) > ($4,$5,$6))
+          ORDER BY observed_at_ms,source_id,source_observation_id LIMIT $7`,
+          [request.normalized_alias, from, until, cursor, request.cursor_source_id,
+            request.cursor_observation_id, limit]) : { rows: [] };
+        for (const row of rows.rows) await reevaluatePositionOnConnection(sql, row.source_id, row.source_observation_id);
+        const last = rows.rows.at(-1);
+        if (last) await sql.query(`UPDATE fleet_identity.replay_requests SET cursor_time_ms=$2,
+          cursor_source_id=$3,cursor_observation_id=$4 WHERE request_id=$1`,
+          [request.request_id, last.observed_at_ms, last.source_id, last.source_observation_id]);
+        if (rows.rows.length < limit) await sql.query(`UPDATE fleet_identity.replay_requests SET phase='MESSAGES',
+          cursor_time_ms=NULL,cursor_source_id=NULL,cursor_observation_id=NULL WHERE request_id=$1`, [request.request_id]);
+        return { requestId: Number(request.request_id), processed: rows.rows.length, complete: false };
+      }
+      const rows = await sql.query<{ message_id: string; observed_at_ms: string; canonical: {
+        aircraftHints: { icao24?: string; registration?: string; callsign?: string } } }>(
+        identityMessageReplayQuery(request.kind),
+        [request.normalized_alias, from, until, cursor, request.cursor_message_id, limit]);
+      const directory = createRegistryCandidateDirectory(createPostgresRegistryReader(sql));
+      const transaction = { run: <T>(work: Parameters<typeof runDecisionWork<T>>[1]) =>
+        runDecisionWork(createPostgresDecisionWriteSet(sql), work) };
+      const correlate = createCorrelateMessage({ directory, transaction,
+        clock: { now: () => { const time = epochMillis(now());
+          if (!time.ok) throw new Error('Invalid replay clock.'); return time.value; } },
+        eventIds: { next() { const id = eventId('evt_' + randomUUID());
+          if (!id.ok) throw new Error('Invalid event ID.'); return id.value; } } });
+      for (const row of rows.rows) {
+        const id = messageId(row.message_id);
+        if (!id.ok) throw new Error('Invalid stored message ID.');
+        const hints = row.canonical.aircraftHints;
+        const identifiers: StrongIdentifier[] = [];
+        if (hints.icao24) { const parsed = icao24(hints.icao24);
+          if (!parsed.ok) throw new Error('Invalid stored ICAO24.'); identifiers.push({ kind: 'ICAO24', value: parsed.value }); }
+        if (hints.registration) { const parsed = registration(hints.registration);
+          if (!parsed.ok) throw new Error('Invalid stored registration.'); identifiers.push({ kind: 'REGISTRATION', value: parsed.value }); }
+        const observedAt = epochMillis(Number(row.observed_at_ms));
+        if (!observedAt.ok) throw new Error('Invalid stored observation time.');
+        const previous = await createPostgresDecisionReader(sql).readCurrent(id.value);
+        const snapshot = await directory.find({ messageId: id.value, effectiveAt: observedAt.value,
+          identifiers, callsign: hints.callsign ?? null });
+        if (snapshot.completeness !== 'COMPLETE') {
+          await sql.query(`UPDATE fleet_identity.replay_requests
+            SET phase='BLOCKED',blocked_revision=$2 WHERE request_id=$1`,
+          [request.request_id, snapshot.registryRevision]);
+          return { requestId: Number(request.request_id), processed: 0, complete: false };
+        }
+        if (previous?.directoryRevision === snapshot.revision) continue;
+        const result = await correlate({ messageId: id.value, effectiveAt: observedAt.value,
+          identifiers, callsign: hints.callsign ?? null }, previous?.revision ?? null);
+        if (!result.ok) throw new Error(result.error.code);
+      }
+      const last = rows.rows.at(-1);
+      if (last) await sql.query(`UPDATE fleet_identity.replay_requests SET cursor_time_ms=$2,
+        cursor_message_id=$3 WHERE request_id=$1`, [request.request_id, last.observed_at_ms, last.message_id]);
+      if (rows.rows.length < limit) await sql.query(`UPDATE fleet_identity.replay_requests SET phase='DONE',
+        completed_at=clock_timestamp() WHERE request_id=$1`, [request.request_id]);
+      return { requestId: Number(request.request_id), processed: rows.rows.length,
+        complete: rows.rows.length < limit };
+    });
+  };
+}

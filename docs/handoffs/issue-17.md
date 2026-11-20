@@ -1,0 +1,47 @@
+# Issue #17 engineering handoff
+
+## Scope and state
+
+The `feature/epic4-issue-17` checkout contains the temporal fleet identity implementation on top of merged predecessor #16. The coordinator owns commits, GitHub issue and PR updates, merge, and the next issue. This handoff does not mark #17 accepted or merged.
+
+The registry stores stable internal aircraft IDs and append-only ICAO24 and registration assertions with source, issuer, validity interval, recorded time, and revision. Resolution uses the observation time and reports matched, ambiguous, conflicted, unmatched, or incomplete results. Position link revisions are separate from immutable position facts. Alias changes enqueue bounded position and message re-evaluation; message replay appends correlation decisions and outbox events without replacing source revisions. The public candidate directory preserves complete and partial snapshots. The rendered Airframes on-demand command remains separate and retains no real message content.
+
+## Migration and replay
+
+Migrations 008–010 add the registry, assertion and link history, replay requests with durable cursors, lookup indexes, and a position-link job queue. Migration 011 enforces same-source and same-issuer correction authority for every SQL writer and rejects an upgrade if existing history violates that rule. Migration 012 adds bounded, durable alias-expansion tasks. A database trigger queues a job in the same transaction as each new position fact. The worker handles new-position jobs, alias expansions, and correction pages with one checked-out connection per transaction. Durable scheduling advances new positions and correction work under a continuous feed. A changed assertion queues its own alias and paginates overlapping current aliases of both affected aircraft, because their decisions may change even when observations do not contain the changed alias. Each request runs in bounded pages; a failed page or job rolls back its cursor and turn, and repeated position work is idempotent. The runtime role has narrow grants; the owner role has `NOLOGIN`.
+
+Migration 013 removes direct runtime assertion and replay-expansion writes and provides an atomic, revisioned assertion append function that also schedules correction work. Migration 014 records blocked replay requests and the revision at which their candidate lookup was incomplete. Migrations 008–014 are additive and have no destructive down migration. Rolling back application code must preserve assertion, position-link decision, replay-request, job, message-decision, and outbox history; an older worker may leave new jobs or requests pending. Correcting or retiring the schema requires a forward, history-preserving migration and replay plan. No schema rollback or deployment has been performed.
+
+## Verification evidence
+
+The coordinator's isolated exact-SHA CI for `6faa59d12f86eb481c04067863a1c16eff6a1de7` passed offline `npm ci`, `npm run check` (33 script, 191 backend, 30 API tests), `npm run test:postgres:local` (111 tests), demo, smoke, message tests (41), and browser tests (26). This proves the tested commit in isolated local CI; it is not hosted CI or merged-SHA verification.
+
+Independent review found that the registry reader's 1,001-row completeness limit included expired aliases, history returned an unlimited array, and the correction message query did not prove use of migration 009's fixed-path indexes. The follow-up filters candidates at observation time before the limit, pages assertion history with a 500-row maximum and assertion-ID cursor, and uses literal JSON alias paths. Synthetic PostgreSQL regressions cover more than 1,001 expired assertions and the actual replay query's plan on a populated retained-message table. The issue and reviewed PR hold the exact-SHA and merged-SHA results for this follow-up.
+
+The coordinator's isolated CI at `273e16f0080fcd35fc6af94bb719c0dfcdfa30c4` passed `npm ci` and `npm run check`, then failed two PostgreSQL baseline-upgrade tests. Both tests enumerated migrations through 012 and rejected the newly applied 013 in their expected list. This checkout updates those expectations while retaining the upgrade, checksum, preserved-record, and permission assertions. In this authoring shell, offline `npm ci`, type checking, architecture boundaries, and backend unit tests passed under Node 24. `npm run check` stopped at the private-preview socket test; the API socket tests also failed in this restricted shell. `npm run test:postgres:local` stopped before tests because root cannot run `initdb`. The corrected upgrade tests and full PostgreSQL suite still require the coordinator's unprivileged exact-SHA CI. No pass for that suite is claimed here.
+
+The coordinator's isolated CI at `124ae7a153a4ee038d579f9fd2863ad70f787c73` passed install, check (33 script, 191 backend, 30 API tests), PostgreSQL (115 tests), demo, smoke, and messages (41 tests). Browser verification passed 25 of 26 tests; the synthetic on-demand filter query timed out. The fixture had sent its card immediately after the WebSocket handshake, before the browser relay was guaranteed to have registered message handlers. It now waits for the synthetic page's `ready` frame before sending. This changes only the offline fixture, not the user-facing crawl command. In this authoring shell, Node 24 offline `npm ci`, TypeScript checks, and architecture boundaries passed. `npm run check` and `npm run test:browser` stopped on `listen EPERM` for loopback socket tests; the browser fix therefore needs an unprivileged exact-SHA run by the coordinator. No browser pass is claimed for this revision.
+
+The coordinator supplied a passing isolated CI result for `f6adb4e`; independent review found that a single aircraft with more than 2,000 active assertions became permanently incomplete and could stall the earliest replay request. The reader now collapses duplicate claims and returns at most two distinct active alias values per kind and owner. Two values are sufficient to prove an alias conflict; full assertion provenance remains in paged history. More than 2,000 decision-evidence rows still returns `PARTIAL`. Migration 014 adds a blocked replay phase and revision: an incomplete request yields to later work and retries when the registry changes. Synthetic PostgreSQL tests cover duplicate growth, distinct-alias conflict, blocked request progress, and retry after a history-preserving correction. This checkout needs fresh exact-SHA PostgreSQL and full-check verification; `f6adb4e` does not verify these edits.
+
+The coordinator's isolated CI at `91dc654` passed installation and `npm run check` (33 script, 191 backend, 30 API tests), then failed two PostgreSQL tests. The distinct-alias test used an invalid aircraft ID containing an underscore after the `ac_` prefix. The replay worker also passed a textual directory token (`fleet/2001`) to the numeric `blocked_revision` column. The registry adapter now supplies the numeric revision from the same lookup snapshot alongside its correlation token; the worker persists that numeric value. The blocked-request test also queued its oversized alias twice, so it now uses the original queued request and one unrelated alias. In this authoring shell, `npm ci --offline --ignore-scripts --no-audit --no-fund`, `npm run typecheck`, and `npm run check:boundaries` passed. `npm run check` stopped at the first TypeScript import because this shell has Node 20, while the repository requires Node 24. `npm run test:postgres:local` stopped before tests because PostgreSQL refuses `initdb` as root. The changes need a new isolated exact-SHA PostgreSQL and full-check run; the earlier result does not verify this checkout.
+
+In the authoring shell, offline `npm ci`, `npm run typecheck`, `npm run check:boundaries`, and `git diff --check` passed. `npm run check` reached the script tests but stopped because Node 20 cannot load the repository's `.ts` test imports; the required runtime is Node 24. `npm run test:postgres:local` stopped before database startup because `initdb` refuses root. The new PostgreSQL tests have not run here. The coordinator must run them with Node 24 under an unprivileged isolated CI user at the reviewed exact SHA before accepting this follow-up.
+
+## External gates
+
+All implementation evidence uses synthetic data. Provider rights, real-source retention, publication policy, deployment, and owner acceptance remain external decisions. This change adds no public map or flight-session recognition. The coordinator should run exact-SHA CI, review the migration and correction, then update #17 and epic #4 according to the issue workflow. Only after merge and verification can #17 be marked `DONE` and the next issue activated.
+
+
+## Fair scheduling follow-up on PR #66
+
+Review of the pushed `bb05057c` head identified a starvation risk: a
+continuously nonempty alias-expansion queue could monopolize CORRECTIONS turns
+and prevent queued message/position correction requests from executing.
+Migration 015 extends the durable scheduler to three work classes. A pure
+round-robin policy selects the next nonempty class and advances the persisted
+turn after the class that actually ran. Added pure and real-PostgreSQL
+regressions for this condition. Only the three pure policy tests have been
+executed in the current environment (Node 22 experimental TS stripping);
+full Node 24/PostgreSQL and browser suites require independent execution
+for the new head before marking #17 complete.

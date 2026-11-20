@@ -6,7 +6,7 @@ import type { SourceDeliveryOrigin } from '../ports/source-delivery-store.ts';
 import { createPermittedProviderPipeline } from './create-permitted-provider-pipeline.ts';
 
 /** Explicit offline helper; only synthetic content is authorized by this fixture scope. */
-export function createSyntheticProviderPipeline(pool: SqlPool, directory: CandidateDirectory, now: () => number = Date.now) {
+export function createSyntheticProviderPipeline(pool: SqlPool, directory: CandidateDirectory | undefined, now: () => number = Date.now) {
   const create = (scope: Pick<VerifiedSourceScope, 'sourceId' | 'provider' | 'accountScope' | 'sourceEpoch'>) =>
     createPermittedProviderPipeline(pool, directory, { ...scope, retentionAllowed: true,
       purpose: 'PRIVATE_PROCESSING', evidenceReference: 'repository-synthetic-fixtures-only' }, now);

@@ -42,6 +42,9 @@ export function checkDependencyPolicy(project, fromFile, resolution) {
     : failure('KERNEL_DEPENDENCY', 'Kernel may depend only on kernel.');
   if (from.zone === 'contracts') return ['kernel', 'contracts'].includes(to.zone) ? null
     : failure('CONTRACT_DEPENDENCY', 'Contracts may depend only on contracts and kernel.');
+  if (to.unit === 'module:fleet-identity' && from.unit !== to.unit && !isPublicEntry(to)) {
+    return failure('CROSS_MODULE_DEEP_IMPORT', 'Fleet identity consumers must use public/index.ts.');
+  }
   if (from.layer === 'composition') return to.zone !== 'unknown' ? null
     : failure('UNKNOWN_SOURCE_AREA', `Composition targets unclassified source ${to.relative}.`);
   if (['kernel', 'contracts'].includes(to.zone)) return null;
@@ -61,8 +64,8 @@ export function checkDependencyPolicy(project, fromFile, resolution) {
   }
   if (from.layer === 'public') {
     if (to.layer === 'infrastructure') return failure('PUBLIC_ADAPTER_EXPORT', 'Public entry must not expose an infrastructure adapter.');
-    if (to.layer === 'composition' && !(from.unit === 'demo' && isPublicEntry(from))) {
-      return failure('PUBLIC_COMPOSITION_EXPORT', 'Only demo/public/index.ts may export its composition factory.');
+    if (to.layer === 'composition' && !((from.unit === 'demo' || from.unit === 'module:fleet-identity') && isPublicEntry(from))) {
+      return failure('PUBLIC_COMPOSITION_EXPORT', 'Only approved public entries may export composition factories.');
     }
     return null;
   }

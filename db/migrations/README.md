@@ -1,5 +1,11 @@
 # PostgreSQL migrations and test isolation
 
+## Migrations 008–010: temporal aircraft identity
+
+`fleet_identity.aircraft` holds stable internal IDs. Assertions record normalized ICAO24 or registration, source, issuer, half-open validity interval, recording time, global revision, and optional predecessor. Corrections append successors; old rows remain evidence. Overlapping owner claims remain ambiguous, while disagreeing identifiers remain conflicted. Readers use observation time and report completeness explicitly. Correlation consumes complete candidate snapshots through its existing port.
+
+Each assertion append atomically advances the registry revision and writes replay requests for the new and corrected validity ranges. The private replay worker scans ICAO24 position hints and affected messages in bounded, keyset pages, appending position-link and correlation decision revisions. Migration 009 adds durable phase and cursor progress. Migration 010 adds a position-link job queue and a trigger that enqueues each newly inserted observation in the same transaction as its fact and outbox. It does not scan older position rows during migration. After migration, run `npm run db:backfill-position-links` with `MIGRATION_DATABASE_URL` for an existing database. That command scans at most 500 keys per transaction, queues only unlinked facts, and commits its cursor with each batch. Repeated runs resume safely; concurrent new inserts are already covered by the trigger. Keep the older worker active until the progress row has `completed_at` and pending jobs have drained. Its scheduler row alternates between new-position jobs and correction requests so either class progresses under a continuous feed. The worker uses the same transaction connection for the page, decision, scheduler turn, and progress update, including with a one-connection pool. Failed work retains its pending job or cursor and rolls back the turn. Observation facts and prior link revisions remain immutable. Registration-only requests apply to message correlation because positions have no registration hint index. The migrations are additive and have no destructive down migration; application rollback must retain the new tables and history.
+
 These migrations implement the durable synthetic Stage 2 message flow, private Stage 3 delivery metadata, and private append-only Stage 4 position history. The larger DDL under `docs/architecture/persistence` remains a design reference. It is not executed by the application.
 
 ## Ownership and application permissions
@@ -56,7 +62,7 @@ GitHub Actions uses an ephemeral `postgres:18.7` service and runs the integratio
 
 The suite exercises independent-process first-write contention, revision CAS, atomic decision/outbox writes, SQL rollback and capability lifetime, late-committing outbox records, `SKIP LOCKED` queue claims, lease token fencing, recovery, bounded retries, consumer-specific inbox deduplication, atomic projection rollback, contribution correction and tombstones, runtime grants, and migration drift. Application integration tests also restart the actual API process and read persisted state.
 
-The position table in migration 007 uses PostgreSQL's built-in `point` value with a GiST index; no PostGIS extension is required. Position history is keyed by `(source_id, source_observation_id)` and stores the canonical JSON fact so omitted, null, and zero optional fields remain distinct. Its generated ICAO24 hint is only a search hint; the temporal identity registry is added later. The history adapter can insert synthetic test observations, but S4-03 does not connect the live adsb.lol source to durable storage. ADR #0002 keeps real position-row retention gated on issue #46.
+The position table in migration 007 uses PostgreSQL's built-in `point` value with a GiST index; no PostGIS extension is required. Position history is keyed by `(source_id, source_observation_id)` and stores the canonical JSON fact so omitted, null, and zero optional fields remain distinct. Its generated ICAO24 hint remains a search hint; migration 008 links facts through separately versioned decisions. The history adapter can insert synthetic test observations, but S4-03 does not connect the live adsb.lol source to durable storage. ADR #0002 keeps real position-row retention gated on issue #46.
 
 The implemented message projection serves one fixed synthetic public scope. This schema does not implement multi-tenant authorization, real receiver ingestion, a broker, or the complete architecture catalog.
 The implemented projection serves one fixed synthetic public scope. This schema does not implement multi-tenant authorization, real receiver ingestion, a broker, or the complete architecture catalog.
@@ -101,3 +107,29 @@ is coordinator-verified in the isolated PostgreSQL suite, never by API startup.
 `007_tracking_position_history.sql` follows the Stage 3 source migrations. It creates `tv_tracking_owner` and `tracking`, a source-scoped append-only observation table, and a producer outbox. The runtime role receives only `SELECT` and `INSERT` on these tables. Canonical JSON facts retain optional field presence while generated ICAO24 is only an unconfirmed search hint. Observed and ingestion times have distinct columns. Source delivery references are optional and opaque; they do not imply a foreign key to a permitted provider delivery. A unique source observation key and one event per fact make retries idempotent. Different sources retain independent facts. The application writer inserts both rows in one checked-out transaction. An outbox failure rolls back the observation.
 
 Coordinates use finite, bounded longitude and latitude validated by the application and database. PostgreSQL's built-in `point` and GiST index support private spatial bounding-box queries, with a split range when west exceeds east across the antimeridian. The time and ICAO24 indexes support bounded, deterministic keyset history. No extension or persistent service is installed by this migration. A rollback requires a new migration; do not edit an applied checksum or delete retained facts as an application rollback.
+
+## Migration 011 — fleet correction authority
+
+`011_fleet_identity_correction_authority.sql` rejects a successor assertion whose `source_id` or `issuer` differs from the assertion it supersedes. It first fails migration if prior cross-authority corrections already exist, so those histories must be reviewed rather than silently accepted. The insert trigger covers direct SQL writers as well as the application committer. Independent conflicting claims remain separate current assertions and resolve ambiguously; a source cannot erase another source's claim by naming its assertion ID. This migration changes no existing assertion, link, or replay row and has no destructive down migration. A rollback of application code must retain this correction guard and the append-only history; altering the schema requires a forward migration.
+
+## Migration 013 — atomic fleet registry writes
+
+`013_fleet_identity_registry_write.sql` removes the runtime role's direct assertion insert and registry revision update grants. The role calls `fleet_identity.append_assertion` to append a validated row, advance the global revision, and enqueue affected alias and aircraft expansion work in one transaction. The function serializes writers on the registry state row and checks correction authority again after acquiring that lock. A failed insert or correction rolls back its revision and replay work. Existing assertions and replay history are retained. Runtime replay workers keep the narrow replay-request insert grant needed to expand already committed work.
+
+Identity reads page bounded decision evidence by assertion ID. It keeps at most two distinct active aliases of each kind per matching aircraft; duplicate claims and further conflicting values remain in paged assertion history. Each page reads the registry revision; a revision change while paging returns an incomplete snapshot so correlation cannot confirm an aircraft from mixed registry versions. The 2,000-row decision-evidence ceiling can still return `PARTIAL` for very large owner sets. Application rollback must retain migration 013 or use a new forward migration restoring a safe writer; direct insert cannot be re-enabled without a revision and replay mechanism.
+
+## Migration 014 — incomplete correction replay
+
+`014_fleet_identity_replay_blocked.sql` adds a `BLOCKED` request phase and the registry revision that caused an incomplete candidate lookup. The worker skips that request so later correction requests can advance. It retries the blocked request after the registry revision changes. The cursor and immutable message, assertion, and decision histories remain intact. An application rollback must retain this phase or use a forward migration that safely handles blocked requests.
+
+
+## Migration 015 — fair identity replay scheduling
+
+`015_fleet_identity_fair_scheduler.sql` extends the existing scheduler
+with a separate `EXPANSIONS` work class. On each committed page the worker
+rotates the preferred queue from `JOBS` to `EXPANSIONS` to `CORRECTIONS`
+and back, starting after the class that actually completed. Empty classes
+are skipped without losing progress; the scheduler row and selected page
+remain in the same transaction. Under continuously nonempty queues,
+every class is serviced at least once in three committed turns. This
+migration preserves previous state values and all durable pending work.

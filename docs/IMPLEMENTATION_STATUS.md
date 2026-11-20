@@ -1,6 +1,12 @@
 # Terminal Velocity — implementation status, Stage 2
 
-Date: November 19, 2026. Code version: `0.1.0`. The application offers a durable PostgreSQL mode for one complete synthetic message flow, alongside the original memory demonstration. Stage 3 includes source-observation contracts, on-demand website lookup, and private delivery metadata storage exercised with synthetic inputs.
+### S4-04 temporal fleet identity (issue #17, local authoring)
+
+The private registry stores stable aircraft IDs, time-qualified ICAO24 and registration assertions, explicit ambiguity and conflict, and versioned links to immutable position and message facts. Migrations 008–014 add append-only history, replay cursors, new-position jobs, correction authority, bounded alias-expansion tasks, an atomic database write entry point, and blocked replay recovery. A separate command backfills old positions in small transactions; migration 010 does not scan the entire position table. The permitted provider composition uses the registry through its public entry point. All retained examples and tests are synthetic.
+
+The coordinator supplied passing isolated CI for the earlier #17 revision `f6adb4e`, before independent review found that duplicate or historical aliases could exhaust the 2,000-row lookup ceiling and block correction replay. The current reader returns at most two distinct active values per identifier kind and aircraft, which preserves the conflict veto while keeping a single owner's decision evidence bounded. Full source and revision provenance remains available through paged history. A lookup involving more than 2,000 evidence rows remains `PARTIAL`; the replay worker records `BLOCKED` at the numeric registry revision from the same candidate snapshot, lets later requests run, and retries after a registry revision change. Synthetic PostgreSQL regressions cover both growth and recovery. The coordinator's isolated CI at `91dc654` passed `npm run check` and failed two new PostgreSQL tests: a fixture ID violated the registry format, and the worker passed the `fleet/…` directory token to a bigint column. This checkout corrects both, and removes a duplicate oversized replay request from the test. Fresh exact-SHA PostgreSQL and full-check evidence is still required.
+
+These migrations are additive and have no destructive down migration. Rolling back application code must retain assertions, link decisions, jobs, replay cursors, and outbox history. A schema correction needs a forward migration. The code does not establish provider rights, live retention permission, a public map, or flight-session recognition.
 
 ## Implemented
 
@@ -58,7 +64,7 @@ Memory remains the default. It stages a single `DemoState` swap under a mutex, i
 
 ### Shared scope
 
-Aircraft position storage, identity, projection, and UI remain unimplemented. S4-02 adds an opt-in private adsb.lol adapter, but no live result is persisted or publicly served. Messages are decoded text examples, not captured RF frames. No real Airframes message connector, moving map frontend, flight sessions, reassembly, entitlement enforcement, or public deployment has been added.
+Stage 4 now has private synthetic position history and temporal aircraft identity. New position facts enqueue a durable identity-link job in their write transaction; the private replay worker processes jobs and alias corrections through the registry on one transaction connection. Position projection and UI remain unimplemented. S4-02 adds an opt-in private adsb.lol adapter, but no live result is persisted or publicly served. Messages are decoded text examples, not captured RF frames. No real Airframes message connector, moving map frontend, flight sessions, reassembly, entitlement enforcement, or public deployment has been added.
 
 The architecture v2 catalog still describes 89 intended responsibilities rather than 89 completed services. Stage 3 has a separate on-demand lookup and durable metadata store. Real-source retention and a permitted provider fixture remain gated by issue #6. Its source contracts do not grant publication rights. The historical DDL and target event envelope remain design documents; the implemented schema is under `db/migrations`, and the current event is `correlation.aircraft-decision-revised.v1`.
 

@@ -58,8 +58,7 @@ async function loopbackProvider(t, { upgradeStatus, denied, redirect, partial, d
       + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
     socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
       + `Sec-WebSocket-Accept: ${accept}\r\n\r\n`);
-    // Wait for Chromium's first frame after the page opens the connection.
-    socket.once('data', () => {
+    const sendFixture = () => {
       if (onReady) { onReady(); return; }
       if (disconnect && sockets.length === 1) { socket.end(Buffer.from([0x88, 0])); return; }
       const body = Buffer.from(burst
@@ -68,7 +67,11 @@ async function loopbackProvider(t, { upgradeStatus, denied, redirect, partial, d
       const header = Buffer.from([0x81, 126, 0, 0]);
       header.writeUInt16BE(body.length, 2);
       socket.write(Buffer.concat([header, body]));
-    });
+    };
+    // The synthetic page sends ready after its socket opens. Wait for that
+    // frame so the browser-side relay has installed its message handlers
+    // before this fixture sends a rendered card.
+    socket.once('data', sendFixture);
     socket.on('end', () => socket.end());
   });
   server.on('stream', (response, headers) => {

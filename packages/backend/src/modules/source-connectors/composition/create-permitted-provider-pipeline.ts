@@ -21,11 +21,13 @@ import { readProviderImportReceipt } from '../infrastructure/postgres/read-provi
 import { readSourceEvent, type AcceptedSourceEvent } from '../infrastructure/postgres/read-source-event.ts';
 import { routeSourceEvents, SOURCE_IMPORT_CONSUMER, PRIVATE_AVAILABILITY_CONSUMER } from '../infrastructure/postgres/source-event-router.ts';
 import { projectPrivateDecision, readPrivateAvailability } from '../infrastructure/postgres/private-availability.ts';
+import { createRegistryCandidateDirectory, createPostgresRegistryReader } from '../../fleet-identity/public/index.ts';
+import { createIdentityReplayWorker } from './create-identity-replay-worker.ts';
 
 import { permitsRetention, type RetentionPermission } from '../domain/retention-permission.ts';
 
 /** Private durable composition. Permission must come from trusted operator configuration. */
-export function createPermittedProviderPipeline(pool: SqlPool, directory: CandidateDirectory, permission: RetentionPermission, now: () => number = Date.now) {
+export function createPermittedProviderPipeline(pool: SqlPool, directory: CandidateDirectory | undefined, permission: RetentionPermission, now: () => number = Date.now) {
   const grant = structuredClone(permission);
   const queue = createPostgresEventDelivery(pool);
   const events = { next() { const id = eventId('evt_' + randomUUID()); if (!id.ok) throw new Error('Invalid event ID'); return id.value; } };
@@ -39,8 +41,12 @@ export function createPermittedProviderPipeline(pool: SqlPool, directory: Candid
     const outcome = await consumeRegisteredEvent(pool, lease, async (sql, id) => {
       const read = await readSourceEvent(sql, id); source = read.event; return read;
     }, async (sql, event) => {
+      // Serialize registry corrections with a message import, so a replay cannot
+      // finish before an import using the preceding registry revision commits.
+      if (!directory) await sql.query('SELECT revision FROM fleet_identity.registry_state WHERE singleton FOR SHARE');
       result = await importProviderMessage({ ...event, now: now() },
-        postgresProviderMessageCommit(sql, event.messageId, event.sourceDeliveryId, decisions(sql), event.canonical), directory, events);
+        postgresProviderMessageCommit(sql, event.messageId, event.sourceDeliveryId, decisions(sql), event.canonical),
+        directory ?? createRegistryCandidateDirectory(createPostgresRegistryReader(sql)), events);
     });
     if (outcome === 'DUPLICATE' && source) result = await readProviderImportReceipt(pool, source.sourceDeliveryId);
     return { outcome, result };
@@ -53,8 +59,11 @@ export function createPermittedProviderPipeline(pool: SqlPool, directory: Candid
     if (!permitsRetention(grant, canonical.observation)) throw new Error('Retention permission is missing or outside its scope.');
     return acceptSourceDelivery(scope, postgresSourceAcceptanceTransaction(pool, randomUUID, { canonical, permission: grant }), canonical.observation, origin);
   }
+  const registryReplay = createIdentityReplayWorker(pool, now);
+  const identityReplay = directory ? async (_limit?: number) => null : registryReplay;
   return {
     queue, route: () => routeSourceEvents(pool), consumeSource, consumePrivate,
+    replayIdentityCorrections: identityReplay,
     async accept(input: unknown, context: NormalizationContext, scope: VerifiedSourceScope, origin: SourceDeliveryOrigin) {
       const normalized = normalizeSourceObservation(input, context, scope.capabilities);
       if (!normalized.ok) return normalized;
@@ -86,6 +95,23 @@ export function createPermittedProviderPipeline(pool: SqlPool, directory: Candid
             else await queue.retry(lease, { code: 'PROVIDER_PROCESSING_FAILED', delayMs: 1000 });
             throw error;
           }
+        }
+      }
+      for (let i = 0; i < 100; i++) {
+        const page = await identityReplay(100);
+        if (!page) break;
+        processed += page.processed;
+      }
+      await routeSourceEvents(pool);
+      for (let i = 0; i < 100; i++) {
+        const lease = await queue.leaseNext(PRIVATE_AVAILABILITY_CONSUMER, 30_000);
+        if (!lease) break;
+        try {
+          if (await consumePrivate(lease) !== 'STALE_LEASE') processed++;
+        } catch (error) {
+          if (error instanceof EventIdentityConflict) await queue.quarantine(lease, 'EVENT_ID_CONFLICT');
+          else await queue.retry(lease, { code: 'PROVIDER_PROCESSING_FAILED', delayMs: 1000 });
+          throw error;
         }
       }
       return processed;
