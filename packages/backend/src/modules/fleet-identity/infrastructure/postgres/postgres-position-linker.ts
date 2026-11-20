@@ -8,7 +8,8 @@ import { postgresIdentityReader } from './postgres-identity-reader.ts';
 export function postgresPositionLinker(pool: SqlPool): PositionLinker {
   async function reevaluate(sourceId: string, sourceObservationId: string): Promise<PositionLinkDecision> {
     return runSqlTransaction(pool, async sql => {
-      await sql.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [`${sourceId}\0${sourceObservationId}`]);
+      await sql.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
+        [JSON.stringify([sourceId, sourceObservationId])]);
       await sql.query('SELECT revision FROM fleet_identity.registry_state WHERE singleton FOR SHARE');
       const found = await sql.query<{ fact: { observedAt?: string; identifierHints?: { icao24?: string };
         confirmedAircraftId?: string } }>(`SELECT fact FROM tracking.position_observations
