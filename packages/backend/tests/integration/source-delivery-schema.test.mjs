@@ -56,7 +56,8 @@ test('a baseline database upgrades once to source storage and preserves its migr
     await pool.query(`INSERT INTO event_delivery.deliveries(consumer_id,event_id) VALUES ('upgrade-private-test',$1)`, [event.eventId]);
     assert.deepEqual(await applyMigrations(pool), ['002_source_deliveries.sql', '003_source_acceptance_fingerprint.sql',
       '004_source_event_delivery_bridge.sql', '005_permitted_source_retention.sql', '006_source_replay.sql',
-      '007_tracking_position_history.sql', '008_fleet_identity.sql', '009_fleet_identity_replay_progress.sql']);
+      '007_tracking_position_history.sql', '008_fleet_identity.sql', '009_fleet_identity_replay_progress.sql',
+      '010_fleet_identity_position_jobs.sql']);
     const queue = createPostgresEventDelivery(pool);
     const lease = await queue.leaseNext('upgrade-private-test', 30_000);
     assert.equal(lease.eventId, event.eventId);
@@ -198,7 +199,8 @@ test('retention permission migration preserves existing synthetic snapshots and 
     const delivery = await postgresSourceDeliveryStore(pool).appendDelivery(canonical.observation, fixtureOrigin, accepted);
     await pool.query('INSERT INTO source_ingestion.synthetic_inputs(delivery_id,canonical) VALUES ($1,$2)', [delivery, canonical]);
     assert.deepEqual(await applyMigrations(pool), ['005_permitted_source_retention.sql', '006_source_replay.sql',
-      '007_tracking_position_history.sql', '008_fleet_identity.sql', '009_fleet_identity_replay_progress.sql']);
+      '007_tracking_position_history.sql', '008_fleet_identity.sql', '009_fleet_identity_replay_progress.sql',
+      '010_fleet_identity_position_jobs.sql']);
     const row = (await pool.query('SELECT * FROM source_ingestion.retained_inputs WHERE delivery_id=$1', [delivery])).rows[0];
     assert.deepEqual(row.canonical, canonical);
     assert.equal(row.permission.evidenceReference, 'repository-synthetic-fixtures-only');
