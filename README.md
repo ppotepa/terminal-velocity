@@ -81,6 +81,6 @@ The GitHub Actions workflow is configured to run the checks and real PostgreSQL 
 
 ## Status and next steps
 
-[IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) distinguishes implemented behavior from the target architecture. [ROADMAP.md](docs/ROADMAP.md) describes the next slices: one real connector, positions and map reads, publication scope, and incremental updates.
+[IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) distinguishes implemented behavior from the target architecture. [MASTER_IMPLEMENTATION_PLAN.md](docs/MASTER_IMPLEMENTATION_PLAN.md) is the complete issue-by-issue, code-first agent execution plan (48 tasks; hosted CI/CD postponed). [ROADMAP.md](docs/ROADMAP.md) describes the next slices: one real connector, positions and map reads, publication scope, and incremental updates.
 
 The current stage does not include real ADS-B/Airframes sources, a complete RF decoder, reassembly, a map frontend, or production access/publication controls. Durable availability currently has one fixed synthetic visibility scope. The SQL and JSON Schema files under `docs/architecture` remain historical target designs; executable schema lives under `db/migrations`. Public deployment requires the access and publication layers first.

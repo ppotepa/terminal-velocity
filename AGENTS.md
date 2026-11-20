@@ -29,6 +29,12 @@ Follow [the sequential issue execution workflow](docs/ISSUE_WORKFLOW.md) and the
 
 Before coding, update the selected issue body to `IN PROGRESS` and record its branch, owner/date, dependencies, intended steps, and blocker state. During development, tick verified acceptance criteria and record actual test/PR evidence in that same issue body. Mark `IN REVIEW` with the PR, then `DONE` only after merge and verification. Close it, check it off in the EPIC, update its counts/status history, and set the next issue `READY`. Keep blocked prerequisites explicitly `BLOCKED` with an unblock condition; never silently skip them. Do not report local tests as passing remote CI.
 
+## Code-first implementation priority (owner directive, 2026-11-20)
+
+Use [the Master Code Implementation Plan](docs/MASTER_IMPLEMENTATION_PLAN.md) to execute the EPIC #4 roadmap. Build a functioning **private local prototype first**; defer GitHub Actions/hosted CI/CD (#49), staging (#50), formal release-scale qualification (#51), and production launch (#52) until the owner explicitly accepts the MVP. Do **not** spend current code iterations on workflow billing, runner availability or hosted deployment setup. Local type checks, architectural tests, focused unit/integration tests, real disposable PostgreSQL checks for durable changes, and browser/API smoke are still necessary to validate behavior.
+
+An external data-rights or provider-sample gate may remain `status:blocked` while **independent** synthetic/local-only engineering proceeds under the updated EPIC's explicit code-first execution exception. Preserve `gate:external` and `implementation:verified` labels honestly; no source becomes licensed merely because its connector passes tests. Keep one active **code** issue, do not duplicate merged work, and do not mark blocked acceptance DONE. Consult live GitHub issue state before relying on snapshot statuses in the master document.
+
 ## Verification
 
 Run `npm ci` and `npm run check` from the repository root. A material change to the startup flow also requires checking API process startup and shutdown. Add behavioral and regression tests for changed invariants, rather than tests that repeat the implementation.
