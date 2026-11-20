@@ -13,12 +13,14 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 setWorkerUrl(workerUrl);
 type Snapshot = components['schemas']['MapSnapshot'];
 type Aircraft = Snapshot['aircraft'][number];
-type Props = { client?: ApiClient; onSelectAircraft?: (aircraftId: string) => void; selectedAircraftId?: string | null };
+type Props = { client?: ApiClient; onSelectAircraft?: (aircraftId: string) => void; selectedAircraftId?: string | null; onMapReady?: (map: MapLibreMap | null) => void };
 const fallbackStyle: StyleSpecification = { version: 8, sources: {}, layers: [{ id: 'background', type: 'background', paint: { 'background-color': '#e8efec' } }] };
 const styleURL = import.meta.env.VITE_MAP_STYLE_URL || 'https://tiles.openfreemap.org/styles/liberty';
 
-export function LiveMapFeature({ client = createApiClient(), onSelectAircraft, selectedAircraftId }: Props) {
+export function LiveMapFeature({ client = createApiClient(), onSelectAircraft, selectedAircraftId, onMapReady }: Props) {
   const container = useRef<HTMLDivElement>(null); const mapRef = useRef<MapLibreMap | null>(null); const markersRef = useRef<Marker[]>([]); const fallbackUsed = useRef(false);
+  const onMapReadyRef = useRef(onMapReady);
+  useEffect(() => { onMapReadyRef.current = onMapReady; }, [onMapReady]);
   const [snapshot, setSnapshot] = useState<Snapshot>(); const [loading, setLoading] = useState(true); const [error, setError] = useState<string>(); const [styleFailed, setStyleFailed] = useState(false);
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setError(undefined);
@@ -41,7 +43,8 @@ export function LiveMapFeature({ client = createApiClient(), onSelectAircraft, s
       }
     });
     mapRef.current = map;
-    return () => { markersRef.current.forEach((marker) => marker.remove()); markersRef.current = []; map.remove(); mapRef.current = null; };
+    onMapReadyRef.current?.(map);
+    return () => { onMapReadyRef.current?.(null); markersRef.current.forEach((marker) => marker.remove()); markersRef.current = []; map.remove(); mapRef.current = null; };
   }, []);
 
   const positioned = useMemo(() => snapshot?.aircraft.filter((item) => item.position) ?? [], [snapshot]);
