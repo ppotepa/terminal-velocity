@@ -1,6 +1,6 @@
 # Demonstrator API — v0.1
 
-Local address: `http://127.0.0.1:3000`. This stage has no authentication. The server binds only to loopback, and all aircraft identifiers and positions come from fixtures.
+Local address: `http://127.0.0.1:3000`. This stage has no authentication. The server binds only to loopback. The original aircraft detail routes use fixtures; the private map route reads the current-position projection in PostgreSQL mode.
 
 ## Reads
 
@@ -11,10 +11,35 @@ Local address: `http://127.0.0.1:3000`. This stage has no authentication. The se
 | `GET /api/v1/aircraft/:id` | One aircraft and its current availability |
 | `GET /api/v1/aircraft/:id/messages` | Messages matched to the specified aircraft |
 | `GET /api/v1/messages/:id` | One message and a safe decision DTO |
+| `GET /api/v1/internal/map/aircraft` | Bounded private map viewport; loopback only |
 
 Data reads use the `{ "data": ... }` envelope. A missing object returns HTTP 404. An aircraft without messages returns an empty list. Positions do not simulate movement; `position.observedAt` is a fixed timestamp stored in the fixture.
 
 Storage selection is a process setting: `STORAGE_DRIVER=memory` (default) or `STORAGE_DRIVER=postgres` with `DATABASE_URL`. See [POSTGRES.md](POSTGRES.md) for migrations and credentials. Health returns `storage: "memory"` or `storage: "postgres"`; an unreachable PostgreSQL database returns HTTP 503 with `status: "unavailable"`. A healthy response uses `status: "ok"`. Both modes remain `mode: "demo"`.
+
+## Private map viewport (Stage 4)
+
+`GET /api/v1/internal/map/aircraft?bbox=west,south,east,north&limit=500` reads only coordinates with a confirmed current-position head. The bbox includes its edges. Longitude may cross the antimeridian when `west > east`; latitude must ascend. A viewport may span at most 90° longitude and 60° latitude. The response has at most 500 markers; `limit` accepts 1–500 and defaults to 500. The caller follows `nextCursor` by repeating the same bbox and filters with `cursor=<value>`. A position or synthetic message change rejects a prior PostgreSQL cursor with HTTP 409 `STALE_MAP_CURSOR`; restart at the first page. Cursors are opaque and bound to the bbox and filters.
+
+Optional exact filters are `positionStatus=CURRENT|STALE|UNKNOWN`, `messageStatus=RECENT|STALE|NONE`, and `protocol=VHF_ACARS|VDL2|HFDL|SATCOM`. Position freshness uses a 60-second window with observation precision and clock uncertainty; an indeterminate age is `UNKNOWN`. A protocol filter requires a synthetic demo contribution in that protocol and calculates message freshness from its last observation. Unknown or repeated parameters, malformed coordinates, oversized areas/limits and mismatched cursors return HTTP 400 `INVALID_MAP_QUERY`.
+
+```json
+{
+  "data": [{
+    "aircraftId": "ac_demo-001",
+    "position": { "latitude": 52.2297, "longitude": 21.0122,
+      "observedAt": "2026-11-18T12:00:00.000Z", "freshness": "STALE",
+      "source": "DEMO_FIXTURE", "measurementKind": "DEMO" },
+    "messages": { "freshness": "NONE", "lastMessageAt": null,
+      "coverage": "UNKNOWN", "feedHealth": "DISCONNECTED" }
+  }],
+  "nextCursor": null,
+  "asOf": "2026-11-20T12:00:00.000Z",
+  "checkpoint": 0
+}
+```
+
+In memory mode the three fixed fixture markers support the same bounded query but the checkpoint is always zero; a cursor does not detect a concurrent memory message change. PostgreSQL mode reads compact private map position rows and **synthetic demo contributions only**, under a version checkpoint. Position and message observation times and freshness are independent; an old position can coexist with a recent synthetic message. Unknown coverage and disconnected real feed health are explicit. This route returns no message text, IDs, counts or private provider contribution state. It has no authentication or Stage 5 publication policy and must remain on loopback; the path name alone provides no access control. PostgreSQL statement time is capped at one second, so an expensive viewport fails as an internal error instead of returning an unbounded response.
 
 ## Message ingestion
 
@@ -92,4 +117,4 @@ Request errors use `{ "error": { "code": "...", "message": "..." } }`. The healt
 | 500 | Internal error, without exposing a stack trace |
 | 503 | Incomplete candidate data, or unavailable PostgreSQL connectivity on `/healthz` |
 
-API v0.1 has no pagination or spatial filters. Their contracts will be introduced with the map read model. PostgreSQL aircraft message lists use the documented 500-record bound. Unsupported parameters are rejected rather than silently ignored.
+The original aircraft and message routes have no pagination or spatial filters. PostgreSQL aircraft message lists use the documented 500-record bound. Unsupported parameters are rejected rather than silently ignored.

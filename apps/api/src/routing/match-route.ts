@@ -6,8 +6,10 @@ export function matchRoute(target: string): ApiRoute {
   let url: URL;
   try { url = new URL(target, 'http://127.0.0.1'); }
   catch { throw new HttpProblem(400, 'INVALID_URL', 'The request URL is invalid.'); }
-  if (url.search !== '') throw new HttpProblem(400, 'UNSUPPORTED_QUERY', 'This demo API does not support query parameters.');
   const path = url.pathname;
+  if (path === '/api/v1/internal/map/aircraft')
+    return { name: 'map-aircraft', method: 'GET', search: url.search };
+  if (url.search !== '') throw new HttpProblem(400, 'UNSUPPORTED_QUERY', 'This demo API does not support query parameters.');
   if (path === '/healthz') return { name: 'health', method: 'GET' };
   if (path === '/api/v1/aircraft') return { name: 'aircraft-list', method: 'GET' };
   if (path === '/api/v1/demo/messages') return { name: 'demo-ingest', method: 'POST' };

@@ -1,4 +1,5 @@
 import { freshnessPolicy } from '../../modules/message-availability/public/index.ts';
+import { createPostgresMapReader } from '../../modules/map-projection/infrastructure/postgres-map-reader.ts';
 import { createPostgresDecisionWriteSet } from '../../modules/aircraft-correlation/infrastructure/postgres/create-postgres-decision-write-set.ts';
 import { runDecisionWork } from '../../modules/aircraft-correlation/infrastructure/postgres/run-decision-work.ts';
 import { createPostgresEventDelivery } from '../../modules/event-delivery/infrastructure/postgres-event-delivery.ts';
@@ -60,6 +61,7 @@ export async function createPostgresDemoTracker(options: PostgresDemoOptions): P
     let closing: Promise<void> | undefined;
     return {
       tracker,
+      mapReader: createPostgresMapReader(pool, now),
       async checkHealth() { try { await pool.query('SELECT 1'); return true; } catch { return false; } },
       drain: worker.drain,
       close() { return closing ??= (async () => { try { await worker.stop(); } finally { await pool.end(); } })(); },

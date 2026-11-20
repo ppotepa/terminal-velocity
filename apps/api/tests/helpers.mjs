@@ -1,5 +1,5 @@
 import { once } from 'node:events';
-import { createDemoTracker } from '@airframes/backend/demo';
+import { createDemoTracker, createDemoMapReader } from '@airframes/backend/demo';
 import { createApiServer } from '../src/create-api-server.ts';
 
 export const NOW = Date.parse('2026-11-18T12:01:00.000Z');
@@ -10,7 +10,7 @@ export const message = overrides => ({
 });
 
 export async function startServer(t, tracker = createDemoTracker({ now: () => NOW })) {
-  const server = createApiServer(tracker);
+  const server = createApiServer(tracker, undefined, createDemoMapReader(tracker, () => NOW));
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const address = server.address();
