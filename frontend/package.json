@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "lucide-react": "latest",
+    "maplibre-gl": "^6.19.0",
     "openapi-fetch": "^0.17.0",
     "react": "latest",
     "react-dom": "latest"
