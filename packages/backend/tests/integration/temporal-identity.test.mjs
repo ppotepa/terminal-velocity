@@ -451,7 +451,7 @@ test('message correction lookup uses fixed-path indexes on populated retained me
     FROM generate_series(1,$1::integer) AS n`, [total]);
   await pools.admin.query(`INSERT INTO source_ingestion.message_revisions
     (message_id,revision,source_delivery_id,transformation_id,canonical)
-    SELECT 'msg_plan_'||n,1,ri.delivery_id,'provider-message/1',ri.canonical
+    SELECT 'msg_plan-'||n,1,ri.delivery_id,'provider-message/1',ri.canonical
     FROM generate_series(1,$1::integer) AS n
     JOIN source_ingestion.retained_inputs ri ON ri.delivery_id=md5('identity-plan-'||n)::uuid`, [total]);
   await pools.admin.query('ANALYZE source_ingestion.message_revisions');
