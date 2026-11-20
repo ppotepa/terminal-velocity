@@ -27,7 +27,8 @@ const criterionKinds: { value: Kind; label: string }[] = [
 ];
 const emptyRule = (): RuleInput => ({ name: '', status: 'active', scope: 'targeted', groups: [{ mode: 'any', criteria: [{ kind: 'callsign', value: '' }] }], collection: { positions: true, messages: false, decoderIds: [] } });
 
-export function WatchRulesFeature({ client = createApiClient() }: { client?: ApiClient }) {
+export function WatchRulesFeature({ client: suppliedClient }: { client?: ApiClient }) {
+  const client = useMemo(() => suppliedClient ?? createApiClient(), [suppliedClient]);
   const [rules, setRules] = useState<Rule[]>([]); const [loading, setLoading] = useState(true); const [loadError, setLoadError] = useState<string>();
   const [editing, setEditing] = useState<Rule | null>(null); const [isCreating, setIsCreating] = useState(false); const [form, setForm] = useState<RuleInput>(emptyRule());
   const [formError, setFormError] = useState<string>(); const [saving, setSaving] = useState(false); const [actionError, setActionError] = useState<string>();
