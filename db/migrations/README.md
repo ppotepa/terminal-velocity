@@ -121,3 +121,15 @@ Identity reads page bounded decision evidence by assertion ID. It keeps at most 
 ## Migration 014 — incomplete correction replay
 
 `014_fleet_identity_replay_blocked.sql` adds a `BLOCKED` request phase and the registry revision that caused an incomplete candidate lookup. The worker skips that request so later correction requests can advance. It retries the blocked request after the registry revision changes. The cursor and immutable message, assertion, and decision histories remain intact. An application rollback must retain this phase or use a forward migration that safely handles blocked requests.
+
+
+## Migration 015 — fair identity replay scheduling
+
+`015_fleet_identity_fair_scheduler.sql` extends the existing scheduler
+with a separate `EXPANSIONS` work class. On each committed page the worker
+rotates the preferred queue from `JOBS` to `EXPANSIONS` to `CORRECTIONS`
+and back, starting after the class that actually completed. Empty classes
+are skipped without losing progress; the scheduler row and selected page
+remain in the same transaction. Under continuously nonempty queues,
+every class is serviced at least once in three committed turns. This
+migration preserves previous state values and all durable pending work.
