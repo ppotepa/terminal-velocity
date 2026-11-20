@@ -46,3 +46,12 @@ export { type PositionHistoryPage, type PositionHistoryReader } from '../ports/p
 export { comparePositionEvidence, measurementRank, type PositionEvidenceRank } from '../domain/compare-position-evidence.ts';
 export { type CurrentPositionView, type CurrentPositionReader } from '../ports/current-position-reader.ts';
 export { createPostgresCurrentPosition } from '../composition/postgres-current-position.ts';
+export {
+  observedTrackQuery, OBSERVED_TRACK_MAX_PAGE_SIZE, OBSERVED_TRACK_MAX_RANGE_MS,
+  type ObservedTrackCursor, type ObservedTrackQuery, type InvalidObservedTrackQuery,
+} from '../domain/observed-track-query.ts';
+export {
+  buildObservedTrack, simplifyObservedTrack, DEFAULT_TRACK_GAP_POLICY,
+  type ObservedTrackPoint, type ObservedTrackSegment, type TrackBreakReason, type TrackGapPolicy,
+} from '../domain/observed-track.ts';
+export { type ObservedTrackPage, type ObservedTrackReader } from '../ports/observed-track-reader.ts';

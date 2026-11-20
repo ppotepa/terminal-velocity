@@ -53,6 +53,7 @@ export async function resetTestData(admin) {
   await admin.query("UPDATE fleet_identity.replay_scheduler SET next_kind='JOBS' WHERE singleton");
   await admin.query(`UPDATE tracking.current_position_backfill_progress
     SET last_source_id=NULL,last_source_observation_id=NULL,completed_at=NULL WHERE singleton`);
+  await admin.query('UPDATE tracking.current_position_state SET revision=0 WHERE singleton');
   await admin.query(`UPDATE fleet_identity.position_backfill_progress
     SET last_source_id=NULL,last_source_observation_id=NULL,completed_at=NULL WHERE singleton`);
 }

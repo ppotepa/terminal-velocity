@@ -105,6 +105,8 @@ export function createCurrentPositionWorker(pool: SqlPool, priority: Priority = 
       const result = inbox.rowCount === 1
         ? await applyPositionLinkProjection(sql, job.source_id, job.source_observation_id,
           Number(job.link_revision), priority) : 'DUPLICATE';
+      if (result === 'APPLIED') await sql.query(`UPDATE tracking.current_position_state
+        SET revision=revision+1 WHERE singleton`);
       await sql.query(`UPDATE tracking.current_position_jobs SET completed_at=clock_timestamp()
         WHERE job_id=$1`, [job.job_id]);
       return result;
@@ -149,6 +151,7 @@ export function createCurrentPositionRebuilder(pool: SqlPool, priority: Priority
       }
       await refreshAircraft(sql, aircraftId);
       for (const owner of [...displaced].sort()) await refreshAircraft(sql, owner);
+      await sql.query(`UPDATE tracking.current_position_state SET revision=revision+1 WHERE singleton`);
       return facts.rows.length;
     });
   };

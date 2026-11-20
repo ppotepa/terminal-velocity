@@ -1,6 +1,21 @@
 # Terminal Velocity — implementation status, Stage 2
 
-### S4-05 private current-position projection (issue #18, in progress)
+### S4-06 observed aircraft tracks (issue #19, in progress)
+
+The private track reader pages matched, immutable position facts by observed time,
+source ID and observation UUID, with a seven-day query window and at most 500
+observed points per page. Migration 017 adds an index and projection checkpoint;
+later pages reject stale cursors after any projection change. It returns source,
+measurement, time precision, uncertainty and quality evidence with each point.
+Pure rules split excessive time gaps, conflicting same-time points, implausible
+jumps and antimeridian wraps. A wrap starts a new geometry segment with
+`ANTIMERIDIAN_WRAP`; it adds no fabricated seam point. Deterministic
+endpoint-preserving simplification respects a point budget or returns an explicit
+budget error when it cannot preserve every segment. These segments are observed
+history only: no planned route, origin airport, destination or flight number is
+inferred. Synthetic PostgreSQL and pure verification remain in progress.
+
+### S4-05 private current-position projection (issue #18, merged PR #68)
 
 Migration 016 adds a private, versioned current-position projection. A committed
 identity-link change enqueues a projection job; the worker commits inbox, effects
@@ -10,7 +25,9 @@ can remove a candidate and select the next fact, while missing positions stay
 unknown. Reads calculate position freshness independently of message availability.
 Bounded single-aircraft repair and durable link backfill support restarts and
 upgrades. This engineering uses synthetic facts only and does not expose a map or
-persist unapproved live source rows. Verification and PR review remain in progress.
+persist unapproved live source rows. PR #68 merged as `9eca56b`; exact head and
+merge SHA passed local Node 24 checks, 127 PostgreSQL tests, 41 message tests,
+26 browser tests, demo and API smoke. Hosted CI is a separate #49 gate.
 
 ### S4-04 temporal fleet identity (issue #17, merged PR #66)
 
