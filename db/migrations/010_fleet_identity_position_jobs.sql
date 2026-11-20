@@ -1,0 +1,39 @@
+-- Every new immutable position fact schedules a durable identity decision.
+GRANT TRIGGER ON tracking.position_observations TO tv_fleet_owner;
+GRANT SELECT (source_id, source_observation_id) ON tracking.position_observations TO tv_fleet_owner;
+SET LOCAL ROLE tv_fleet_owner;
+
+CREATE TABLE fleet_identity.position_link_jobs (
+  job_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  source_id text NOT NULL,
+  source_observation_id text NOT NULL,
+  completed_at timestamptz,
+  UNIQUE (source_id, source_observation_id),
+  FOREIGN KEY (source_id, source_observation_id)
+    REFERENCES tracking.position_observations (source_id, source_observation_id)
+);
+CREATE INDEX position_link_jobs_pending ON fleet_identity.position_link_jobs (job_id)
+  WHERE completed_at IS NULL;
+
+CREATE FUNCTION fleet_identity.enqueue_position_link() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$
+BEGIN
+  INSERT INTO fleet_identity.position_link_jobs (source_id, source_observation_id)
+    VALUES (NEW.source_id, NEW.source_observation_id);
+  RETURN NEW;
+END;
+$$;
+CREATE TRIGGER enqueue_position_link AFTER INSERT ON tracking.position_observations
+  FOR EACH ROW EXECUTE FUNCTION fleet_identity.enqueue_position_link();
+
+-- Existing facts predate the trigger and still need their first decision.
+INSERT INTO fleet_identity.position_link_jobs (source_id, source_observation_id)
+  SELECT p.source_id, p.source_observation_id
+  FROM tracking.position_observations p
+  LEFT JOIN fleet_identity.position_link_heads h
+    USING (source_id, source_observation_id)
+  WHERE h.source_id IS NULL;
+
+GRANT SELECT ON fleet_identity.position_link_jobs TO tv_runtime;
+GRANT UPDATE (completed_at) ON fleet_identity.position_link_jobs TO tv_runtime;
+RESET ROLE;

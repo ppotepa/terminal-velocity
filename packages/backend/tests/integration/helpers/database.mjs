@@ -36,6 +36,7 @@ export async function resetTestData(admin) {
   if (!/^tv_test_[a-f0-9]{16}$/.test(expected ?? '') || result.rows[0]?.name !== expected)
     throw new Error('Refusing fixture cleanup outside the exact database created by the test runner.');
   await admin.query(`TRUNCATE
+    fleet_identity.position_link_jobs,
     fleet_identity.position_link_heads, fleet_identity.position_link_revisions,
     fleet_identity.replay_requests, fleet_identity.assertions, fleet_identity.aircraft,
     tracking.position_observation_outbox, tracking.position_observations,

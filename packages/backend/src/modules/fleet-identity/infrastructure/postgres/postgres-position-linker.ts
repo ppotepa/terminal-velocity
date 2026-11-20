@@ -1,4 +1,4 @@
-import type { SqlPool } from '../../../../contracts/database/index.ts';
+import type { SqlExecutor, SqlPool } from '../../../../contracts/database/index.ts';
 import { runSqlTransaction } from '../../../database-transactions/public/index.ts';
 import { icao24, type StrongIdentifier } from '../../../aircraft-correlation/public/index.ts';
 import { resolveIdentityAt } from '../../domain/resolve-identity-at.ts';
@@ -7,7 +7,36 @@ import { postgresIdentityReader } from './postgres-identity-reader.ts';
 
 export function postgresPositionLinker(pool: SqlPool): PositionLinker {
   async function reevaluate(sourceId: string, sourceObservationId: string): Promise<PositionLinkDecision> {
-    return runSqlTransaction(pool, async sql => {
+    return runSqlTransaction(pool, sql => reevaluatePositionOnConnection(sql, sourceId, sourceObservationId));
+  }
+  return { reevaluate, async replayAlias(alias, from, until, limit, after) {
+    const parsed = icao24(alias);
+    if (!parsed.ok || !Number.isSafeInteger(from) || from < 0 || (until !== null &&
+      (!Number.isSafeInteger(until) || until <= from)) || !Number.isSafeInteger(limit) || limit < 1 || limit > 500
+      || (after !== undefined && (!Number.isSafeInteger(after.observedAt) || after.observedAt < from
+        || (until !== null && after.observedAt >= until) || typeof after.sourceId !== 'string'
+        || typeof after.sourceObservationId !== 'string')))
+      throw new RangeError('Invalid bounded alias replay.');
+    const result = await pool.query<{ observed_at_ms: string; source_id: string; source_observation_id: string }>(`
+      SELECT observed_at_ms,source_id,source_observation_id FROM tracking.position_observations
+      WHERE icao24_hint=$1 AND observed_at_ms >= $2 AND ($3::bigint IS NULL OR observed_at_ms < $3)
+        AND ($4::bigint IS NULL OR (observed_at_ms,source_id,source_observation_id) > ($4,$5,$6))
+      ORDER BY observed_at_ms,source_id,source_observation_id LIMIT $7`,
+    [parsed.value, from, until, after?.observedAt ?? null, after?.sourceId ?? null,
+      after?.sourceObservationId ?? null, limit + 1]);
+    const page = result.rows.slice(0, limit);
+    const decisions = [];
+    for (const row of page) decisions.push(await reevaluate(row.source_id, row.source_observation_id));
+    const last = page.at(-1);
+    return { decisions, next: result.rows.length > limit && last ? {
+      observedAt: Number(last.observed_at_ms), sourceId: last.source_id,
+      sourceObservationId: last.source_observation_id } : null };
+  } };
+}
+
+/** Called only inside an existing SQL transaction, including the replay worker. */
+export async function reevaluatePositionOnConnection(sql: SqlExecutor, sourceId: string,
+  sourceObservationId: string): Promise<PositionLinkDecision> {
       await sql.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',
         [JSON.stringify([sourceId, sourceObservationId])]);
       await sql.query('SELECT revision FROM fleet_identity.registry_state WHERE singleton FOR SHARE');
@@ -57,29 +86,4 @@ export function postgresPositionLinker(pool: SqlPool): PositionLinker {
         DO UPDATE SET revision=EXCLUDED.revision`, [sourceId, sourceObservationId, revision]);
       return { sourceId, sourceObservationId, revision, registryRevision: snapshot.revision,
         status: resolution.status, aircraftId };
-    });
-  }
-  return { reevaluate, async replayAlias(alias, from, until, limit, after) {
-    const parsed = icao24(alias);
-    if (!parsed.ok || !Number.isSafeInteger(from) || from < 0 || (until !== null &&
-      (!Number.isSafeInteger(until) || until <= from)) || !Number.isSafeInteger(limit) || limit < 1 || limit > 500
-      || (after !== undefined && (!Number.isSafeInteger(after.observedAt) || after.observedAt < from
-        || (until !== null && after.observedAt >= until) || typeof after.sourceId !== 'string'
-        || typeof after.sourceObservationId !== 'string')))
-      throw new RangeError('Invalid bounded alias replay.');
-    const result = await pool.query<{ observed_at_ms: string; source_id: string; source_observation_id: string }>(`
-      SELECT observed_at_ms,source_id,source_observation_id FROM tracking.position_observations
-      WHERE icao24_hint=$1 AND observed_at_ms >= $2 AND ($3::bigint IS NULL OR observed_at_ms < $3)
-        AND ($4::bigint IS NULL OR (observed_at_ms,source_id,source_observation_id) > ($4,$5,$6))
-      ORDER BY observed_at_ms,source_id,source_observation_id LIMIT $7`,
-    [parsed.value, from, until, after?.observedAt ?? null, after?.sourceId ?? null,
-      after?.sourceObservationId ?? null, limit + 1]);
-    const page = result.rows.slice(0, limit);
-    const decisions = [];
-    for (const row of page) decisions.push(await reevaluate(row.source_id, row.source_observation_id));
-    const last = page.at(-1);
-    return { decisions, next: result.rows.length > limit && last ? {
-      observedAt: Number(last.observed_at_ms), sourceId: last.source_id,
-      sourceObservationId: last.source_observation_id } : null };
-  } };
 }

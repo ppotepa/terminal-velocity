@@ -1,5 +1,6 @@
 import test, { after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { Pool } from 'pg';
 import { createTestPools, resetTestData } from './helpers/database.mjs';
 import { icao24, registration } from '../../src/modules/aircraft-correlation/public/index.ts';
 import { createResolveAircraft, createRegistryCandidateDirectory } from '../../src/modules/fleet-identity/public/index.ts';
@@ -223,4 +224,55 @@ test('registration correction re-evaluates a historical provider message without
     WHERE message_id=$1`, [message.message_id])).rows[0].n, '1');
   assert.deepEqual((await pools.runtime.query(`SELECT canonical FROM source_ingestion.message_revisions
     WHERE message_id=$1`, [message.message_id])).rows[0].canonical, message.canonical);
+});
+
+test('a position appended after alias replay completes receives a durable first decision', async () => {
+  const commit = postgresIdentityCommitter(pools.runtime);
+  await commit.createAircraft('ac_a');
+  await commit.append(claim('ac_a', hex('A0B1C2'), 0));
+  const work = createIdentityReplayWorker(pools.runtime);
+  while (await work(1)) { /* Drain the assertion request before the position exists. */ }
+  const id = 'epoch:synthetic-1:after-replay';
+  assert.ok((await postgresPositionHistoryWriter(pools.runtime).append(
+    position('after-replay', Date.parse('2026-11-19T10:00:00Z')))).ok);
+  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.position_link_heads
+    WHERE source_observation_id=$1`, [id])).rows[0].n, '0');
+  assert.equal((await pools.runtime.query(`SELECT count(*) AS n FROM fleet_identity.position_link_jobs
+    WHERE source_observation_id=$1 AND completed_at IS NULL`, [id])).rows[0].n, '1');
+  assert.equal((await work(1)).processed, 1);
+  assert.equal((await pools.runtime.query(`SELECT r.aircraft_id FROM fleet_identity.position_link_heads h
+    JOIN fleet_identity.position_link_revisions r USING (source_id,source_observation_id,revision)
+    WHERE h.source_observation_id=$1`, [id])).rows[0].aircraft_id, 'ac_a');
+  assert.equal(await work(1), null);
+});
+
+test('insertion during replay and concurrent workers complete with a one-connection pool', async () => {
+  const commit = postgresIdentityCommitter(pools.runtime);
+  await commit.createAircraft('ac_a');
+  await commit.append(claim('ac_a', hex('A0B1C2'), 0));
+  const writer = postgresPositionHistoryWriter(pools.runtime);
+  const at = Date.parse('2026-11-19T10:00:00Z');
+  assert.ok((await writer.append(position('before-page', at))).ok);
+  const one = new Pool({ connectionString: process.env.TEST_RUNTIME_DATABASE_URL, max: 1,
+    connectionTimeoutMillis: 1000, statement_timeout: 5000 });
+  try {
+    const work = createIdentityReplayWorker(one);
+    await work(1); // Initial position job.
+    await work(1); // First assertion position page; request remains open.
+    assert.ok((await writer.append(position('during-page', at + 1000))).ok);
+    for (let i = 0; i < 12; i++) {
+      const pages = await Promise.all([work(1), work(1), work(1)]);
+      if (pages.every(page => page === null)) break;
+    }
+    assert.equal(await work(1), null);
+    const rows = (await one.query(`SELECT h.source_observation_id,r.aircraft_id
+      FROM fleet_identity.position_link_heads h JOIN fleet_identity.position_link_revisions r
+      USING (source_id,source_observation_id,revision) ORDER BY h.source_observation_id`)).rows;
+    assert.deepEqual(rows, [
+      { source_observation_id: 'epoch:synthetic-1:before-page', aircraft_id: 'ac_a' },
+      { source_observation_id: 'epoch:synthetic-1:during-page', aircraft_id: 'ac_a' },
+    ]);
+    assert.equal((await one.query(`SELECT count(*) AS n FROM fleet_identity.position_link_jobs
+      WHERE completed_at IS NULL`)).rows[0].n, '0');
+  } finally { await one.end(); }
 });

@@ -68,7 +68,7 @@ Memory remains the default. It stages a single `DemoState` swap under a mutex, i
 
 ### Shared scope
 
-Stage 4 now has private synthetic position history and temporal aircraft identity. Position projection and UI remain unimplemented. S4-02 adds an opt-in private adsb.lol adapter, but no live result is persisted or publicly served. Messages are decoded text examples, not captured RF frames. No real Airframes message connector, moving map frontend, flight sessions, reassembly, entitlement enforcement, or public deployment has been added.
+Stage 4 now has private synthetic position history and temporal aircraft identity. New position facts enqueue a durable identity-link job in their write transaction; the private replay worker processes jobs and alias corrections through the registry on one transaction connection. Position projection and UI remain unimplemented. S4-02 adds an opt-in private adsb.lol adapter, but no live result is persisted or publicly served. Messages are decoded text examples, not captured RF frames. No real Airframes message connector, moving map frontend, flight sessions, reassembly, entitlement enforcement, or public deployment has been added.
 
 The architecture v2 catalog still describes 89 intended responsibilities rather than 89 completed services. Stage 3 has a separate on-demand lookup and durable metadata store. Real-source retention and a permitted provider fixture remain gated by issue #6. Its source contracts do not grant publication rights. The historical DDL and target event envelope remain design documents; the implemented schema is under `db/migrations`, and the current event is `correlation.aircraft-decision-revised.v1`.
 

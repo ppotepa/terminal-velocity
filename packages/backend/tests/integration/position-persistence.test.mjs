@@ -147,6 +147,7 @@ test('invalid data and outbox failure leave no partial position history', async 
   await assert.rejects(() => writer.append(fact('outbox-failure')), error => error.code === '23514');
   assert.equal((await pools.runtime.query('SELECT * FROM tracking.position_observations')).rowCount, 0);
   assert.equal((await pools.runtime.query('SELECT * FROM tracking.position_observation_outbox')).rowCount, 0);
+  assert.equal((await pools.runtime.query('SELECT * FROM fleet_identity.position_link_jobs')).rowCount, 0);
   await assert.rejects(() => pools.runtime.query(`INSERT INTO tracking.position_observations
     (observation_id,source_id,source_observation_id,observed_at_ms,ingested_at_ms,measurement_kind,latitude,longitude,fact)
     VALUES ('00000000-0000-4000-8000-000000000001','src_synthetic-a','bad',0,0,'ADS_B',91,0,'{}')`),

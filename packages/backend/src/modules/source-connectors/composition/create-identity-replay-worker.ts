@@ -9,7 +9,7 @@ import { createPostgresDecisionWriteSet } from '../../aircraft-correlation/infra
 import { runDecisionWork } from '../../aircraft-correlation/infrastructure/postgres/run-decision-work.ts';
 import { createRegistryCandidateDirectory } from '../../fleet-identity/public/index.ts';
 import { postgresIdentityReader } from '../../fleet-identity/infrastructure/postgres/postgres-identity-reader.ts';
-import { postgresPositionLinker } from '../../fleet-identity/infrastructure/postgres/postgres-position-linker.ts';
+import { reevaluatePositionOnConnection } from '../../fleet-identity/infrastructure/postgres/postgres-position-linker.ts';
 
 interface RequestRow {
   [key: string]: unknown;
@@ -21,9 +21,19 @@ interface RequestRow {
 
 /** One locked, bounded page per call. A failed page leaves its cursor unchanged for retry. */
 export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Date.now) {
-  return async (limit = 100): Promise<{ requestId: number; processed: number; complete: boolean } | null> => {
+  return async (limit = 100): Promise<{ requestId: number | null; processed: number; complete: boolean } | null> => {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new RangeError('Invalid replay page size.');
     return runSqlTransaction(pool, async sql => {
+      const jobs = await sql.query<{ job_id: string; source_id: string; source_observation_id: string }>(`
+        SELECT job_id,source_id,source_observation_id FROM fleet_identity.position_link_jobs
+        WHERE completed_at IS NULL ORDER BY job_id FOR UPDATE SKIP LOCKED LIMIT 1`);
+      const job = jobs.rows[0];
+      if (job) {
+        await reevaluatePositionOnConnection(sql, job.source_id, job.source_observation_id);
+        await sql.query(`UPDATE fleet_identity.position_link_jobs SET completed_at=clock_timestamp()
+          WHERE job_id=$1`, [job.job_id]);
+        return { requestId: null, processed: 1, complete: true };
+      }
       const selected = await sql.query<RequestRow>(`SELECT request_id,kind,normalized_alias,valid_from_ms,
         valid_until_ms,phase,cursor_time_ms,cursor_source_id,cursor_observation_id,cursor_message_id
         FROM fleet_identity.replay_requests WHERE phase <> 'DONE' ORDER BY request_id
@@ -42,7 +52,7 @@ export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Da
           ORDER BY observed_at_ms,source_id,source_observation_id LIMIT $7`,
           [request.normalized_alias, from, until, cursor, request.cursor_source_id,
             request.cursor_observation_id, limit]) : { rows: [] };
-        for (const row of rows.rows) await postgresPositionLinker(pool).reevaluate(row.source_id, row.source_observation_id);
+        for (const row of rows.rows) await reevaluatePositionOnConnection(sql, row.source_id, row.source_observation_id);
         const last = rows.rows.at(-1);
         if (last) await sql.query(`UPDATE fleet_identity.replay_requests SET cursor_time_ms=$2,
           cursor_source_id=$3,cursor_observation_id=$4 WHERE request_id=$1`,
