@@ -134,7 +134,10 @@ func (r alertReader) ListAlertEvents(ctx context.Context, cursor string, limit i
 	}
 	items := make([]alertapp.StoredEvent, 0)
 	for _, rule := range rules.Items {
-		page, err := r.service.ListEvents(ctx, alertapp.EventQuery{RuleID: shared.Some(rule.Rule.ID), After: cursor, Limit: alertapp.MaxPageSize})
+		// The notifications panel only lists outstanding events. Filtering in
+		// the persisted read path keeps an acknowledged notification dismissed
+		// when the page is reloaded.
+		page, err := r.service.ListEvents(ctx, alertapp.EventQuery{RuleID: shared.Some(rule.Rule.ID), Acknowledged: shared.Some(false), After: cursor, Limit: alertapp.MaxPageSize})
 		if err != nil {
 			return httpalerts.EventPage{}, err
 		}
