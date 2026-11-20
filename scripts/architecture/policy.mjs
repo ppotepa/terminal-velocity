@@ -64,7 +64,8 @@ export function checkDependencyPolicy(project, fromFile, resolution) {
   }
   if (from.layer === 'public') {
     if (to.layer === 'infrastructure') return failure('PUBLIC_ADAPTER_EXPORT', 'Public entry must not expose an infrastructure adapter.');
-    if (to.layer === 'composition' && !((from.unit === 'demo' || from.unit === 'module:fleet-identity') && isPublicEntry(from))) {
+    if (to.layer === 'composition' && !((from.unit === 'demo' || from.unit === 'module:fleet-identity'
+      || from.unit === 'module:flight-tracking') && isPublicEntry(from))) {
       return failure('PUBLIC_COMPOSITION_EXPORT', 'Only approved public entries may export composition factories.');
     }
     return null;

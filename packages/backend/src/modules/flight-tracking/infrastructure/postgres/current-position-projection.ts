@@ -132,11 +132,23 @@ export function createCurrentPositionRebuilder(pool: SqlPool, priority: Priority
         ORDER BY p.observed_at_ms,p.source_id,p.source_observation_id LIMIT 501`,
       [aircraftId, from, until]);
       if (facts.rows.length > 500) throw new RangeError('Current-position rebuild range exceeds 500 facts.');
+      const priorRows = await sql.query(`SELECT 1 FROM tracking.current_position_candidates
+        WHERE aircraft_id=$1 AND observed_at_ms >= $2 AND observed_at_ms < $3 LIMIT 501`,
+      [aircraftId, from, until]);
+      if (priorRows.rows.length > 500) throw new RangeError('Current-position rebuild range exceeds 500 candidates.');
       await sql.query(`DELETE FROM tracking.current_position_candidates
         WHERE aircraft_id=$1 AND observed_at_ms >= $2 AND observed_at_ms < $3`,
       [aircraftId, from, until]);
-      for (const fact of facts.rows) await insertCandidate(sql, fact, priority);
+      const displaced = new Set<string>();
+      for (const fact of facts.rows) {
+        const old = await sql.query<{ aircraft_id: string }>(`SELECT aircraft_id
+          FROM tracking.current_position_candidates WHERE source_id=$1 AND source_observation_id=$2`,
+        [fact.source_id, fact.source_observation_id]);
+        if (old.rows[0] && old.rows[0].aircraft_id !== aircraftId) displaced.add(old.rows[0].aircraft_id);
+        await insertCandidate(sql, fact, priority);
+      }
       await refreshAircraft(sql, aircraftId);
+      for (const owner of [...displaced].sort()) await refreshAircraft(sql, owner);
       return facts.rows.length;
     });
   };

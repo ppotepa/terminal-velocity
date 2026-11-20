@@ -4,6 +4,7 @@ import { createTestPools, resetTestData } from './helpers/database.mjs';
 import { postgresPositionHistoryWriter } from '../../src/modules/flight-tracking/infrastructure/postgres/append-position.ts';
 import { createCurrentPositionWorker, createCurrentPositionRebuilder } from '../../src/modules/flight-tracking/infrastructure/postgres/current-position-projection.ts';
 import { postgresCurrentPositionReader } from '../../src/modules/flight-tracking/infrastructure/postgres/current-position-reader.ts';
+import { backfillCurrentPositionLinks } from '../../src/modules/flight-tracking/infrastructure/postgres/backfill-current-position.ts';
 import { postgresIdentityCommitter } from '../../src/modules/fleet-identity/infrastructure/postgres/postgres-identity-committer.ts';
 import { postgresPositionLinker } from '../../src/modules/fleet-identity/infrastructure/postgres/postgres-position-linker.ts';
 import { icao24 } from '../../src/modules/aircraft-correlation/public/index.ts';
@@ -72,6 +73,18 @@ test('equal-time quality wins, then a newer lower-quality observation supersedes
   assert.equal((await read('ac_a')).observation.sourceObservationId, key('later'));
 });
 
+test('equal evidence from independent sources follows configured source priority', async () => {
+  await setupAircraft();
+  await add('source-a', noon - 10_000, { nic: 8 });
+  const second = { ...position('source-b', noon - 10_000, { nic: 8 }), sourceId: 'src_other' };
+  assert.equal((await postgresPositionHistoryWriter(pools.runtime).append(second)).ok, true);
+  await postgresPositionLinker(pools.runtime).reevaluate('src_other', key('source-b'));
+  await drain(createCurrentPositionWorker(pools.runtime, sourceId => sourceId === 'src_other' ? 10 : 0));
+  const selected = await read('ac_a');
+  assert.equal(selected.observation.sourceId, 'src_other');
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM tracking.position_observations')).rows[0].n, '2');
+});
+
 test('identity correction removes the old owner and selects a replacement without changing facts', async () => {
   const { commit, assertion } = await setupAircraft();
   await commit.createAircraft('ac_b');
@@ -89,7 +102,7 @@ test('identity correction removes the old owner and selects a replacement withou
   const next = await read('ac_b');
   assert.equal(old.observation, null);
   assert.equal(old.freshness, 'UNKNOWN');
-  assert.equal(old.revision, 2);
+  assert.equal(old.revision, 3);
   assert.equal(next.observation.sourceObservationId, key('second'));
   assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM tracking.position_observations')).rows[0].n, '2');
 });
@@ -123,4 +136,29 @@ test('concurrent consumers serialize revisions and a bounded rebuild repairs can
   assert.equal(await rebuild('ac_a', noon - 60_000, noon), 2);
   assert.equal((await read('ac_a')).observation.sourceObservationId, key('two'));
   await assert.rejects(() => rebuild('ac_a', noon - 86_400_001, noon), /bounded/);
+});
+
+test('preexisting link heads backfill in durable pages without duplicating queued decisions', async () => {
+  await setupAircraft();
+  await add('backfill-one', noon - 15_000, { nic: 2 });
+  await add('backfill-two', noon - 10_000, { nic: 3 });
+  await pools.admin.query('DELETE FROM tracking.current_position_jobs');
+  assert.deepEqual(await backfillCurrentPositionLinks(pools.runtime, 1), { queued: 1, complete: false });
+  assert.deepEqual(await backfillCurrentPositionLinks(pools.runtime, 1), { queued: 1, complete: false });
+  assert.deepEqual(await backfillCurrentPositionLinks(pools.runtime, 1), { queued: 0, complete: true });
+  assert.deepEqual(await backfillCurrentPositionLinks(pools.runtime, 1), { queued: 0, complete: true });
+  assert.deepEqual(await drain(), ['APPLIED', 'APPLIED']);
+  assert.equal((await read('ac_a')).observation.sourceObservationId, key('backfill-two'));
+});
+
+test('a superseded link job is acknowledged without regressing the projected owner', async () => {
+  const { commit, assertion } = await setupAircraft();
+  await commit.createAircraft('ac_b');
+  await add('fenced', noon - 10_000, { nic: 3 });
+  await commit.append({ aircraftId: 'ac_b', identifier: { kind: 'ICAO24', value: 'A0B1C2' },
+    validFrom: 0, validUntil: null, sourceId: 'synthetic', issuer: 'test' }, assertion.assertionId);
+  await postgresPositionLinker(pools.runtime).reevaluate('src_synthetic', key('fenced'));
+  assert.deepEqual(await drain(), ['SUPERSEDED', 'APPLIED']);
+  assert.equal((await read('ac_a')).observation, null);
+  assert.equal((await read('ac_b')).observation.sourceObservationId, key('fenced'));
 });

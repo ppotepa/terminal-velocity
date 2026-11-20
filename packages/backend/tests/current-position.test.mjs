@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { comparePositionEvidence } from '../src/modules/flight-tracking/public/index.ts';
+import { comparePositionEvidence, classifyPositionFreshness } from '../src/modules/flight-tracking/public/index.ts';
 
 const rank = (overrides = {}) => ({ observedAtMs: 10, nic: null, nacP: null,
   containmentRadiusMeters: null, measurementRank: 3, sourcePriority: 0,
@@ -22,4 +22,14 @@ test('equal-time quality and configured priority have a total stable order', () 
   assert.ok(comparePositionEvidence(rank({ observationId: '00000000-0000-0000-0000-000000000001' }),
     rank({ observationId: '00000000-0000-0000-0000-000000000002' })) > 0);
   assert.equal(comparePositionEvidence(rank(), rank()), 0);
+});
+
+test('position freshness uses the observation clock and exposes an uncertainty boundary', () => {
+  const observation = { observedAt: '2026-11-20T11:59:00.000Z',
+    timestampPrecision: 'MILLISECOND', timestampUncertaintyMs: 0 };
+  const policy = { currentWithinMs: 60_000 };
+  assert.equal(classifyPositionFreshness(observation, '2026-11-20T11:59:59.998Z', policy), 'CURRENT');
+  assert.equal(classifyPositionFreshness(observation, '2026-11-20T11:59:59.999Z', policy), 'UNKNOWN');
+  assert.equal(classifyPositionFreshness(observation, '2026-11-20T12:00:00.000Z', policy), 'UNKNOWN');
+  assert.equal(classifyPositionFreshness(observation, '2026-11-20T12:00:00.001Z', policy), 'STALE');
 });

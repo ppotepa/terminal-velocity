@@ -45,3 +45,4 @@ export {
 export { type PositionHistoryPage, type PositionHistoryReader } from '../ports/position-history-reader.ts';
 export { comparePositionEvidence, measurementRank, type PositionEvidenceRank } from '../domain/compare-position-evidence.ts';
 export { type CurrentPositionView, type CurrentPositionReader } from '../ports/current-position-reader.ts';
+export { createPostgresCurrentPosition } from '../composition/postgres-current-position.ts';
