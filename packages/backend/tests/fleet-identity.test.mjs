@@ -35,14 +35,25 @@ test('overlapping claims and competing strong identifiers cannot confirm identit
   assert.deepEqual(resolveIdentityAt([hex('A0B1C2')], 10, assertions, 3),
     { status: 'AMBIGUOUS', candidateIds: ['ac_a', 'ac_b'], revision: 3 });
   assert.deepEqual(resolveIdentityAt([hex('FFFFFF'), tail('N123AB')], 10, assertions, 3),
-    { status: 'MATCHED', aircraftId: 'ac_b', revision: 3 });
+    { status: 'CONFLICTED', candidateIds: ['ac_b'], revision: 3 });
   assert.equal(resolveIdentityAt([hex('A0B1C2')], 10, assertions, 3, false).status, 'INCOMPLETE');
   assert.deepEqual(resolveIdentityAt([hex('A0B1C2'), tail('N999ZZ')], 10,
     [...assertions, claim('ac_c', tail('N999ZZ'), 0)], 4),
-  { status: 'AMBIGUOUS', candidateIds: ['ac_a', 'ac_b', 'ac_c'], revision: 4 });
+  { status: 'CONFLICTED', candidateIds: ['ac_a', 'ac_b', 'ac_c'], revision: 4 });
   assert.deepEqual(resolveIdentityAt([hex('FFFFFF'), tail('N123AB'), tail('N999ZZ')], 10,
     [...assertions, claim('ac_c', tail('N999ZZ'), 0)], 4),
   { status: 'CONFLICTED', candidateIds: ['ac_b', 'ac_c'], revision: 4 });
+});
+
+test('an unowned registration contradicts a different active registration on the ICAO owner', () => {
+  const assertions = [claim('ac_a', hex('A0B1C2'), 0), claim('ac_a', tail('N123AB'), 0)];
+  assert.deepEqual(resolveIdentityAt([hex('A0B1C2'), tail('N999ZZ')], 10, assertions, 2),
+    { status: 'CONFLICTED', candidateIds: ['ac_a'], revision: 2 });
+  assert.deepEqual(resolveIdentityAt([hex('A0B1C2'), tail('N123AB')], 10, assertions, 2),
+    { status: 'MATCHED', aircraftId: 'ac_a', revision: 2 });
+  assert.deepEqual(resolveIdentityAt([hex('A0B1C2'), tail('N999ZZ')], 10,
+    [claim('ac_a', hex('A0B1C2'), 0)], 1),
+  { status: 'MATCHED', aircraftId: 'ac_a', revision: 1 });
 });
 
 test('a second simultaneous ICAO24 vetoes a position match until its validity ends', () => {

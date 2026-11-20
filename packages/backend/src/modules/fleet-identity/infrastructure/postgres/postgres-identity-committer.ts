@@ -14,16 +14,18 @@ export function postgresIdentityCommitter(pool: SqlPool): IdentityCommitter {
       if (!checked.ok) throw new RangeError(`${checked.error.code}: ${checked.error.field}`);
       return runSqlTransaction(pool, async sql => {
         let old: { assertion_id: string; aircraft_id: string; kind: string; normalized_alias: string; valid_from_ms: string;
-          valid_until_ms: string | null } | undefined;
+          valid_until_ms: string | null; source_id: string; issuer: string } | undefined;
         if (supersedesId !== undefined) {
           if (!Number.isSafeInteger(supersedesId) || supersedesId <= 0) throw new RangeError('Invalid superseded assertion.');
           const previous = await sql.query<typeof old & Record<string, unknown>>(`
-            SELECT a.assertion_id,a.aircraft_id,a.kind,a.normalized_alias,a.valid_from_ms,a.valid_until_ms
+            SELECT a.assertion_id,a.aircraft_id,a.kind,a.normalized_alias,a.valid_from_ms,a.valid_until_ms,a.source_id,a.issuer
             FROM fleet_identity.assertions a
             WHERE a.assertion_id=$1 AND NOT EXISTS
               (SELECT 1 FROM fleet_identity.assertions successor WHERE successor.supersedes_id=a.assertion_id)`, [supersedesId]);
           old = previous.rows[0];
           if (!old) throw new Error('Superseded assertion is absent or already corrected.');
+          if (old.source_id !== checked.value.sourceId || old.issuer !== checked.value.issuer)
+            throw new Error('Only the same source and issuer may correct an assertion.');
         }
         const next = await sql.query<{ revision: string }>(
           'UPDATE fleet_identity.registry_state SET revision=revision+1 WHERE singleton RETURNING revision');

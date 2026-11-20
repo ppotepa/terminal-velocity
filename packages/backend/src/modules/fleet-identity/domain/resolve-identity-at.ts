@@ -32,6 +32,13 @@ export function resolveIdentityAt(identifiers: readonly StrongIdentifier[], obse
       if (values.size > 1) return { status: 'CONFLICTED', candidateIds, revision };
       activeByKind.set(assertion.identifier.kind, values);
     }
+    // An unknown supplied identifier still contradicts a different active
+    // value of the same kind on a candidate supported by another identifier.
+    for (const identifier of identifiers) {
+      const values = activeByKind.get(identifier.kind);
+      if (values && !values.has(identifier.value))
+        return { status: 'CONFLICTED', candidateIds, revision };
+    }
   }
   if (sets.some(set => set.size > 1)) return { status: 'AMBIGUOUS', candidateIds, revision };
   if (candidateIds.length > 1) return { status: 'CONFLICTED', candidateIds, revision };

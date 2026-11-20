@@ -2,7 +2,7 @@ import test, { after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Pool } from 'pg';
 import { createTestPools, resetTestData } from './helpers/database.mjs';
-import { icao24, registration } from '../../src/modules/aircraft-correlation/public/index.ts';
+import { icao24, registration, decideAircraftMatch } from '../../src/modules/aircraft-correlation/public/index.ts';
 import { createResolveAircraft, createRegistryCandidateDirectory } from '../../src/modules/fleet-identity/public/index.ts';
 import { postgresIdentityReader } from '../../src/modules/fleet-identity/infrastructure/postgres/postgres-identity-reader.ts';
 import { postgresIdentityCommitter } from '../../src/modules/fleet-identity/infrastructure/postgres/postgres-identity-committer.ts';
@@ -77,10 +77,50 @@ test('overlapping owners and competing identifiers remain ambiguous or conflicte
     messageId: 'msg_synthetic', effectiveAt: 1, identifiers: [hex('A0B1C2')], callsign: null });
   assert.equal(snapshot.completeness, 'COMPLETE');
   assert.equal(snapshot.candidates.length, 2);
-  assert.equal((await resolve([hex('FFFFFF'), tail('N123AB')], 1)).aircraftId, 'ac_b');
+  assert.equal((await resolve([hex('FFFFFF'), tail('N123AB')], 1)).status, 'CONFLICTED');
   await commit.append(claim('ac_a', tail('N999ZZ'), 0));
-  assert.equal((await resolve([hex('FFFFFF'), tail('N999ZZ')], 1)).aircraftId, 'ac_a');
+  assert.equal((await resolve([hex('FFFFFF'), tail('N999ZZ')], 1)).status, 'CONFLICTED');
   assert.equal((await resolve([tail('N999ZZ'), tail('N123AB')], 1)).status, 'CONFLICTED');
+});
+
+test('cross-source and cross-issuer corrections cannot retire another owner claim', async () => {
+  const commit = postgresIdentityCommitter(pools.runtime);
+  await commit.createAircraft('ac_a'); await commit.createAircraft('ac_b');
+  const first = await commit.append(claim('ac_a', hex('A0B1C2'), 0));
+  const competing = { ...claim('ac_b', hex('A0B1C2'), 0), sourceId: 'other-source' };
+  await assert.rejects(() => commit.append(competing, first.assertionId),
+    /same source and issuer/);
+  await assert.rejects(() => commit.append({ ...claim('ac_b', hex('A0B1C2'), 0), issuer: 'other-issuer' },
+    first.assertionId), /same source and issuer/);
+  assert.equal((await pools.runtime.query('SELECT revision FROM fleet_identity.registry_state')).rows[0].revision, '1');
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.replay_requests')).rows[0].n, '1');
+  await assert.rejects(() => pools.runtime.query(`INSERT INTO fleet_identity.assertions
+    (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision,supersedes_id)
+    VALUES ('ac_b','ICAO24','A0B1C2',0,'other-source','test',2,$1)`, [first.assertionId]),
+  error => error.code === '23514');
+  await commit.append(competing);
+  const resolve = createResolveAircraft(postgresIdentityReader(pools.runtime));
+  assert.deepEqual(await resolve([hex('A0B1C2')], 1),
+    { status: 'AMBIGUOUS', candidateIds: ['ac_a', 'ac_b'], revision: 2 });
+  const prior = (await postgresIdentityReader(pools.runtime).history('ac_a'))[0];
+  assert.equal(prior.supersededAt, null);
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.assertions')).rows[0].n, '2');
+});
+
+test('registry resolution rejects an unowned registration that contradicts the ICAO owner', async () => {
+  const commit = postgresIdentityCommitter(pools.runtime);
+  await commit.createAircraft('ac_a');
+  await commit.append(claim('ac_a', hex('A0B1C2'), 0));
+  await commit.append(claim('ac_a', tail('N123AB'), 0));
+  const reader = postgresIdentityReader(pools.runtime);
+  const resolve = createResolveAircraft(reader);
+  assert.deepEqual(await resolve([hex('A0B1C2'), tail('N999ZZ')], 1),
+    { status: 'CONFLICTED', candidateIds: ['ac_a'], revision: 2 });
+  const input = { messageId: 'msg_synthetic', effectiveAt: 1,
+    identifiers: [hex('A0B1C2'), tail('N999ZZ')], callsign: null };
+  const snapshot = await createRegistryCandidateDirectory(reader).find(input);
+  assert.equal(snapshot.completeness, 'COMPLETE');
+  assert.equal(decideAircraftMatch(input, snapshot.candidates).status, 'CONFLICTED');
 });
 
 test('concurrent corrections have one successor and failed transactions leave no revision or replay request', async () => {
