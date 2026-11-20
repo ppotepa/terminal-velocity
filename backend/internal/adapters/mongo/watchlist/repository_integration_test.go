@@ -32,6 +32,9 @@ func TestMongoWatchlistCRUDVersioningAndReload(t *testing.T) {
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
+		if client == nil {
+			return
+		}
 		_ = client.Database(databaseName).Drop(cleanupCtx)
 		_ = client.Disconnect(cleanupCtx)
 	})
