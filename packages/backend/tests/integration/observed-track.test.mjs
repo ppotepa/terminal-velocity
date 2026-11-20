@@ -39,10 +39,10 @@ async function project() {
 
 test('paged observed track preserves facts, wrap/gap reasons and page continuation', async () => {
   await setup();
-  await append('three', noon - 180_000, 10, -179.4);
-  await append('one', noon - 200_000, 10, 179.5);
+  await append('three', noon - 180_000, 89, -179.4);
+  await append('one', noon - 200_000, 89, 179.5);
   await append('four', noon - 100_000, 30, 30);
-  await append('two', noon - 190_000, 10, -179.5);
+  await append('two', noon - 190_000, 89, -179.5);
   await project();
   const reader = postgresObservedTrackReader(pools.runtime);
   const first = await reader.read(query());
