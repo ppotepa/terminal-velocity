@@ -133,3 +133,35 @@ are skipped without losing progress; the scheduler row and selected page
 remain in the same transaction. Under continuously nonempty queues,
 every class is serviced at least once in three committed turns. This
 migration preserves previous state values and all durable pending work.
+
+## Migration 016 — private current positions
+
+`016_current_position_projection.sql` adds a private current-position read model.
+The identity-link-head trigger enqueues `(source, observation, link revision)` in
+the same transaction as each link decision. A separate worker commits its inbox,
+candidate change, selected position, and job acknowledgment together under a
+projection lock. Superseded jobs are acknowledged without replacing newer link
+decisions. Immutable tracking facts and link history are unchanged.
+
+Candidates are indexed by aircraft and deterministic rank: observation time,
+reported NIC/NACp, smaller containment radius, ADS-B/MLAT/other measurement kind,
+configured source priority, source ID and immutable observation UUID. Source ID
+uses the `C` collation so the database and pure comparator agree. Arrival time
+does not enter that rank. The default source priority is zero; changing configured
+priorities requires bounded rebuild of affected aircraft. An unresolved link
+removes its candidate, allowing the next eligible fact to become current. A
+missing candidate is an explicit unknown
+head, not a fabricated coordinate. Freshness is calculated by the read port from
+observation time and is independent of message availability.
+
+The trigger covers new links. Existing link heads are queued through bounded,
+durable keyset backfill; the application must run the backfill before relying on a
+complete projection after upgrade. Run `npm run db:backfill-current-position`
+with the restricted runtime `DATABASE_URL`, then `npm run db:project-current-position`
+until the queue reports empty; either command exits 2 if its bounded work budget
+is exhausted and can safely be repeated. Single-aircraft repair reads at most 500
+versioned links within a window of at most one day and aborts without partial
+changes when that limit is exceeded. These tables contain private derived position
+data. No real source data or public map endpoint is authorized by the migration.
+Application rollback must retain these tables and queued history; schema changes
+require a forward migration.

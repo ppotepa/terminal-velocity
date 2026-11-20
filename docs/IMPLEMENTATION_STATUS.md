@@ -1,10 +1,29 @@
 # Terminal Velocity — implementation status, Stage 2
 
-### S4-04 temporal fleet identity (issue #17, local authoring)
+### S4-05 private current-position projection (issue #18, in progress)
 
-The private registry stores stable aircraft IDs, time-qualified ICAO24 and registration assertions, explicit ambiguity and conflict, and versioned links to immutable position and message facts. Migrations 008–014 add append-only history, replay cursors, new-position jobs, correction authority, bounded alias-expansion tasks, an atomic database write entry point, and blocked replay recovery. A separate command backfills old positions in small transactions; migration 010 does not scan the entire position table. The permitted provider composition uses the registry through its public entry point. All retained examples and tests are synthetic.
+Migration 016 adds a private, versioned current-position projection. A committed
+identity-link change enqueues a projection job; the worker commits inbox, effects
+and acknowledgment in a separate transaction. Candidate selection uses observation
+time before quality and source priority, with stable tie-breakers. A corrected link
+can remove a candidate and select the next fact, while missing positions stay
+unknown. Reads calculate position freshness independently of message availability.
+Bounded single-aircraft repair and durable link backfill support restarts and
+upgrades. This engineering uses synthetic facts only and does not expose a map or
+persist unapproved live source rows. Verification and PR review remain in progress.
 
-The coordinator supplied passing isolated CI for the earlier #17 revision `f6adb4e`, before independent review found that duplicate or historical aliases could exhaust the 2,000-row lookup ceiling and block correction replay. The current reader returns at most two distinct active values per identifier kind and aircraft, which preserves the conflict veto while keeping a single owner's decision evidence bounded. Full source and revision provenance remains available through paged history. A lookup involving more than 2,000 evidence rows remains `PARTIAL`; the replay worker records `BLOCKED` at the numeric registry revision from the same candidate snapshot, lets later requests run, and retries after a registry revision change. Synthetic PostgreSQL regressions cover both growth and recovery. The coordinator's isolated CI at `91dc654` passed `npm run check` and failed two new PostgreSQL tests: a fixture ID violated the registry format, and the worker passed the `fleet/…` directory token to a bigint column. This checkout corrects both, and removes a duplicate oversized replay request from the test. Fresh exact-SHA PostgreSQL and full-check evidence is still required.
+### S4-04 temporal fleet identity (issue #17, merged PR #66)
+
+The private registry stores stable aircraft IDs, time-qualified ICAO24 and registration assertions, explicit ambiguity and conflict, and versioned links to immutable position and message facts. Migrations 008–015 add append-only history, replay cursors, new-position jobs, correction authority, bounded alias-expansion tasks, an atomic database write entry point, blocked replay recovery, and fair three-class scheduling. A separate command backfills old positions in small transactions; migration 010 does not scan the entire position table. The permitted provider composition uses the registry through its public entry point. All retained examples and tests are synthetic.
+
+PR #66 merged as `adcfd9f` after the local branch, remote migration 015 and newer
+main were reconciled. Exact head `1274cdd` and the merge SHA have the same tree;
+both passed isolated local Node 24 checks, 119 PostgreSQL tests, 41 message tests,
+26 browser tests, demo and API smoke. The reader keeps bounded active decision
+evidence while full assertion provenance remains paged. Incomplete replay requests
+pause at a registry revision and retry after a change; the durable scheduler gives
+position jobs, alias expansions and corrections fair turns. Hosted GitHub Actions
+is a separate release gate under #49.
 
 These migrations are additive and have no destructive down migration. Rolling back application code must retain assertions, link decisions, jobs, replay cursors, and outbox history. A schema correction needs a forward migration. The code does not establish provider rights, live retention permission, a public map, or flight-session recognition.
 

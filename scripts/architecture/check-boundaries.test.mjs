@@ -178,6 +178,15 @@ test('API may import the exported demo factory; composition may wire adapters', 
   assert.deepEqual(result.diagnostics, []);
 });
 
+test('flight-tracking public entry may expose its private PostgreSQL composition', async t => {
+  const result = await fixture(t, {
+    [`${backend}modules/flight-tracking/public/index.ts`]: "export { create } from '../composition/wire.ts';",
+    [`${backend}modules/flight-tracking/composition/wire.ts`]: "import { adapter } from '../infrastructure/adapter.ts'; export const create = () => adapter;",
+    [`${backend}modules/flight-tracking/infrastructure/adapter.ts`]: 'export const adapter = 1;',
+  });
+  assert.deepEqual(result.diagnostics, []);
+});
+
 test('API cannot bypass package exports using a private package path', async t => {
   const result = await fixture(t, {
     [`${api}route.ts`]: "type Raw = import('@airframes/backend/src/demo/domain/value.ts').Value;",
