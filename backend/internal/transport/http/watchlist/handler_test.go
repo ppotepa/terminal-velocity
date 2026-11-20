@@ -170,6 +170,22 @@ func TestWatchRuleRESTCRUDAndETagVersioning(t *testing.T) {
 	}
 }
 
+func TestAdvancedWatchRuleFiltersRoundTrip(t *testing.T) {
+	handler := NewHandler(application.NewService(newMemoryRepository()), nil)
+	body := strings.TrimSuffix(validBody, "}") + `,"filters":{"countryCodes":["FR"],"altitudeMeters":{"min":9000,"max":11000},"route":{"origin":"LHR","destination":"CDG","via":["DOV"]},"geofence":{"type":"Polygon","coordinates":[[[-1,48],[5,48],[5,52],[-1,52],[-1,48]]]},"flightPath":{"type":"LineString","coordinates":[[-0.1,51.5],[2.35,48.85]],"widthMeters":50000}}}`
+	created := request(handler, http.MethodPost, "/watch-rules", body, "")
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create advanced rule status=%d body=%s", created.Code, created.Body.String())
+	}
+	var got ruleDTO
+	if err := json.Unmarshal(created.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Filters == nil || got.Filters.Route == nil || got.Filters.Route.Origin != "LHR" || got.Filters.Geofence == nil || got.Filters.FlightPath == nil || got.Filters.AltitudeMeters == nil || len(got.Filters.CountryCodes) != 1 {
+		t.Fatalf("advanced filters were not round-tripped: %+v", got.Filters)
+	}
+}
+
 func TestMalformedOrUnsupportedRulesFailBeforePersistence(t *testing.T) {
 	repo := newMemoryRepository()
 	validator := &rejectingValidator{}

@@ -46,13 +46,14 @@ func NewHandler(service *application.Service, validator RuleValidator) http.Hand
 }
 
 type requestDTO struct {
-	Name       string         `json:"name"`
-	Status     *watch.Status  `json:"status"`
-	Scope      *watch.Scope   `json:"scope"`
-	Groups     *[]groupDTO    `json:"groups"`
-	Window     *windowDTO     `json:"window"`
-	Discovery  *discoveryDTO  `json:"discovery"`
-	Collection *collectionDTO `json:"collection"`
+	Name       string                 `json:"name"`
+	Status     *watch.Status          `json:"status"`
+	Scope      *watch.Scope           `json:"scope"`
+	Groups     *[]groupDTO            `json:"groups"`
+	Window     *windowDTO             `json:"window"`
+	Discovery  *discoveryDTO          `json:"discovery"`
+	Filters    *watch.AdvancedFilters `json:"filters"`
+	Collection *collectionDTO         `json:"collection"`
 }
 type groupDTO struct {
 	Mode     watch.GroupMode `json:"mode"`
@@ -76,16 +77,17 @@ type collectionDTO struct {
 	DecoderIDs *[]string `json:"decoderIds"`
 }
 type ruleDTO struct {
-	ID         shared.WatchRuleID `json:"id"`
-	Name       string             `json:"name"`
-	Status     watch.Status       `json:"status"`
-	Scope      watch.Scope        `json:"scope"`
-	Groups     []groupDTO         `json:"groups"`
-	Window     *windowDTO         `json:"window,omitempty"`
-	Discovery  *discoveryDTO      `json:"discovery,omitempty"`
-	Collection collectionDTO      `json:"collection"`
-	CreatedAt  time.Time          `json:"createdAt"`
-	UpdatedAt  time.Time          `json:"updatedAt"`
+	ID         shared.WatchRuleID     `json:"id"`
+	Name       string                 `json:"name"`
+	Status     watch.Status           `json:"status"`
+	Scope      watch.Scope            `json:"scope"`
+	Groups     []groupDTO             `json:"groups"`
+	Window     *windowDTO             `json:"window,omitempty"`
+	Discovery  *discoveryDTO          `json:"discovery,omitempty"`
+	Filters    *watch.AdvancedFilters `json:"filters,omitempty"`
+	Collection collectionDTO          `json:"collection"`
+	CreatedAt  time.Time              `json:"createdAt"`
+	UpdatedAt  time.Time              `json:"updatedAt"`
 }
 type rulePageDTO struct {
 	Items      []ruleDTO `json:"items"`
@@ -274,7 +276,7 @@ func (b requestDTO) toDomain(id shared.WatchRuleID) watch.WatchRule {
 	if b.Discovery != nil {
 		discovery = &watch.DiscoveryBounds{AreaID: b.Discovery.AreaID, MaxCandidates: b.Discovery.MaxCandidates}
 	}
-	return watch.WatchRule{ID: id, Name: b.Name, Status: *b.Status, Scope: *b.Scope, Groups: groups, Window: window, Discovery: discovery, Collection: watch.CollectionPreferences{Positions: b.Collection.Positions, Messages: b.Collection.Messages, DecoderIDs: append([]string(nil), (*b.Collection.DecoderIDs)...)}}
+	return watch.WatchRule{ID: id, Name: b.Name, Status: *b.Status, Scope: *b.Scope, Groups: groups, Window: window, Discovery: discovery, Filters: b.Filters, Collection: watch.CollectionPreferences{Positions: b.Collection.Positions, Messages: b.Collection.Messages, DecoderIDs: append([]string(nil), (*b.Collection.DecoderIDs)...)}}
 }
 func toDTO(item application.StoredRule) ruleDTO {
 	rule := item.Rule
@@ -295,7 +297,7 @@ func toDTO(item application.StoredRule) ruleDTO {
 		discovery = &discoveryDTO{AreaID: rule.Discovery.AreaID, MaxCandidates: rule.Discovery.MaxCandidates}
 	}
 	decoderIDs := append([]string{}, rule.Collection.DecoderIDs...)
-	return ruleDTO{ID: rule.ID, Name: rule.Name, Status: rule.Status, Scope: rule.Scope, Groups: groups, Window: window, Discovery: discovery, Collection: collectionDTO{Positions: rule.Collection.Positions, Messages: rule.Collection.Messages, DecoderIDs: &decoderIDs}, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+	return ruleDTO{ID: rule.ID, Name: rule.Name, Status: rule.Status, Scope: rule.Scope, Groups: groups, Window: window, Discovery: discovery, Filters: rule.Filters, Collection: collectionDTO{Positions: rule.Collection.Positions, Messages: rule.Collection.Messages, DecoderIDs: &decoderIDs}, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
 }
 func parseLimit(value string) (int, error) {
 	if value == "" {

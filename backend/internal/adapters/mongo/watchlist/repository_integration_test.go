@@ -78,6 +78,9 @@ func TestMongoWatchlistCRUDVersioningAndReload(t *testing.T) {
 	if reloaded.Rule.Status != watch.StatusPaused || reloaded.Version != 2 {
 		t.Fatalf("disable did not persist across reconnect: %+v", reloaded)
 	}
+	if reloaded.Rule.Filters == nil || len(reloaded.Rule.Filters.CountryCodes) != 1 || reloaded.Rule.Filters.CountryCodes[0] != "FR" || reloaded.Rule.Filters.AltitudeMeters == nil || reloaded.Rule.Filters.Geofence == nil || reloaded.Rule.Filters.FlightPath == nil {
+		t.Fatalf("advanced filters did not persist across reconnect: %+v", reloaded.Rule.Filters)
+	}
 	updatedRule := reloaded.Rule
 	updatedRule.Name = "Edited Mongo integration watch"
 	updated, err := service.Update(ctx, reloaded.Rule.ID, reloaded.Version, updatedRule)
@@ -122,9 +125,11 @@ func connect(ctx context.Context, uri string) (*driver.Client, error) {
 }
 
 func integrationRule(id string) watch.WatchRule {
+	minimum, maximum := 9000.0, 11000.0
 	return watch.WatchRule{
 		ID: shared.WatchRuleID(id), Name: "Mongo integration watch", Status: watch.StatusActive, Scope: watch.ScopeTargeted,
 		Groups:     []watch.CriteriaGroup{{Mode: watch.GroupAny, Criteria: []watch.Criterion{{Kind: watch.CriterionICAO24, Value: "A1B2C3"}}}},
+		Filters:    &watch.AdvancedFilters{CountryCodes: []string{"FR"}, AltitudeMeters: &watch.AltitudeRange{Min: &minimum, Max: &maximum}, Route: &watch.FlightRoute{Origin: "LHR", Destination: "CDG", Via: []string{"DOV"}}, Geofence: &watch.GeoJSONPolygon{Type: "Polygon", Coordinates: [][]watch.GeoJSONPosition{{{-1, 48}, {5, 48}, {5, 52}, {-1, 52}, {-1, 48}}}}, FlightPath: &watch.FlightPathCorridor{Type: "LineString", Coordinates: []watch.GeoJSONPosition{{-0.1, 51.5}, {2.35, 48.85}}, WidthMeters: 50000}},
 		Collection: watch.CollectionPreferences{Positions: true},
 	}
 }

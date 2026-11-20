@@ -442,6 +442,7 @@ export interface components {
                 areaId: string;
                 maxCandidates: number;
             } | null;
+            filters?: components["schemas"]["WatchRuleFilters"];
             collection: components["schemas"]["CollectionPreferences"];
         };
         WatchRule: components["schemas"]["WatchRuleInput"] & {
@@ -454,6 +455,32 @@ export interface components {
         WatchRulePage: {
             items: components["schemas"]["WatchRule"][];
             nextCursor: string | null;
+        };
+        /** @description Coordinate pair in GeoJSON longitude, latitude order. */
+        GeoJSONPosition: number[];
+        /** @description Evidence filters applied only after a selected Watch Rule has produced a bounded source result. These filters never create a broad query. */
+        WatchRuleFilters: {
+            countryCodes?: string[];
+            altitudeMeters?: {
+                min?: number;
+                max?: number;
+            };
+            route?: {
+                origin?: string;
+                destination?: string;
+                via?: string[];
+            };
+            geofence?: {
+                /** @constant */
+                type: "Polygon";
+                coordinates: components["schemas"]["GeoJSONPosition"][][];
+            };
+            flightPath?: {
+                /** @constant */
+                type: "LineString";
+                coordinates: components["schemas"]["GeoJSONPosition"][];
+                widthMeters: number;
+            };
         };
         IdentifierAssertion: {
             /** @enum {string} */
@@ -856,6 +883,63 @@ export interface operations {
                  *           ]
                  *         }
                  *       ],
+                 *       "filters": {
+                 *         "countryCodes": [
+                 *           "FR"
+                 *         ],
+                 *         "altitudeMeters": {
+                 *           "min": 9000,
+                 *           "max": 11000
+                 *         },
+                 *         "route": {
+                 *           "origin": "EGLL",
+                 *           "destination": "LFPG",
+                 *           "via": [
+                 *             "DOV"
+                 *           ]
+                 *         },
+                 *         "geofence": {
+                 *           "type": "Polygon",
+                 *           "coordinates": [
+                 *             [
+                 *               [
+                 *                 -1,
+                 *                 48
+                 *               ],
+                 *               [
+                 *                 5,
+                 *                 48
+                 *               ],
+                 *               [
+                 *                 5,
+                 *                 52
+                 *               ],
+                 *               [
+                 *                 -1,
+                 *                 52
+                 *               ],
+                 *               [
+                 *                 -1,
+                 *                 48
+                 *               ]
+                 *             ]
+                 *           ]
+                 *         },
+                 *         "flightPath": {
+                 *           "type": "LineString",
+                 *           "coordinates": [
+                 *             [
+                 *               -0.1,
+                 *               51.5
+                 *             ],
+                 *             [
+                 *               2.35,
+                 *               48.85
+                 *             ]
+                 *           ],
+                 *           "widthMeters": 50000
+                 *         }
+                 *       },
                  *       "collection": {
                  *         "positions": true,
                  *         "messages": false,

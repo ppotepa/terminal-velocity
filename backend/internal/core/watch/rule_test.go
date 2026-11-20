@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	geometry "github.com/ppotepa/terminal-velocity/backend/internal/core/geography"
 	"github.com/ppotepa/terminal-velocity/backend/internal/core/shared"
 )
 
@@ -113,5 +114,44 @@ func TestCollectionPreferencesMustBeActionable(t *testing.T) {
 	rule.Collection.DecoderIDs = []string{"decoder-1"}
 	if _, err := NewWatchRule(rule); err == nil {
 		t.Fatal("accepted decoder selection without message collection")
+	}
+}
+
+func TestAdvancedFiltersValidateAndMatchEvidence(t *testing.T) {
+	minAltitude, maxAltitude := 9000.0, 11000.0
+	rule := WatchRule{ID: "watch-1", Name: "route filters", Scope: ScopeTargeted, Groups: []CriteriaGroup{{Mode: GroupAny, Criteria: []Criterion{{Kind: CriterionCallsign, Value: "UAL52"}}}}, Collection: CollectionPreferences{Positions: true}, Filters: &AdvancedFilters{
+		CountryCodes: []string{"fr"}, AltitudeMeters: &AltitudeRange{Min: &minAltitude, Max: &maxAltitude}, Route: &FlightRoute{Origin: "lhr", Destination: "cdg", Via: []string{"dov"}},
+		Geofence:   &GeoJSONPolygon{Type: "Polygon", Coordinates: [][]GeoJSONPosition{{{-1, 48}, {5, 48}, {5, 52}, {-1, 52}, {-1, 48}}}},
+		FlightPath: &FlightPathCorridor{Type: "LineString", Coordinates: []GeoJSONPosition{{-0.1, 51.5}, {2.35, 48.85}}, WidthMeters: 50000},
+	}}
+	validated, err := NewWatchRule(rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validated.Filters.Route.Origin != "LHR" || validated.Filters.CountryCodes[0] != "FR" {
+		t.Fatalf("filters were not normalized: %+v", validated.Filters)
+	}
+	candidate := Candidate{Callsign: shared.Some(shared.Callsign("UAL52")), CountryCodes: shared.Some([]string{"FR"}), AltitudeMeters: shared.Some(9800.0), Position: shared.Some(geometry.GeoPoint{Latitude: 48.85, Longitude: 2.35}), Origin: shared.Some("LHR"), Destination: shared.Some("CDG"), RouteVia: []string{"DOV"}, RouteViaKnown: true, ObservedPath: []geometry.GeoPoint{{Latitude: 51.5, Longitude: -0.1}, {Latitude: 48.85, Longitude: 2.35}}, ObservedPathKnown: true}
+	if got := MatchWatchCriteria(validated, candidate); got.Status != Match {
+		t.Fatalf("expected complete advanced-filter match: %+v", got)
+	}
+	candidate.AltitudeMeters = shared.Some(12000.0)
+	if got := MatchWatchCriteria(validated, candidate); got.Status != NoMatch {
+		t.Fatalf("altitude outside bounds must not match: %+v", got)
+	}
+	candidate.AltitudeMeters = shared.None[float64]()
+	if got := MatchWatchCriteria(validated, candidate); got.Status != Unknown {
+		t.Fatalf("missing altitude must remain unknown: %+v", got)
+	}
+}
+
+func TestAdvancedFiltersRejectUnsafeGeometryAndRanges(t *testing.T) {
+	min, max := 12000.0, 9000.0
+	for _, filters := range []*AdvancedFilters{{AltitudeMeters: &AltitudeRange{Min: &min, Max: &max}}, {Geofence: &GeoJSONPolygon{Type: "Polygon", Coordinates: [][]GeoJSONPosition{{{0, 0}, {0, 1}, {1, 1}, {1, 0}}}}}, {FlightPath: &FlightPathCorridor{Type: "LineString", Coordinates: []GeoJSONPosition{{0, 0}, {1, 1}}, WidthMeters: 100001}}} {
+		rule := baseRule()
+		rule.Filters = filters
+		if _, err := NewWatchRule(rule); err == nil {
+			t.Fatalf("accepted invalid filters: %+v", filters)
+		}
 	}
 }
