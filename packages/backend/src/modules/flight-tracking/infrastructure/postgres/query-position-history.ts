@@ -1,5 +1,5 @@
 import type { SqlPool } from '../../../../contracts/database/index.ts';
-import { parsePositionObservation } from '../../domain/position-observation.ts';
+import { parseStoredPositionObservation } from '../../domain/position-observation.ts';
 import type { PositionHistoryQuery } from '../../domain/position-history-query.ts';
 import type { PositionHistoryPage, PositionHistoryReader } from '../../ports/position-history-reader.ts';
 
@@ -27,7 +27,7 @@ export function postgresPositionHistoryReader(pool: SqlPool): PositionHistoryRea
     const hasMore = result.rows.length > query.limit;
     const rows = result.rows.slice(0, query.limit);
     const observations = rows.map(row => {
-      const parsed = parsePositionObservation(row.fact);
+      const parsed = parseStoredPositionObservation(row.fact);
       if (!parsed.ok) throw new Error('Stored position fact failed validation.');
       return parsed.value;
     });

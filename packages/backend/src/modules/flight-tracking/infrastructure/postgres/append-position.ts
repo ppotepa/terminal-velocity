@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { SqlPool } from '../../../../contracts/database/index.ts';
 import { runSqlTransaction } from '../../../database-transactions/public/index.ts';
-import { parsePositionObservation } from '../../domain/position-observation.ts';
+import { parsePositionObservation, parseStoredPositionObservation } from '../../domain/position-observation.ts';
 import { isDurableSourceObservationId } from '../../domain/position-identifiers.ts';
 import type { PositionHistoryWriter } from '../../ports/position-history-writer.ts';
 
@@ -9,8 +9,8 @@ import type { PositionHistoryWriter } from '../../ports/position-history-writer.
 export function postgresPositionHistoryWriter(pool: SqlPool,
   nextEventId: () => string = () => `evt_${randomUUID()}`): PositionHistoryWriter {
   return {
-    async append(input) {
-      const parsed = parsePositionObservation(input);
+    async append(input, identityDecision) {
+      const parsed = parsePositionObservation(input, identityDecision);
       if (!parsed.ok) return { ok: false, error: { code: 'INVALID_POSITION_OBSERVATION', error: parsed.error } };
       const observation = parsed.value;
       if (!isDurableSourceObservationId(observation.sourceObservationId))
@@ -37,7 +37,7 @@ export function postgresPositionHistoryWriter(pool: SqlPool,
           [observation.sourceId, observation.sourceObservationId, fact]);
           if (previous.rows.length !== 1 || !previous.rows[0]?.matches)
             return { ok: false, error: { code: 'SOURCE_OBSERVATION_CONFLICT' } };
-          const stored = parsePositionObservation(previous.rows[0]!.fact);
+          const stored = parseStoredPositionObservation(previous.rows[0]!.fact);
           if (!stored.ok) throw new Error('Stored position fact failed validation.');
           return { ok: true, value: { status: 'ALREADY_PRESENT',
             eventId: previous.rows[0]!.event_id, observation: stored.value } };

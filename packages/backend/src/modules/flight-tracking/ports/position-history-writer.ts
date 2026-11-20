@@ -1,5 +1,5 @@
 import type { Result } from '../../../kernel/result.ts';
-import type { PositionObservation, PositionParseError } from '../domain/position-observation.ts';
+import type { PositionIdentityDecision, PositionObservation, PositionParseError } from '../domain/position-observation.ts';
 
 export type PositionObservationAppendError =
   | { readonly code: 'INVALID_POSITION_OBSERVATION'; readonly error: PositionParseError }
@@ -14,5 +14,5 @@ export interface PositionObservationAppendResult {
 
 /** Stores an immutable source fact and its producer event atomically. */
 export interface PositionHistoryWriter {
-  append(input: unknown): Promise<Result<PositionObservationAppendResult, PositionObservationAppendError>>;
+  append(input: unknown, identityDecision?: PositionIdentityDecision): Promise<Result<PositionObservationAppendResult, PositionObservationAppendError>>;
 }

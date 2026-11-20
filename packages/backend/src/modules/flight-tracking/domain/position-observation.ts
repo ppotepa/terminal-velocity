@@ -140,6 +140,17 @@ function parseIdentifierHints(input: unknown): Result<PositionIdentifierHints, P
 export function parsePositionObservation(
   input: unknown, identityDecision?: PositionIdentityDecision,
 ): Result<PositionObservation, PositionParseError> {
+  return validatePositionObservation(input, identityDecision, false);
+}
+
+/** Revalidates a fact already read from the private immutable position table. Never use for a new receipt. */
+export function parseStoredPositionObservation(input: unknown): Result<PositionObservation, PositionParseError> {
+  return validatePositionObservation(input, undefined, true);
+}
+
+function validatePositionObservation(
+  input: unknown, identityDecision: PositionIdentityDecision | undefined, storedFact: boolean,
+): Result<PositionObservation, PositionParseError> {
   const record = plainRecord(input);
   if (!record) return err({ code: 'INVALID_INPUT', field: 'object' });
   const allowed = [
@@ -272,15 +283,15 @@ export function parsePositionObservation(
       || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(evidence['resolverId'])
       || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(evidence['evidenceRef']))
       return err({ code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
-    if (identityDecision?.status !== 'CONFIRMED'
+    if (!storedFact && (identityDecision?.status !== 'CONFIRMED'
       || identityDecision.sourceId !== sourceId.value
       || identityDecision.sourceObservationId !== observationId.value
       || identityDecision.aircraftId !== confirmed.value
       || identityDecision.resolverId !== evidence['resolverId']
-      || identityDecision.evidenceRef !== evidence['evidenceRef'])
+      || identityDecision.evidenceRef !== evidence['evidenceRef']))
       return err({ code: 'UNSUPPORTED_CONFIRMED_IDENTITY' });
-    if (output.identifierHints?.icao24 !== undefined
-      && (typeof identityDecision.icao24 !== 'string'
+    if (!storedFact && output.identifierHints?.icao24 !== undefined
+      && (typeof identityDecision?.icao24 !== 'string'
         || identityDecision.icao24.toUpperCase() !== output.identifierHints.icao24))
       return err({ code: 'CONFLICTING_POSITION_IDENTIFIERS' });
     output.confirmedAircraftId = confirmed.value;

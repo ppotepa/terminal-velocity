@@ -26,6 +26,46 @@ const query = (overrides = {}) => positionHistoryByIcao24Query({
   toObservedAtMs: Date.parse('2026-11-19T12:00:00Z'), limit: 2, ...overrides,
 }).value;
 
+test('confirmed identity requires an upstream decision on first write and survives restart replay and history', async () => {
+  const writer = postgresPositionHistoryWriter(pools.runtime);
+  const confirmed = fact('confirmed', {
+    confirmedAircraftId: 'ac_synthetic-1',
+    identityEvidence: { resolverId: 'resolver_synthetic', evidenceRef: 'decision:confirmed' },
+  });
+  const decision = {
+    status: 'CONFIRMED', sourceId: confirmed.sourceId,
+    sourceObservationId: confirmed.sourceObservationId,
+    aircraftId: confirmed.confirmedAircraftId, icao24: 'A0B1C2',
+    resolverId: 'resolver_synthetic', evidenceRef: 'decision:confirmed',
+  };
+  assert.deepEqual((await writer.append(confirmed)).error,
+    { code: 'INVALID_POSITION_OBSERVATION', error: { code: 'UNSUPPORTED_CONFIRMED_IDENTITY' } });
+  assert.deepEqual((await writer.append(confirmed, { ...decision, aircraftId: 'ac_other' })).error,
+    { code: 'INVALID_POSITION_OBSERVATION', error: { code: 'UNSUPPORTED_CONFIRMED_IDENTITY' } });
+  assert.deepEqual((await writer.append(confirmed, { ...decision, icao24: 'FFFFFF' })).error,
+    { code: 'INVALID_POSITION_OBSERVATION', error: { code: 'CONFLICTING_POSITION_IDENTIFIERS' } });
+  assert.equal((await pools.runtime.query('SELECT * FROM tracking.position_observations')).rowCount, 0);
+  const inserted = await writer.append(confirmed, decision);
+  assert.equal(inserted.value.status, 'INSERTED');
+  const laterReceipt = { ...confirmed, ingestedAt: '2026-11-19T11:05:00Z', sourceDeliveryRef: 'delivery:confirmed-retry' };
+  const restarted = await execute(process.execPath,
+    [new URL('./helpers/position-worker.mjs', import.meta.url).pathname],
+    { env: { ...process.env, TV_SYNTHETIC_POSITION: JSON.stringify(laterReceipt),
+      TV_SYNTHETIC_IDENTITY_DECISION: JSON.stringify(decision) } });
+  const replay = JSON.parse(restarted.stdout);
+  assert.equal(replay.value.status, 'ALREADY_PRESENT');
+  assert.equal(replay.value.eventId, inserted.value.eventId);
+  assert.equal(replay.value.observation.ingestedAt, '2026-11-19T11:00:01.000Z');
+  assert.equal(replay.value.observation.sourceDeliveryRef, 'delivery:confirmed');
+  assert.deepEqual(replay.value.observation.identityEvidence, confirmed.identityEvidence);
+  const history = await postgresPositionHistoryReader(pools.runtime).byIcao24(query());
+  assert.equal(history.observations.length, 1);
+  assert.equal(history.observations[0].confirmedAircraftId, confirmed.confirmedAircraftId);
+  assert.deepEqual(history.observations[0].identityEvidence, confirmed.identityEvidence);
+  assert.equal((await pools.runtime.query('SELECT * FROM tracking.position_observations')).rowCount, 1);
+  assert.equal((await pools.runtime.query('SELECT * FROM tracking.position_observation_outbox')).rowCount, 1);
+});
+
 test('concurrent first writes and restart retries create one immutable fact and event', async () => {
   const writer = postgresPositionHistoryWriter(pools.runtime);
   const results = await Promise.all(Array.from({ length: 6 }, () => writer.append(fact('race',
