@@ -66,11 +66,16 @@ for (const acrossSamples of [false, true]) {
             const query = scroller.querySelectorAll.bind(scroller);
             scroller.querySelectorAll = selector => {
               window.sampleCount++;
-              ${acrossSamples ? `queueMicrotask(() => { document.querySelector('dl').innerHTML = ${JSON.stringify(reordered)}; });` : ''}
               return query(selector);
             };
           </script>` }));
-        const result = await observePage(page, 'ABC123', acrossSamples ? 1500 : 0);
+        const observation = observePage(page, 'ABC123', acrossSamples ? 1500 : 0);
+        if (acrossSamples) {
+          // A separate browser task runs only after the first synchronous card read.
+          await page.waitForFunction(() => window.sampleCount >= 1, null, { polling: 10 });
+          await page.evaluate(value => { document.querySelector('dl').innerHTML = value; }, reordered);
+        }
+        const result = await observation;
         const sampleCount = await page.evaluate(() => window.sampleCount);
         assert.ok(acrossSamples ? sampleCount >= 2 : sampleCount === 1);
         assert.equal(result.status, changedValue ? 'PARTIAL_LAYOUT' : 'OBSERVED');
