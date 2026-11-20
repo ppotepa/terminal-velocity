@@ -108,7 +108,7 @@ test('cross-source and cross-issuer corrections cannot retire another owner clai
   await assert.rejects(() => pools.runtime.query(`INSERT INTO fleet_identity.assertions
     (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision,supersedes_id)
     VALUES ('ac_b','ICAO24','A0B1C2',0,'other-source','test',2,$1)`, [first.assertionId]),
-  error => error.code === '23514');
+  error => error.code === '42501');
   await commit.append(competing);
   const resolve = createResolveAircraft(postgresIdentityReader(pools.runtime));
   assert.deepEqual(await resolve([hex('A0B1C2')], 1),
@@ -116,6 +116,55 @@ test('cross-source and cross-issuer corrections cannot retire another owner clai
   const prior = (await postgresIdentityReader(pools.runtime).history('ac_a'))[0];
   assert.equal(prior.supersededAt, null);
   assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.assertions')).rows[0].n, '2');
+});
+
+test('restricted runtime writes cannot bypass registry revision and correction replay', async () => {
+  const commit = postgresIdentityCommitter(pools.runtime);
+  await commit.createAircraft('ac_guarded');
+  for (const sql of [
+    `INSERT INTO fleet_identity.assertions
+      (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
+      VALUES ('ac_guarded','ICAO24','A0B1C2',0,'synthetic','test',1)`,
+    'UPDATE fleet_identity.registry_state SET revision=1 WHERE singleton',
+    `INSERT INTO fleet_identity.replay_expansions
+      (assertion_id,aircraft_id,valid_from_ms) VALUES (1,'ac_guarded',0)`,
+  ]) await assert.rejects(() => pools.runtime.query(sql), error => error.code === '42501');
+  assert.equal((await pools.runtime.query('SELECT revision FROM fleet_identity.registry_state')).rows[0].revision, '0');
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.assertions')).rows[0].n, '0');
+  const first = await commit.append(claim('ac_guarded', hex('A0B1C2'), 0));
+  assert.equal(first.revision, 1);
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.replay_requests')).rows[0].n, '1');
+  assert.equal((await pools.runtime.query('SELECT count(*) AS n FROM fleet_identity.replay_expansions')).rows[0].n, '1');
+});
+
+test('more than 1,000 active assertions produce a complete registry decision', async () => {
+  await postgresIdentityCommitter(pools.runtime).createAircraft('ac_populated');
+  await pools.admin.query(`INSERT INTO fleet_identity.assertions
+    (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
+    SELECT 'ac_populated','ICAO24','A0B1C2',0,'synthetic','test',n
+    FROM generate_series(1,1201) AS n`);
+  await pools.admin.query('UPDATE fleet_identity.registry_state SET revision=1201 WHERE singleton');
+  const reader = postgresIdentityReader(pools.runtime);
+  const snapshot = await reader.find([hex('A0B1C2')], 1);
+  assert.equal(snapshot.completeness, 'COMPLETE');
+  assert.equal(snapshot.assertions.length, 1201);
+  assert.deepEqual(await createResolveAircraft(reader)([hex('A0B1C2')], 1),
+    { status: 'MATCHED', aircraftId: 'ac_populated', revision: 1201 });
+  const candidates = await createRegistryCandidateDirectory(reader).find({
+    messageId: 'msg_populated', effectiveAt: 1, identifiers: [hex('A0B1C2')], callsign: null });
+  assert.equal(candidates.completeness, 'COMPLETE');
+  assert.equal(candidates.candidates.length, 1);
+  let pages = 0;
+  const changingReader = postgresIdentityReader({ async query(sql, parameters) {
+    const result = await pools.runtime.query(sql, parameters);
+    if (++pages === 1)
+      await pools.admin.query('UPDATE fleet_identity.registry_state SET revision=revision+1 WHERE singleton');
+    return result;
+  } });
+  const changed = await changingReader.find([hex('A0B1C2')], 1);
+  assert.ok(pages > 1);
+  assert.equal(changed.completeness, 'PARTIAL');
+  assert.deepEqual(changed.assertions, []);
 });
 
 test('registry resolution rejects an unowned registration that contradicts the ICAO owner', async () => {
@@ -155,11 +204,11 @@ test('concurrent corrections have one successor and failed transactions leave no
 
 test('large registry append stays bounded and expansion resumes after a failed page', async () => {
   await pools.runtime.query("INSERT INTO fleet_identity.aircraft (aircraft_id) VALUES ('ac_large')");
-  await pools.runtime.query(`INSERT INTO fleet_identity.assertions
+  await pools.admin.query(`INSERT INTO fleet_identity.assertions
     (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
     SELECT 'ac_large','REGISTRATION','N'||lpad(n::text,5,'0'),0,'synthetic','test',n
     FROM generate_series(1,250) n`);
-  await pools.runtime.query('UPDATE fleet_identity.registry_state SET revision=250 WHERE singleton');
+  await pools.admin.query('UPDATE fleet_identity.registry_state SET revision=250 WHERE singleton');
   const commit = postgresIdentityCommitter(pools.runtime);
   const assertion = await commit.append(claim('ac_large', hex('A0B1C2'), 0));
   assert.equal(assertion.revision, 251);

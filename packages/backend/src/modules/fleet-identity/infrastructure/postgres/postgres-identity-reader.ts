@@ -25,7 +25,14 @@ export function postgresIdentityReader(pool: SqlExecutor): IdentityReader {
     const aliasPredicate = identifiers.length ? identifiers.map((_, index) =>
       `(a.kind=$${index * 2 + 1} AND a.normalized_alias=$${index * 2 + 2})`).join(' OR ') : 'false';
     const observedParameter = identifiers.length * 2 + 1;
-    const result = await pool.query<AssertionRow>(`
+    const parameters = [...identifiers.flatMap(item => [item.kind, item.value]), observedAt];
+    const assertions: IdentityAssertion[] = [];
+    let cursor = 0;
+    let revision: number | undefined;
+    // Keyset pages bound each read while allowing a complete decision for an
+    // owner with arbitrarily many simultaneously valid historical claims.
+    for (;;) {
+      const result = await pool.query<AssertionRow>(`
       WITH owners AS (
         SELECT DISTINCT a.aircraft_id FROM fleet_identity.assertions a
         WHERE (${aliasPredicate})
@@ -40,15 +47,21 @@ export function postgresIdentityReader(pool: SqlExecutor): IdentityReader {
         LEFT JOIN fleet_identity.assertions successor ON successor.supersedes_id=assertion.assertion_id
         WHERE successor.assertion_id IS NULL
           AND assertion.aircraft_id IN (SELECT aircraft_id FROM owners)
+          AND assertion.assertion_id > $${observedParameter + 1}
           AND assertion.valid_from_ms <= $${observedParameter}
           AND (assertion.valid_until_ms IS NULL OR $${observedParameter} < assertion.valid_until_ms)
-        ORDER BY assertion.assertion_id LIMIT 1001) a ON true WHERE state.singleton`,
-    [...identifiers.flatMap(item => [item.kind, item.value]), observedAt]);
-    const revision = Number(result.rows[0]?.registry_revision);
-    if (!Number.isSafeInteger(revision)) throw new Error('Invalid registry revision.');
-    const nonempty = result.rows.filter(row => row.assertion_id !== null);
-    const assertions = nonempty.slice(0, 1000).map(decode);
-    return { revision, assertions, completeness: nonempty.length > 1000 ? 'PARTIAL' : 'COMPLETE' };
+        ORDER BY assertion.assertion_id LIMIT 500) a ON true WHERE state.singleton`,
+      [...parameters, cursor]);
+      const pageRevision = Number(result.rows[0]?.registry_revision);
+      if (!Number.isSafeInteger(pageRevision)) throw new Error('Invalid registry revision.');
+      if (revision !== undefined && revision !== pageRevision)
+        return { revision: pageRevision, assertions: [], completeness: 'PARTIAL' };
+      revision = pageRevision;
+      const page = result.rows.filter(row => row.assertion_id !== null);
+      assertions.push(...page.map(decode));
+      if (page.length < 500) return { revision, assertions, completeness: 'COMPLETE' };
+      cursor = Number(page.at(-1)!.assertion_id);
+    }
   }, async history(aircraftId, afterAssertionId = 0, limit = 100) {
     if (!Number.isSafeInteger(afterAssertionId) || afterAssertionId < 0)
       throw new RangeError('Invalid history cursor.');
