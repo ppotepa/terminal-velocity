@@ -146,7 +146,7 @@ test('private HTTP track reads only actual linked PostgreSQL observations with a
   const now = Date.parse('2026-11-20T12:00:00.000Z');
   const writer = postgresPositionHistoryWriter(pools.runtime);
   const linker = postgresPositionLinker(pools.runtime);
-  for (const [id, offset, latitude] of [['one', -700_000, 51], ['two', -100_000, 52]]) {
+  for (const [id, offset, latitude] of [['one', -800_000, 51], ['two', -100_000, 52]]) {
     const sourceObservationId = `epoch:synthetic-1:http-${id}`;
     const fact = { schemaVersion: 1, sourceId: 'src_synthetic', sourceObservationId,
       observedAt: new Date(now + offset).toISOString(), observedAtBasis: 'SOURCE_TIMESTAMP',
@@ -160,7 +160,7 @@ test('private HTTP track reads only actual linked PostgreSQL observations with a
   for (let n = 0; n < 10; n++) if (await project() === null) break;
   const api = await launch(t);
   const track = await request(api.base,
-    `/api/v1/internal/aircraft/ac_http-track/observed-track?from=${now - 800_000}&to=${now}&zoom=5`);
+    `/api/v1/internal/aircraft/ac_http-track/observed-track?from=${now - 900_000}&to=${now}&zoom=5`);
   assert.equal(track.status, 200);
   assert.equal(track.body.data.observedCount, 2);
   assert.deepEqual(track.body.data.segments.map(segment => segment.breakBefore), [null, 'TIME_GAP']);
