@@ -2,9 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { SqlPool } from '../../../../contracts/database/index.ts';
 import { runSqlTransaction } from '../../../database-transactions/public/index.ts';
 import { parsePositionObservation } from '../../domain/position-observation.ts';
+import { isDurableSourceObservationId } from '../../domain/position-identifiers.ts';
 import type { PositionHistoryWriter } from '../../ports/position-history-writer.ts';
 
-/** The source's stable observation key is the delivery retry boundary. */
+/** Durable keys include a source epoch and a genuine measurement ID. Preview snapshot keys are ineligible. */
 export function postgresPositionHistoryWriter(pool: SqlPool,
   nextEventId: () => string = () => `evt_${randomUUID()}`): PositionHistoryWriter {
   return {
@@ -12,6 +13,8 @@ export function postgresPositionHistoryWriter(pool: SqlPool,
       const parsed = parsePositionObservation(input);
       if (!parsed.ok) return { ok: false, error: { code: 'INVALID_POSITION_OBSERVATION', error: parsed.error } };
       const observation = parsed.value;
+      if (!isDurableSourceObservationId(observation.sourceObservationId))
+        return { ok: false, error: { code: 'UNSTABLE_SOURCE_OBSERVATION_ID' } };
       return runSqlTransaction(pool, async sql => {
         const fact = JSON.stringify(observation);
         const inserted = await sql.query(`INSERT INTO tracking.position_observations
@@ -25,15 +28,19 @@ export function postgresPositionHistoryWriter(pool: SqlPool,
           observation.latitude, observation.longitude, fact, randomUUID(),
           observation.quality ? JSON.stringify(observation.quality) : null]);
         if (inserted.rowCount === 0) {
-          const previous = await sql.query<{ matches: boolean; event_id: string }>(`
-            SELECT p.fact = $3::jsonb AS matches,o.event_id FROM tracking.position_observations p
+          const previous = await sql.query<{ matches: boolean; event_id: string; fact: unknown }>(`
+            SELECT p.fact - 'ingestedAt' - 'sourceDeliveryRef' =
+              $3::jsonb - 'ingestedAt' - 'sourceDeliveryRef' AS matches,
+              o.event_id,p.fact FROM tracking.position_observations p
             JOIN tracking.position_observation_outbox o USING (source_id,source_observation_id)
             WHERE p.source_id=$1 AND p.source_observation_id=$2`,
           [observation.sourceId, observation.sourceObservationId, fact]);
           if (previous.rows.length !== 1 || !previous.rows[0]?.matches)
             return { ok: false, error: { code: 'SOURCE_OBSERVATION_CONFLICT' } };
+          const stored = parsePositionObservation(previous.rows[0]!.fact);
+          if (!stored.ok) throw new Error('Stored position fact failed validation.');
           return { ok: true, value: { status: 'ALREADY_PRESENT',
-            eventId: previous.rows[0]!.event_id, observation } };
+            eventId: previous.rows[0]!.event_id, observation: stored.value } };
         }
         const eventId = nextEventId();
         await sql.query(`INSERT INTO tracking.position_observation_outbox

@@ -118,7 +118,8 @@ export const adsbLolPositionAdapter: PositionAdapter<unknown, AdsbLolAircraftCon
     const observation = {
       schemaVersion: 1,
       sourceId: context.sourceId,
-      sourceObservationId: `adsb-lol:v2:${context.snapshotNowMs}:${hex}`,
+      // The snapshot has no provider measurement ID. This preview key is never eligible for durable append.
+      sourceObservationId: `preview:adsb-lol:v2:${context.snapshotNowMs}:${hex}`,
       observedAt,
       observedAtBasis: 'SOURCE_AGE_FROM_REFERENCE',
       sourceTimeReferenceAt: referenceAt,

@@ -362,3 +362,26 @@ authoring shell, Node 24 offline `npm ci`, type checking, architecture checks,
 the focused position contract/history tests, and `git diff --check` passed.
 `npm run check` stopped at the existing private-preview loopback test;
 `npm run test:postgres:local` could not start because `initdb` refuses root.
+
+### S4-03 source identity review follow-up (2026-11-20)
+
+Merged predecessor #15 is present on main at `e1a5f33` (PR #57). Issue #16
+remains in review, with no merge or issue closure claimed here. Coordinator
+isolated CI passed the prior exact head, then requested a stronger source-fact
+identity contract. The writer now requires a source-scoped key with an explicit
+epoch and genuine measurement ID. The adsb.lol snapshot has no such provider ID;
+its `preview:` key cannot be durably appended. Replays compare measurement
+fields while allowing a later ingestion time or delivery reference, return the
+first stored receipt and event ID, and leave row and outbox counts unchanged.
+Synthetic PostgreSQL regressions cover this replay with a later fetch, reused
+IDs across epochs, and independent facts with the same coordinates or time.
+These changes do not establish real-source rights or actual provider identity
+guarantees. Migration 007 remains additive and unchanged; there is no destructive
+down migration. Local checks for this follow-up are recorded below.
+
+In this authoring shell, Node 24.22.3 type checking, architecture boundaries,
+the focused source/position suites, and `git diff --check` passed. `npm run check`
+reached the existing private-preview loopback test and failed in this sandbox;
+the focused tests passed. `npm run test:postgres:local` stopped before database
+startup because `initdb` refuses root. The new PostgreSQL replay and identity
+assertions need coordinator exact-SHA CI in its unprivileged isolated checkout.

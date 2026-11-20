@@ -3,6 +3,7 @@ import type { PositionObservation, PositionParseError } from '../domain/position
 
 export type PositionObservationAppendError =
   | { readonly code: 'INVALID_POSITION_OBSERVATION'; readonly error: PositionParseError }
+  | { readonly code: 'UNSTABLE_SOURCE_OBSERVATION_ID' }
   | { readonly code: 'SOURCE_OBSERVATION_CONFLICT' };
 
 export interface PositionObservationAppendResult {

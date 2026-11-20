@@ -22,7 +22,7 @@ Select a source for which access and permitted usage are established. The adapte
 
 ## Stage 4 — positions and map reads
 
-**Status: position-contract implementation is under review in #14; source transport, storage, map reads and UI follow in later issues.**
+**Status: #14 position contracts and #15 private source preview are merged. #16 private synthetic position history is in review; map reads and UI follow in later issues.** The adsb.lol snapshot has no stable provider measurement ID, so its preview output is not eligible for durable append. Real-source retention remains subject to a separate rights decision.
 
 A separate position adapter, observations with timestamps and provenance, stable aircraft identity, and a map read model. The first map version may fetch a coherent snapshot over HTTP. Flight history and position freshness do not depend on the presence of radio messages. The frontend keeps the agreed minimal design: map, list, details, and clear statuses.
 

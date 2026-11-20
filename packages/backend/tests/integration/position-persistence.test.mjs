@@ -14,7 +14,7 @@ const pools = createTestPools();
 beforeEach(() => resetTestData(pools.admin));
 after(() => pools.close());
 const fact = (id, overrides = {}) => ({
-  schemaVersion: 1, sourceId: 'src_synthetic-a', sourceObservationId: id,
+  schemaVersion: 1, sourceId: 'src_synthetic-a', sourceObservationId: `epoch:synthetic-1:${id}`,
   sourceDeliveryRef: `delivery:${id}`,
   observedAt: '2026-11-19T11:00:00Z', observedAtBasis: 'SOURCE_TIMESTAMP',
   ingestedAt: '2026-11-19T11:00:01Z', timestampPrecision: 'SECOND',
@@ -38,6 +38,13 @@ test('concurrent first writes and restart retries create one immutable fact and 
     { env: { ...process.env, TV_SYNTHETIC_POSITION: JSON.stringify(fact('race',
       { quality: { nic: 8, containmentRadiusMeters: null } })) } });
   assert.equal(JSON.parse(restarted.stdout).value.status, 'ALREADY_PRESENT');
+  const laterReceipt = await writer.append(fact('race', {
+    ingestedAt: '2026-11-19T11:05:00Z', sourceDeliveryRef: 'delivery:retry',
+    quality: { nic: 8, containmentRadiusMeters: null },
+  }));
+  assert.equal(laterReceipt.value.status, 'ALREADY_PRESENT');
+  assert.equal(laterReceipt.value.observation.ingestedAt, '2026-11-19T11:00:01.000Z');
+  assert.equal(laterReceipt.value.observation.sourceDeliveryRef, 'delivery:race');
   assert.equal((await pools.runtime.query('SELECT * FROM tracking.position_observations')).rowCount, 1);
   assert.equal((await pools.runtime.query('SELECT * FROM tracking.position_observation_outbox')).rowCount, 1);
   assert.deepEqual((await writer.append(fact('race', { latitude: 51.6 }))).error,
@@ -53,19 +60,25 @@ test('independent sources, reordered time, bounded keyset history and antimeridi
     fact('later', { observedAt: '2026-11-19T11:00:02Z' }),
     fact('earlier', { observedAt: '2026-11-19T10:59:59Z' }),
     fact('same-coords-other-source', { sourceId: 'src_synthetic-b', longitude: -179.9 }),
+    fact('same-coords-new-measurement'),
+    fact('same-source-new-epoch', { sourceObservationId: 'epoch:synthetic-2:later' }),
   ]) assert.equal((await writer.append(item)).ok, true);
   const reader = postgresPositionHistoryReader(pools.runtime);
   const first = await reader.byIcao24(query());
-  assert.deepEqual(first.observations.map(item => item.sourceObservationId), ['earlier', 'same-coords-other-source']);
+  assert.deepEqual(first.observations.map(item => item.sourceObservationId),
+    ['epoch:synthetic-1:earlier', 'epoch:synthetic-1:same-coords-new-measurement']);
   assert.ok(first.next);
   const second = await reader.byIcao24(query({ after: first.next }));
-  assert.deepEqual(second.observations.map(item => item.sourceObservationId), ['later']);
-  assert.equal(second.next, null);
+  assert.deepEqual(second.observations.map(item => item.sourceObservationId),
+    ['epoch:synthetic-2:later', 'epoch:synthetic-1:same-coords-other-source']);
+  const third = await reader.byIcao24(query({ after: second.next }));
+  assert.deepEqual(third.observations.map(item => item.sourceObservationId), ['epoch:synthetic-1:later']);
+  assert.equal(third.next, null);
   const bounds = positionHistoryWithinBoundsQuery({
     bounds: { west: 179, east: -179, south: 50, north: 52 },
     fromObservedAtMs: query().fromObservedAtMs, toObservedAtMs: query().toObservedAtMs, limit: 10,
   }).value;
-  assert.equal((await reader.withinBounds(bounds)).observations.length, 3);
+  assert.equal((await reader.withinBounds(bounds)).observations.length, 5);
   assert.equal((await reader.withinBounds(positionHistoryWithinBoundsQuery({
     fromObservedAtMs: query().fromObservedAtMs, toObservedAtMs: query().toObservedAtMs,
     limit: 10, bounds: { west: -10, east: 10, south: 50, north: 52 },
@@ -74,6 +87,8 @@ test('independent sources, reordered time, bounded keyset history and antimeridi
 
 test('invalid data and outbox failure leave no partial position history', async () => {
   const writer = postgresPositionHistoryWriter(pools.runtime, () => 'invalid-event-id');
+  assert.deepEqual((await writer.append(fact('preview', { sourceObservationId: 'preview:snapshot:aircraft' }))).error,
+    { code: 'UNSTABLE_SOURCE_OBSERVATION_ID' });
   assert.equal((await writer.append(fact('invalid', { longitude: 180.01 }))).ok, false);
   await assert.rejects(() => writer.append(fact('outbox-failure')), error => error.code === '23514');
   assert.equal((await pools.runtime.query('SELECT * FROM tracking.position_observations')).rowCount, 0);

@@ -111,6 +111,7 @@ test('synthetic provider fixture maps ADS-B, MLAT, source age, optional fields a
   });
 
   const [adsb, mlat, other] = parsed.value.observations;
+  assert.match(adsb.sourceObservationId, /^preview:adsb-lol:v2:/);
   assert.equal(adsb.measurementKind, 'ADS_B');
   assert.equal(adsb.latitude, 52.52);
   assert.equal(adsb.longitude, 13.405);

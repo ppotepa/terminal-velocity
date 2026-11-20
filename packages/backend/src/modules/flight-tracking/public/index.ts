@@ -4,7 +4,7 @@ export {
   type PositionIdentityEvidence, type PositionParseError,
 } from '../domain/position-observation.ts';
 export {
-  positionSourceId, sourceObservationId,
+  positionSourceId, sourceObservationId, isDurableSourceObservationId,
   type PositionSourceId, type SourceObservationId, type InvalidPositionIdentifier,
 } from '../domain/position-identifiers.ts';
 export {

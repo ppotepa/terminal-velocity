@@ -19,7 +19,7 @@ Each observation requires:
 |---|---|
 | `schemaVersion` | Canonical schema version, currently `1`. |
 | `sourceId` | Application-assigned `src_…` source configuration ID. |
-| `sourceObservationId` | Opaque source observation ID, scoped by `sourceId`; never derive it from coordinates or rounded time. |
+| `sourceObservationId` | Opaque source observation ID, scoped by `sourceId`; never derive a durable key from coordinates or rounded time. Preview adapters may use explicitly ineligible keys. |
 | `observedAt` | Provider/receiver event time, strict UTC, normalized to milliseconds. |
 | `observedAtBasis` | `SOURCE_TIMESTAMP`, `SOURCE_AGE_FROM_REFERENCE`, or `RECEIVER_TIMESTAMP`; makes derived source time explicit. |
 | `sourceTimeReferenceAt` / `sourceAgeSeconds` | Required together only for `SOURCE_AGE_FROM_REFERENCE`. Preserve the provider reference time and age used to derive `observedAt = reference - age`; the parser validates that relation and rejects a reference later than ingestion plus declared clock uncertainty. |
@@ -181,3 +181,27 @@ serves the latest canonical batch at `/positions` in memory. It does not start
 with the demo API or messages command. A later issue owns persistence and
 publication controls. The provider's geographic circle is checked for every
 positioned row; an out-of-query-area row rejects the snapshot.
+
+## Durable source-fact identity for issue #16
+
+The private PostgreSQL writer accepts only IDs of the form
+`epoch:<source-epoch>:<measurement-id>`. The source epoch must change whenever
+the upstream namespace can reuse measurement IDs, including a receiver reset or
+provider ID rollover. The final component must identify one genuine measurement
+within that epoch. The application source ID scopes the whole key. A connector
+must document where both components come from and establish that retries of the
+same measurement carry the same key before it is connected to this writer.
+Coordinates, ICAO24, an aircraft snapshot timestamp, and fetch time do not
+establish measurement identity. Independent facts with identical coordinates or
+timestamps need distinct measurement IDs. The current adsb.lol v2 snapshot
+exposes no suitable measurement ID; its `preview:` keys are deliberately rejected
+by the durable writer. It remains an in-memory preview only. Synthetic tests
+use explicit epoch and measurement IDs without asserting that adsb.lol provides
+this guarantee.
+
+On a repeated key, the writer compares measurement facts and returns the first
+stored observation and event ID. A later `ingestedAt` or delivery reference is
+retry metadata and does not change the stored receipt or emit a second event.
+Changed coordinates, event time, quality, source evidence, identity hints or
+other measurement fields produce `SOURCE_OBSERVATION_CONFLICT`. This comparison
+does not turn a provider's unstable snapshot key into a genuine measurement ID.
