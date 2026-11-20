@@ -135,7 +135,7 @@ export function createIdentityReplayWorker(pool: SqlPool, now: () => number = Da
         if (snapshot.completeness !== 'COMPLETE') {
           await sql.query(`UPDATE fleet_identity.replay_requests
             SET phase='BLOCKED',blocked_revision=$2 WHERE request_id=$1`,
-          [request.request_id, snapshot.revision]);
+          [request.request_id, snapshot.registryRevision]);
           return { requestId: Number(request.request_id), processed: 0, complete: false };
         }
         if (previous?.directoryRevision === snapshot.revision) continue;

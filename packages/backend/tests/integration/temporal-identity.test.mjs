@@ -208,10 +208,10 @@ test('duplicate active claims stay bounded and resolve completely after 2,000 as
 });
 
 test('distinct active aliases retain the conflict veto with bounded evidence', async () => {
-  await postgresIdentityCommitter(pools.runtime).createAircraft('ac_many_aliases');
+  await postgresIdentityCommitter(pools.runtime).createAircraft('ac_many-aliases');
   await pools.admin.query(`INSERT INTO fleet_identity.assertions
     (aircraft_id,kind,normalized_alias,valid_from_ms,source_id,issuer,revision)
-    SELECT 'ac_many_aliases','ICAO24',upper(lpad(to_hex(n),6,'0')),0,'synthetic','test',n
+    SELECT 'ac_many-aliases','ICAO24',upper(lpad(to_hex(n),6,'0')),0,'synthetic','test',n
     FROM generate_series(1,2501) AS n`);
   await pools.admin.query('UPDATE fleet_identity.registry_state SET revision=2501 WHERE singleton');
   const reader = postgresIdentityReader(pools.runtime);
@@ -242,9 +242,6 @@ test('an oversized owner set blocks only its replay request and resumes after co
     SELECT 'ac_bulk-'||lpad(n::text,4,'0'),'ICAO24','D00001',0,'synthetic','test',n+1
     FROM generate_series(1,2000) n`);
   await pools.admin.query('UPDATE fleet_identity.registry_state SET revision=2001 WHERE singleton');
-  await pools.admin.query(`INSERT INTO fleet_identity.replay_requests
-    (assertion_id,kind,normalized_alias,valid_from_ms,phase)
-    VALUES ($1,'ICAO24','D00001',0,'MESSAGES')`, [original.assertionId]);
   await pools.admin.query(`INSERT INTO fleet_identity.replay_requests
     (assertion_id,kind,normalized_alias,valid_from_ms,phase)
     VALUES ($1,'ICAO24','FFFFFF',0,'MESSAGES')`, [original.assertionId]);

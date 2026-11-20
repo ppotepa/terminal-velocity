@@ -77,12 +77,15 @@ test('registry candidate adapter preserves partial snapshots and correlation vet
   const partial = createRegistryCandidateDirectory({ async find() {
     return { revision: 2, assertions: assertions.slice(0, 1), completeness: 'PARTIAL' };
   } });
-  assert.equal((await partial.find(input)).completeness, 'PARTIAL');
+  const partialSnapshot = await partial.find(input);
+  assert.equal(partialSnapshot.completeness, 'PARTIAL');
+  assert.equal(partialSnapshot.registryRevision, 2);
   const full = createRegistryCandidateDirectory({ async find() {
     return { revision: 2, assertions, completeness: 'COMPLETE' };
   } });
   const snapshot = await full.find(input);
   assert.equal(snapshot.revision, 'fleet/2');
+  assert.equal(snapshot.registryRevision, 2);
   assert.equal(decideAircraftMatch(input, snapshot.candidates).status, 'AMBIGUOUS');
   const failed = createRegistryCandidateDirectory({ async find() { throw new Error('lookup failed'); } });
   await assert.rejects(() => failed.find(input), /lookup failed/);
