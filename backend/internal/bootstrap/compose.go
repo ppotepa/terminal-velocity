@@ -92,7 +92,7 @@ func Compose(ctx context.Context, db *driver.Database, syntheticMode ...bool) (C
 		jobs = append(jobs, scheduler.Run)
 	}
 	return Composition{Endpoints: transport.Endpoints{
-		WatchRules: watchhttp.NewHandler(watchService, nil),
+		WatchRules: publishWatchlistChanges(watchhttp.NewHandler(watchService, nil), hub),
 		Aircraft:   aircrafthttp.NewHandler(aircraftReader{tracking: trackingService, rules: watchService}),
 		Decoders:   decoderhttp.NewHandler(decoderReader{service: decoderService, configs: decoderRepo, registry: registry}),
 		Messages:   messagehttp.NewHandler(messageReader{messages: messageService, decoders: decoderService, rules: watchService}),
@@ -106,9 +106,9 @@ type staticSourceHealth struct{ synthetic bool }
 
 func (static staticSourceHealth) ListSourceHealth(context.Context) ([]sourcehttp.Health, error) {
 	rows := []sourcehttp.Health{
-		{ID: "opensky", Status: "inactive", Freshness: "unknown", Enabled: false},
-		{ID: "airframes-crawler", Status: "inactive", Freshness: "unknown", Enabled: false},
-		{ID: "airframes-api", Status: "inactive", Freshness: "unknown", Enabled: false},
+		{ID: "opensky", Status: "blocked", Freshness: "unknown", Enabled: false},
+		{ID: "airframes-crawler", Status: "blocked", Freshness: "unknown", Enabled: false},
+		{ID: "airframes-api", Status: "not_configured", Freshness: "unknown", Enabled: false},
 	}
 	if static.synthetic {
 		rows = append(rows, sourcehttp.Health{ID: "synthetic-fixture", Status: "synthetic", Freshness: "unknown", Enabled: true})

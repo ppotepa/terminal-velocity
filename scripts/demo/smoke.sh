@@ -16,7 +16,7 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 curl -fsS "$health" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"] == "ok" and d["dependencies"]["mongo"] == "ok"'
-curl -fsS "$base/sources" | python3 -c 'import json,sys; rows=json.load(sys.stdin); assert any(x["id"] == "synthetic-fixture" and x["enabled"] for x in rows) and all(not x["enabled"] for x in rows if x["id"] != "synthetic-fixture")'
+curl -fsS "$base/sources" | python3 -c 'import json,sys; rows={x["id"]:x for x in json.load(sys.stdin)}; assert rows["synthetic-fixture"]["enabled"] and rows["opensky"]["status"] == "blocked" and rows["airframes-crawler"]["status"] == "blocked" and rows["airframes-api"]["status"] == "not_configured" and all(not x["enabled"] for k,x in rows.items() if k != "synthetic-fixture")'
 curl -fsS -N "$base/events" >"$stream_file" 2>/dev/null &
 stream_pid=$!
 alert_rule=$(curl -fsS -D "$alert_headers" -X POST "$base/alert-rules" -H 'Content-Type: application/json' --data '{"name":"Temporary smoke alert","enabled":true,"condition":"country_entered","cooldownSeconds":30,"includeBackfill":false,"parameters":{"countryCode":"FR"}}')
@@ -42,7 +42,7 @@ curl -fsS -X POST "$base/alert-events/$alert_event_id/acknowledge" >/dev/null
 kill "$stream_pid" >/dev/null 2>&1 || true
 wait "$stream_pid" 2>/dev/null || true
 stream_pid=0
-python3 -c 'import sys; s=open(sys.argv[1]).read(); assert all(x in s for x in ("event: position_updated", "event: message_observed", "event: message_decoded", "event: alert_triggered"))' "$stream_file"
+python3 -c 'import sys; s=open(sys.argv[1]).read(); assert all(x in s for x in ("event: position_updated", "event: message_observed", "event: message_decoded", "event: alert_triggered", "event: watchlist_changed"))' "$stream_file"
 curl -fsS -X POST "$base/decoders/acars-basic/preview" -H 'Content-Type: application/json' --data '{"payload":"Q0 UAL52 MESSAGE: SYNTHETIC TEST","protocol":"acars","bearer":"vhf"}' | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["status"] == "decoded" and any(x["name"] == "flight_number" for x in d["fields"])'
 stream=$(curl -fsS --max-time 2 -N -H 'Last-Event-ID: cursor-999999' "$base/events" 2>/dev/null || true)
 printf '%s' "$stream" | python3 -c 'import sys; s=sys.stdin.read(); assert "event: snapshot_required" in s and "cursor_expired" in s'
