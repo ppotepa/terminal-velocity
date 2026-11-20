@@ -165,3 +165,16 @@ changes when that limit is exceeded. These tables contain private derived positi
 data. No real source data or public map endpoint is authorized by the migration.
 Application rollback must retain these tables and queued history; schema changes
 require a forward migration.
+
+## Migration 017 — observed-track paging checkpoint
+
+`017_observed_track_checkpoint.sql` adds a monotonic revision to the private
+current-position projection state and a `(aircraft, observed time, source, fact)`
+index for bounded track pages. The projection worker and bounded rebuild advance
+that revision in the same transaction as candidate changes. A track page holds a
+shared lock on the state while reading candidate facts. Its cursor carries the
+revision, aircraft, time window and final observed fact key; a later page returns
+`STALE_OBSERVED_TRACK_CURSOR` if projection changed, so pages cannot silently
+mix versions. No immutable observation or link history is rewritten. The index
+uses `C` collation for the source key. Application rollback must retain the
+revision and index; a schema correction requires a forward migration.
