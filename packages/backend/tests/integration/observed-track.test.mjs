@@ -52,6 +52,8 @@ test('paged observed track preserves facts, wrap/gap reasons and page continuati
   assert.deepEqual(first.segments.flatMap(segment => segment.points.map(point => point.sourceObservationId)),
     [key('one'), key('two')]);
   assert.equal(first.segments[0].points[0].quality.nacP, 9);
+  assert.equal(first.segments[0].points[0].observedAtBasis, 'SOURCE_TIMESTAMP');
+  assert.equal(first.segments[0].points[0].ingestedAtMs, noon);
   assert.deepEqual(await reader.read(query()), first);
   const second = await reader.read(query({ after: first.next }));
   assert.equal(second.hasMore, false);

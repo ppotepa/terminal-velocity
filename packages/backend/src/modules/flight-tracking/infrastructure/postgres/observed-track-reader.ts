@@ -21,6 +21,7 @@ function point(row: TrackRow): ObservedTrackPoint {
     throw new Error('Stored track row and fact disagree.');
   return { observationId: row.observation_id, sourceId: fact.sourceId,
     sourceObservationId: row.source_observation_id, observedAtMs: Number(row.observed_at_ms),
+    observedAtBasis: fact.observedAtBasis, ingestedAtMs: Date.parse(fact.ingestedAt),
     latitude: fact.latitude, longitude: fact.longitude,
     measurementKind: fact.measurementKind, quality: fact.quality ?? null,
     timestampPrecision: fact.timestampPrecision,

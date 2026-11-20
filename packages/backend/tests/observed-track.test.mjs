@@ -7,7 +7,8 @@ import {
 const point = (number, observedAtMs, latitude, longitude) => ({
   observationId: `00000000-0000-0000-0000-${String(number).padStart(12, '0')}`,
   sourceId: 'src_synthetic', sourceObservationId: `epoch:test:${number}`,
-  observedAtMs, latitude, longitude, measurementKind: 'ADS_B', quality: { nic: 8 },
+  observedAtMs, observedAtBasis: 'SOURCE_TIMESTAMP', ingestedAtMs: 2_000_000,
+  latitude, longitude, measurementKind: 'ADS_B', quality: { nic: 8 },
   timestampPrecision: 'SECOND', timestampUncertaintyMs: 0,
 });
 

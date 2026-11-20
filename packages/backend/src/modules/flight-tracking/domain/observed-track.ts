@@ -1,6 +1,6 @@
 import type { PositionMeasurementKind } from './position-measurement.ts';
 import type { PositionQuality } from './position-quality.ts';
-import type { PositionTimePrecision } from './position-time.ts';
+import type { PositionObservedAtBasis, PositionTimePrecision } from './position-time.ts';
 import type { PositionSourceId } from './position-identifiers.ts';
 
 export interface ObservedTrackPoint {
@@ -8,6 +8,8 @@ export interface ObservedTrackPoint {
   readonly sourceId: PositionSourceId;
   readonly sourceObservationId: string;
   readonly observedAtMs: number;
+  readonly observedAtBasis: PositionObservedAtBasis;
+  readonly ingestedAtMs: number;
   readonly latitude: number;
   readonly longitude: number;
   readonly measurementKind: PositionMeasurementKind;
@@ -37,6 +39,8 @@ export const DEFAULT_TRACK_GAP_POLICY: TrackGapPolicy = Object.freeze({
 
 function validatePoint(point: ObservedTrackPoint): void {
   if (!Number.isSafeInteger(point.observedAtMs) || point.observedAtMs < 0
+    || !Number.isSafeInteger(point.ingestedAtMs) || point.ingestedAtMs < 0
+    || !['SOURCE_TIMESTAMP', 'SOURCE_AGE_FROM_REFERENCE', 'RECEIVER_TIMESTAMP'].includes(point.observedAtBasis)
     || !Number.isFinite(point.latitude) || Math.abs(point.latitude) > 90
     || !Number.isFinite(point.longitude) || Math.abs(point.longitude) > 180
     || !point.sourceId || !point.sourceObservationId || !point.observationId)

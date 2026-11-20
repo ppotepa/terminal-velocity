@@ -9,7 +9,8 @@ later pages reject stale cursors after any projection change. It returns source,
 measurement, time precision, uncertainty and quality evidence with each point.
 Pure rules split excessive time gaps, conflicting same-time points, implausible
 jumps and antimeridian wraps. A wrap starts a new geometry segment with
-`ANTIMERIDIAN_WRAP`; it adds no fabricated seam point. Deterministic
+`ANTIMERIDIAN_WRAP`; it adds no fabricated seam point. Every point retains
+its observed-time basis and separate ingestion time. Deterministic
 endpoint-preserving simplification respects a point budget or returns an explicit
 budget error when it cannot preserve every segment. These segments are observed
 history only: no planned route, origin airport, destination or flight number is
