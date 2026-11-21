@@ -3,7 +3,7 @@ package http
 
 import stdhttp "net/http"
 
-type Endpoints struct{ WatchRules, Sources, Aircraft, Messages, Decoders, Alerts, Events stdhttp.Handler }
+type Endpoints struct{ WatchRules, Sources, Aircraft, Messages, Decoders, Alerts, Events, Workspace stdhttp.Handler }
 
 func Router(health stdhttp.Handler, endpoints Endpoints) stdhttp.Handler {
 	mux := stdhttp.NewServeMux()
@@ -14,6 +14,7 @@ func Router(health stdhttp.Handler, endpoints Endpoints) stdhttp.Handler {
 	mountCollection(api, "/watch-rules", endpoints.WatchRules)
 	mountCollection(api, "/sources", endpoints.Sources)
 	mount(api, "/map/", endpoints.Aircraft)
+	mount(api, "/workspace/", endpoints.Workspace)
 	mountCollection(api, "/aircraft", endpoints.Aircraft)
 	mountCollection(api, "/flights", endpoints.Aircraft)
 	mountCollection(api, "/messages", endpoints.Messages)

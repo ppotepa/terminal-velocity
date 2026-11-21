@@ -38,6 +38,51 @@ paths:
               schema: { $ref: '#/components/schemas/Health' }
               example: { status: ok, version: 1.0.0, dependencies: { mongo: ok } }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /workspace/{mode}/snapshot:
+    parameters: [{ $ref: '#/components/parameters/WorkspaceMode' }]
+    get:
+      operationId: getWorkspaceSnapshot
+      tags: [map]
+      responses:
+        '200': { description: Shared regional snapshot, content: { application/json: { schema: { $ref: '#/components/schemas/MapSnapshot' } } } }
+  /workspace/{mode}/flights/{id}:
+    parameters: [{ $ref: '#/components/parameters/WorkspaceMode' }, { $ref: '#/components/parameters/WorkspaceFlightId' }]
+    get:
+      operationId: getWorkspaceFlight
+      tags: [flights]
+      responses:
+        '200': { description: Selected flight and observed relationships, content: { application/json: { schema: { $ref: '#/components/schemas/WorkspaceFlight' } } } }
+        '404': { description: Unknown flight }
+  /workspace/{mode}/flights/{id}/events:
+    parameters: [{ $ref: '#/components/parameters/WorkspaceMode' }, { $ref: '#/components/parameters/WorkspaceFlightId' }]
+    get:
+      operationId: getWorkspaceStream
+      tags: [flights]
+      parameters:
+        - { name: source, in: query, schema: { $ref: '#/components/schemas/WorkspaceSource' } }
+        - { name: before, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Events newest first, content: { application/json: { schema: { $ref: '#/components/schemas/WorkspacePage' } } } }
+  /workspace/{mode}/flights/{id}/rules:
+    parameters: [{ $ref: '#/components/parameters/WorkspaceMode' }, { $ref: '#/components/parameters/WorkspaceFlightId' }]
+    post:
+      operationId: saveWorkspaceListener
+      tags: [watch-rules]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/WorkspaceRule' } } }
+      responses:
+        '200': { $ref: '#/components/responses/WorkspaceRuleSaved' }
+        '400': { description: Invalid target or sources }
+  /workspace/live/legacy:
+    post:
+      operationId: importLocalAircraft
+      tags: [watch-rules]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [aircraftId], properties: { aircraftId: { type: string } } } } }
+      responses:
+        '200': { $ref: '#/components/responses/WorkspaceRuleSaved' }
   /watch-rules:
     get:
       tags: [watch-rules]
@@ -448,6 +493,8 @@ paths:
 security: []
 components:
   parameters:
+    WorkspaceMode: { name: mode, in: path, required: true, schema: { type: string, enum: [debug, live] } }
+    WorkspaceFlightId: { name: id, in: path, required: true, schema: { type: string } }
     Cursor:
       name: cursor
       in: query
@@ -475,6 +522,9 @@ components:
       required: true
       schema: { type: string, minLength: 1, maxLength: 128 }
   responses:
+    WorkspaceRuleSaved:
+      description: Listener configuration persisted
+      content: { application/json: { schema: { type: object, required: [id], properties: { id: { type: string } } } } }
     BadRequest:
       description: Invalid request or domain validation failure
       content:
@@ -807,7 +857,62 @@ components:
       properties:
         generatedAt: { type: string, format: date-time }
         sourceFreshness: { type: string, enum: [fresh, stale, unknown] }
-        aircraft: { type: array, items: { type: object, required: [aircraftId, position, noPositionReason, flightId], properties: { aircraftId: { type: string }, callsign: { oneOf: [{ $ref: '#/components/schemas/EvidenceValue' }, { type: 'null' }] }, position: { oneOf: [{ $ref: '#/components/schemas/Position' }, { type: 'null' }] }, noPositionReason: { type: [string, 'null'], enum: [no_recent_observation, source_unavailable, null] }, flightId: { type: [string, 'null'] } } } }
+        aircraft: { type: array, items: { $ref: '#/components/schemas/MapAircraft' } }
+    MapAircraft: { type: object, required: [aircraftId, position, noPositionReason, flightId], properties: { hasFrames: { type: boolean }, aircraftId: { type: string }, callsign: { oneOf: [{ $ref: '#/components/schemas/EvidenceValue' }, { type: 'null' }] }, position: { oneOf: [{ $ref: '#/components/schemas/Position' }, { type: 'null' }] }, noPositionReason: { type: [string, 'null'], enum: [no_recent_observation, source_unavailable, null] }, flightId: { type: [string, 'null'] } } }
+    WorkspaceSource: { type: string, enum: [ADS-B, Airframes] }
+    WorkspaceRule:
+      type: object
+      required: [kind, active, sources]
+      properties:
+        kind: { type: string, enum: [flight, aircraft, route, corridor] }
+        active: { type: boolean }
+        target: { type: string, description: Corridor ID for corridor rules }
+        sources: { type: array, minItems: 1, uniqueItems: true, items: { $ref: '#/components/schemas/WorkspaceSource' } }
+    WorkspacePoint: { type: array, prefixItems: [{ type: number }, { type: number }], minItems: 2, maxItems: 2 }
+    WorkspaceCorridor:
+      type: object
+      required: [id, width, line, members]
+      properties:
+        id: { type: string }
+        width: { type: number, description: Full width in kilometres }
+        line: { type: array, prefixItems: [{ $ref: '#/components/schemas/WorkspacePoint' }, { $ref: '#/components/schemas/WorkspacePoint' }], minItems: 2, maxItems: 2 }
+        members: { type: object, additionalProperties: { type: string, enum: [observation, passage] } }
+    WorkspaceFlight:
+      type: object
+      required: [item, origin, destination, track, airframes, related, corridors, rules]
+      properties:
+        item: { $ref: '#/components/schemas/MapAircraft' }
+        origin: { type: string }
+        destination: { type: string }
+        track: { type: array, items: { type: array, items: { $ref: '#/components/schemas/WorkspacePoint' } } }
+        airframes: { type: string, enum: [ready, waiting, unavailable, uncertain] }
+        related: { type: array, items: { type: object, required: [id, aircraft, callsign, start, last], properties: { id: { type: string }, aircraft: { type: string }, callsign: { type: string }, start: { type: number }, last: { type: number } } } }
+        corridors: { type: array, items: { $ref: '#/components/schemas/WorkspaceCorridor' } }
+        rules: { type: array, items: { $ref: '#/components/schemas/WorkspaceRule' } }
+    WorkspaceEvent:
+      type: object
+      required: [id, at, source, confirmed, content, receipts]
+      properties:
+        id: { type: string }
+        at: { type: string, format: date-time }
+        source: { $ref: '#/components/schemas/WorkspaceSource' }
+        confirmed: { type: boolean }
+        content:
+          type: object
+          properties:
+            raw: {}
+            decoded: { type: [string, 'null'] }
+            protocol: { type: string }
+            longitude: { type: number }
+            latitude: { type: number }
+          additionalProperties: true
+        receipts: { type: array, items: { type: object, required: [station, at], properties: { station: { type: string }, at: { type: string, format: date-time } } } }
+    WorkspacePage:
+      type: object
+      required: [items, next]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/WorkspaceEvent' } }
+        next: { type: [string, 'null'] }
     EventEnvelope:
       type: object
       required: [eventId, type, occurredAt, sourceObservedAt, data]

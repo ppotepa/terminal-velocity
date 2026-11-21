@@ -24,6 +24,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workspace/{mode}/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mode: components["parameters"]["WorkspaceMode"];
+            };
+            cookie?: never;
+        };
+        get: operations["getWorkspaceSnapshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspace/{mode}/flights/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mode: components["parameters"]["WorkspaceMode"];
+                id: components["parameters"]["WorkspaceFlightId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getWorkspaceFlight"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspace/{mode}/flights/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mode: components["parameters"]["WorkspaceMode"];
+                id: components["parameters"]["WorkspaceFlightId"];
+            };
+            cookie?: never;
+        };
+        get: operations["getWorkspaceStream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspace/{mode}/flights/{id}/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mode: components["parameters"]["WorkspaceMode"];
+                id: components["parameters"]["WorkspaceFlightId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["saveWorkspaceListener"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workspace/live/legacy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["importLocalAircraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/watch-rules": {
         parameters: {
             query?: never;
@@ -678,14 +769,84 @@ export interface components {
             generatedAt: string;
             /** @enum {string} */
             sourceFreshness: "fresh" | "stale" | "unknown";
-            aircraft: {
-                aircraftId: string;
-                callsign?: components["schemas"]["EvidenceValue"] | null;
-                position: components["schemas"]["Position"] | null;
-                /** @enum {string|null} */
-                noPositionReason: "no_recent_observation" | "source_unavailable" | null;
-                flightId: string | null;
+            aircraft: components["schemas"]["MapAircraft"][];
+        };
+        MapAircraft: {
+            hasFrames?: boolean;
+            aircraftId: string;
+            callsign?: components["schemas"]["EvidenceValue"] | null;
+            position: components["schemas"]["Position"] | null;
+            /** @enum {string|null} */
+            noPositionReason: "no_recent_observation" | "source_unavailable" | null;
+            flightId: string | null;
+        };
+        /** @enum {string} */
+        WorkspaceSource: "ADS-B" | "Airframes";
+        WorkspaceRule: {
+            /** @enum {string} */
+            kind: "flight" | "aircraft" | "route" | "corridor";
+            active: boolean;
+            /** @description Corridor ID for corridor rules */
+            target?: string;
+            sources: components["schemas"]["WorkspaceSource"][];
+        };
+        WorkspacePoint: [
+            number,
+            number
+        ];
+        WorkspaceCorridor: {
+            id: string;
+            /** @description Full width in kilometres */
+            width: number;
+            line: [
+                components["schemas"]["WorkspacePoint"],
+                components["schemas"]["WorkspacePoint"]
+            ];
+            members: {
+                [key: string]: "observation" | "passage";
+            };
+        };
+        WorkspaceFlight: {
+            item: components["schemas"]["MapAircraft"];
+            origin: string;
+            destination: string;
+            track: components["schemas"]["WorkspacePoint"][][];
+            /** @enum {string} */
+            airframes: "ready" | "waiting" | "unavailable" | "uncertain";
+            related: {
+                id: string;
+                aircraft: string;
+                callsign: string;
+                start: number;
+                last: number;
             }[];
+            corridors: components["schemas"]["WorkspaceCorridor"][];
+            rules: components["schemas"]["WorkspaceRule"][];
+        };
+        WorkspaceEvent: {
+            id: string;
+            /** Format: date-time */
+            at: string;
+            source: components["schemas"]["WorkspaceSource"];
+            confirmed: boolean;
+            content: {
+                raw?: unknown;
+                decoded?: string | null;
+                protocol?: string;
+                longitude?: number;
+                latitude?: number;
+            } & {
+                [key: string]: unknown;
+            };
+            receipts: {
+                station: string;
+                /** Format: date-time */
+                at: string;
+            }[];
+        };
+        WorkspacePage: {
+            items: components["schemas"]["WorkspaceEvent"][];
+            next: string | null;
         };
         EventEnvelope: {
             eventId: string | null;
@@ -701,6 +862,17 @@ export interface components {
         };
     };
     responses: {
+        /** @description Listener configuration persisted */
+        WorkspaceRuleSaved: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    id: string;
+                };
+            };
+        };
         /** @description Invalid request or domain validation failure */
         BadRequest: {
             headers: {
@@ -794,6 +966,8 @@ export interface components {
         };
     };
     parameters: {
+        WorkspaceMode: "debug" | "live";
+        WorkspaceFlightId: string;
         /** @description Opaque cursor from a previous page; stable ordering is by event/creation time then ID. */
         Cursor: string;
         Limit: number;
@@ -835,6 +1009,128 @@ export interface operations {
                 };
             };
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getWorkspaceSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mode: components["parameters"]["WorkspaceMode"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Shared regional snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapSnapshot"];
+                };
+            };
+        };
+    };
+    getWorkspaceFlight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mode: components["parameters"]["WorkspaceMode"];
+                id: components["parameters"]["WorkspaceFlightId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Selected flight and observed relationships */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceFlight"];
+                };
+            };
+            /** @description Unknown flight */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getWorkspaceStream: {
+        parameters: {
+            query?: {
+                source?: components["schemas"]["WorkspaceSource"];
+                before?: string;
+            };
+            header?: never;
+            path: {
+                mode: components["parameters"]["WorkspaceMode"];
+                id: components["parameters"]["WorkspaceFlightId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Events newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePage"];
+                };
+            };
+        };
+    };
+    saveWorkspaceListener: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mode: components["parameters"]["WorkspaceMode"];
+                id: components["parameters"]["WorkspaceFlightId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceRule"];
+            };
+        };
+        responses: {
+            200: components["responses"]["WorkspaceRuleSaved"];
+            /** @description Invalid target or sources */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    importLocalAircraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    aircraftId: string;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["WorkspaceRuleSaved"];
         };
     };
     listWatchRules: {

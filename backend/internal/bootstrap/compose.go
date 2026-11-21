@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"os"
 	"time"
 
 	builtin "github.com/ppotepa/terminal-velocity/backend/internal/adapters/decoders"
@@ -92,6 +93,7 @@ func Compose(ctx context.Context, db *driver.Database, syntheticMode ...bool) (C
 		jobs = append(jobs, scheduler.Run)
 	}
 	return Composition{Endpoints: transport.Endpoints{
+		Workspace:  transport.WorkspaceProxy(os.Getenv("TV_WORKSPACE_SOCKET")),
 		WatchRules: publishWatchlistChanges(watchhttp.NewHandler(watchService, nil), hub),
 		Aircraft:   aircrafthttp.NewHandler(aircraftReader{tracking: trackingService, rules: watchService}),
 		Decoders:   decoderhttp.NewHandler(decoderReader{service: decoderService, configs: decoderRepo, registry: registry}),

@@ -1,0 +1,15 @@
+[Unit]
+Description=Terminal Velocity flight history and listeners
+After=network-online.target
+
+[Service]
+WorkingDirectory=/root/work/terminal-velocity
+Environment=TV_SNAPSHOT_PATH=/root/work/terminal-velocity/source/frontend/dist/live-snapshot.json
+Environment=TV_WORKSPACE_SOCKET=/run/terminal-velocity-workspace/api.sock
+RuntimeDirectory=terminal-velocity-workspace
+ExecStart=/usr/bin/python3 /root/work/terminal-velocity/source/scripts/live/workspace/server.py
+Restart=on-failure
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
