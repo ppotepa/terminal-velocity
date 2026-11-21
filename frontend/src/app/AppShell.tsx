@@ -1,8 +1,8 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Activity, Bell, ChevronDown, Compass, History, MessageSquareText, Radio, Settings2, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Compass, ShieldCheck, History, MessageSquareText, SlidersHorizontal, Bell, Settings2, X } from 'lucide-react';
 import { createApiClient } from '../shared/api/client';
-import { subscribeRealtime, type RealtimeStatus } from '../shared/realtime/client';
-import { initialRealtimeState, reduceRealtimeEvent } from '../shared/state/realtimeStore';
+import type { components } from '../shared/api/generated';
+import { subscribeRealtime } from '../shared/realtime/client';
 import { WatchRulesFeature } from '../features/watch-rules/WatchRulesFeature';
 import { AircraftDetailsFeature } from '../features/aircraft-details/AircraftDetailsFeature';
 import { FlightHistoryFeature } from '../features/flight-history/FlightHistoryFeature';
@@ -10,21 +10,81 @@ import { MessageFeedFeature } from '../features/message-feed/MessageFeedFeature'
 import { DecoderSettingsFeature } from '../features/decoder-settings/DecoderSettingsFeature';
 import { AlertsFeature } from '../features/alerts/AlertsFeature';
 import { SourceSettingsFeature } from '../features/source-settings/SourceSettingsFeature';
-import '../features/aircraft-details/aircraft-details.css';
-import '../features/flight-history/flight-history.css';
-import '../features/message-feed/message-feed.css';
-import '../features/watch-rules/watch-rules.css';
-import '../features/decoder-settings/decoder-settings.css';
-import '../features/alerts/alerts.css';
-import '../features/source-settings/source-settings.css';
-const LiveMapFeature=lazy(()=>import('../features/live-map/LiveMapFeature').then(m=>({default:m.LiveMapFeature})));
-type Section='Map'|'Watch Rules'|'History'|'Messages'|'Decoders'|'Alerts'|'Source Settings';
-const sections:{label:Section;icon:typeof Compass;description:string}[]=[{label:'Map',icon:Compass,description:'Observed aircraft selected by your active Watch Rules.'},{label:'Watch Rules',icon:ShieldCheck,description:'Choose aircraft and flights to observe.'},{label:'History',icon:History,description:'Inspect observed flight tracks and evidence.'},{label:'Messages',icon:MessageSquareText,description:'Review messages collected for selected aircraft.'},{label:'Decoders',icon:SlidersHorizontal,description:'Configure declarative decoders and preview samples.'},{label:'Alerts',icon:Bell,description:'Manage alert conditions and persisted notifications.'},{label:'Source Settings',icon:Settings2,description:'Review provider status, freshness and collection budgets.'}];
-export default function AppShell(){
- const client=useMemo(()=>createApiClient(),[]);const [active,setActive]=useState<Section>('Map');const [mobileOpen,setMobileOpen]=useState(false);const [aircraftId,setAircraftId]=useState<string|null>(null);const [flightId,setFlightId]=useState<string|null>(null);const [realtime,setRealtime]=useState<RealtimeStatus>('connecting');const [realtimeState,dispatchRealtime]=useReducer(reduceRealtimeEvent,undefined,initialRealtimeState);const connectedOnce=useRef(false);
- const refreshSnapshot=useCallback(async()=>{await Promise.allSettled([client.GET('/map/snapshot'),client.GET('/flights',{params:{query:{limit:100}}}),client.GET('/messages',{params:{query:{limit:100}}}),client.GET('/alert-events',{params:{query:{limit:100}}})])},[client]);
- useEffect(()=>subscribeRealtime({onEvent:event=>dispatchRealtime(event),onStatus:status=>{setRealtime(status);if(status==='connected'&&connectedOnce.current)void refreshSnapshot();if(status==='connected')connectedOnce.current=true},onSnapshotRequired:refreshSnapshot}),[refreshSnapshot]);
- const current=sections.find(s=>s.label===active)!;const selectAircraft=(id:string)=>setAircraftId(id);
- const content=()=>{switch(active){case'Watch Rules':return <WatchRulesFeature client={client}/>;case'Messages':return <MessageFeedFeature client={client} aircraftId={aircraftId??undefined} flightId={flightId??undefined} onSelectAircraft={selectAircraft} onSelectFlight={id=>{setFlightId(id);setActive('History')}}/>;case'Decoders':return <DecoderSettingsFeature client={client}/>;case'Alerts':return <AlertsFeature client={client}/>;case'Source Settings':return <SourceSettingsFeature client={client}/>;case'History':return <><FlightHistoryFeature client={client} aircraftId={aircraftId??undefined} onFlightSelected={setFlightId}/>{aircraftId&&<AircraftDetailsFeature client={client} aircraftId={aircraftId} onClose={()=>setAircraftId(null)} onViewTrack={()=>setActive('History')} onViewMessages={()=>setActive('Messages')}/>}</>;default:return <><Suspense fallback={<div className="workspace-loading">Loading map…</div>}><LiveMapFeature client={client} selectedAircraftId={aircraftId} onSelectAircraft={selectAircraft}/></Suspense>{aircraftId&&<div className="workspace-secondary"><AircraftDetailsFeature client={client} aircraftId={aircraftId} onClose={()=>setAircraftId(null)} onViewTrack={()=>setActive('History')} onViewMessages={()=>setActive('Messages')}/><FlightHistoryFeature client={client} aircraftId={aircraftId} onFlightSelected={setFlightId}/></div>}</>}};
- return <div className="app-shell"><aside className={`sidebar ${mobileOpen?'sidebar-open':''}`} aria-label="Workspace navigation"><a className="brand" href="#map" onClick={()=>setActive('Map')}><span className="brand-mark"><Activity size={18}/></span><span><strong>Terminal Velocity</strong><small>FLIGHT INTELLIGENCE</small></span></a><div className="workspace-label">WORKSPACE</div><nav className="primary-nav" aria-label="Primary">{sections.map(({label,icon:Icon})=><button key={label} className={`nav-item ${active===label?'active':''}`} aria-current={active===label?'page':undefined} onClick={()=>{setActive(label);setMobileOpen(false)}}><Icon size={17}/><span>{label}</span></button>)}</nav><div className="sidebar-footer" title={`${realtimeState.aircraft.size} aircraft, ${realtimeState.messages.size} messages, ${realtimeState.alerts.size} alerts in realtime cache`}><span className={`connection-dot ${realtime==='connected'?'':'connection-offline'}`}/><span>{realtime==='connected'?'Realtime connected':realtime==='connecting'?'Connecting':'Reconnecting'}</span><span className="synthetic-chip">LOCAL</span></div></aside>{mobileOpen&&<button className="scrim" aria-label="Close navigation" onClick={()=>setMobileOpen(false)}/>}<main className="main-area"><header className="topbar"><button className="mobile-menu" onClick={()=>setMobileOpen(v=>!v)} aria-expanded={mobileOpen} aria-label="Toggle navigation">☰</button><div className="breadcrumbs"><span>Workspace</span><span className="crumb-sep">/</span><strong>{active}</strong></div><button className="workspace-button"><span className="avatar">TV</span><span>Local workspace</span><ChevronDown size={14}/></button></header><section className="page-content" aria-labelledby="page-title"><div className="page-heading"><div><div className="eyebrow">TERMINAL VELOCITY 1.0</div><h1 id="page-title">{active}</h1><p>{current.description}{aircraftId?` · Selected aircraft ${aircraftId}`:''}</p></div><div className="mode-badge"><Radio size={14}/> Local workspace</div></div><div className="feature-content">{content()}</div></section></main></div>
+import './map-workspace.css';
+
+const MapView = lazy(() => import('../features/live-map/LiveMapFeature').then(m => ({ default: m.LiveMapFeature })));
+const sections = [
+  ['Map', Compass], ['Watch Rules', ShieldCheck], ['History', History], ['Messages', MessageSquareText],
+  ['Decoders', SlidersHorizontal], ['Alerts', Bell], ['Sources', Settings2],
+] as const;
+type Section = typeof sections[number][0];
+type Aircraft = components['schemas']['MapSnapshot']['aircraft'][number];
+
+export default function AppShell() {
+  const client = useMemo(() => createApiClient(), []);
+  const [section, navigate] = useState<Section>('Map');
+  const [aircraft, select] = useState<Aircraft | null>(null);
+  const [tick, update] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [tracked, setTracked] = useState<Set<string>>(new Set());
+  const [error, setError] = useState('');
+  const callsign = typeof aircraft?.callsign?.value === 'string' ? aircraft.callsign.value : '';
+  const choose = useCallback((item: Aircraft) => { select(item); navigate('Map'); setError(''); }, []);
+  const close = () => { select(null); navigate('Map'); };
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = () => { if (!timer) timer = setTimeout(() => { timer = undefined; update(n => n + 1); }, 1000); };
+    const stop = subscribeRealtime({onEvent: refresh, onStatus: s => { if (s === 'connected') refresh(); }});
+    return () => { stop(); clearTimeout(timer); };
+  }, []);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    async function load() {
+      const names = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const { data } = await client.GET('/watch-rules', {signal: ctrl.signal, params:{query:{cursor,limit:100}}});
+        if (!data) return;
+        for (const rule of data.items) if (rule.status === 'active' && rule.groups.length === 1 && rule.groups[0].criteria.length === 1) {
+          const c = rule.groups[0].criteria[0];
+          if (c.kind === 'callsign') names.add(c.value);
+        }
+        cursor = data.nextCursor ?? undefined;
+      } while (cursor);
+      if (!ctrl.signal.aborted) setTracked(names);
+    }
+    void load().catch(() => {});
+    return () => ctrl.abort();
+  }, [client, section, tick]);
+  async function track() {
+    setSaving(true);
+    try {
+      const {response} = await client.POST('/watch-rules', {body:{
+        name: callsign, status:'active', scope:'targeted', groups:[{mode:'all',criteria:[{kind:'callsign',value:callsign}]}],
+        collection:{positions:true,messages:true,decoderIds:['acars-basic']}
+      }});
+      if (!response.ok) throw Error();
+      setTracked(old => new Set(old).add(callsign)); setError('');
+    } catch { setError('Could not save the tracking rule. Please retry.'); }
+    finally { setSaving(false); }
+  }
+  return <main className="radar">
+    <Suspense fallback={<p>Loading map…</p>}><MapView client={client} onSelectAircraft={choose} selectedAircraftId={aircraft?.aircraftId} tracked={tracked} tick={tick}/></Suspense>
+    {(section !== 'Map' || aircraft) && <aside className="radar-panel" aria-label="Workspace panel">
+      <header><h1>{section === 'Map' ? callsign || aircraft?.aircraftId : section}</h1><button onClick={close} aria-label="Close panel"><X/></button></header>
+      {section === 'Map' && aircraft && <>
+        <button className="track-action" disabled={!callsign || saving || tracked.has(callsign)} onClick={track}>{tracked.has(callsign) ? 'Tracking' : saving ? 'Saving…' : 'Add to tracking'}</button>
+        {error && <p role="alert">{error}</p>}
+        <AircraftDetailsFeature client={client} aircraftId={aircraft.aircraftId} onViewTrack={()=>navigate('History')} onViewMessages={()=>navigate('Messages')}/>
+        {aircraft.flightId && <MessageFeedFeature key={aircraft.flightId} client={client} flightId={aircraft.flightId}/>}
+      </>}
+      {section === 'Watch Rules' && <WatchRulesFeature client={client}/>}
+      {section === 'History' && <FlightHistoryFeature client={client} aircraftId={aircraft?.aircraftId}/>}
+      {section === 'Messages' && <MessageFeedFeature client={client} aircraftId={aircraft?.aircraftId} flightId={aircraft?.flightId}/>}
+      {section === 'Decoders' && <DecoderSettingsFeature client={client}/>}
+      {section === 'Alerts' && <AlertsFeature client={client}/>}
+      {section === 'Sources' && <SourceSettingsFeature client={client}/>}
+    </aside>}
+    <nav className="radar-nav" aria-label="Workspace">{sections.map(([name,Icon])=><button key={name} aria-current={section===name?'page':undefined} onClick={()=>name==='Map'?close():navigate(name)}><Icon size={19}/>{name}</button>)}</nav>
+  </main>;
 }
