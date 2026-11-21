@@ -8,7 +8,7 @@ import {
 } from 'maplibre-gl';
 import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import type { components } from '../../shared/api/generated';
-import { request, type Aircraft, type Corridor, type Mode, type Point } from './workspace';
+import { request, label as tr, type Aircraft, type Corridor, type Mode, type Point } from './workspace';
 import { StatusPill } from '../../shared/ui/StatusPill';
 import './live-map.css';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -62,7 +62,9 @@ export function LiveMapFeature({
   const fallbackUsed = useRef(false);
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [error, setError] = useState('');
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() => window.matchMedia('(min-width: 651px)').matches);
+  const [search, setSearch] = useState('');
+  const [onlyConfirmed, setOnlyConfirmed] = useState(false);
   const [styleFailed, setStyleFailed] = useState(false);
   const refresh = useCallback(
     async (signal: AbortSignal) => {
@@ -129,6 +131,20 @@ export function LiveMapFeature({
         (a) => a.position && (!filter || (a.flightId && corridor?.members[a.flightId])),
       ),
     [snapshot, filter, corridor],
+  );
+  const confirmedCount = positioned.filter((a) => a.hasFrames).length;
+  const listed = useMemo(
+    () => positioned
+      .filter((a) => {
+        const q = search.trim().toLowerCase();
+        const name = String(a.callsign?.value ?? '').toLowerCase();
+        return (!onlyConfirmed || a.hasFrames) && (!q || name.includes(q) || a.aircraftId.toLowerCase().includes(q));
+      })
+      .sort((a, b) =>
+        Number(Boolean(b.hasFrames)) - Number(Boolean(a.hasFrames)) ||
+        String(a.callsign?.value ?? a.aircraftId).localeCompare(String(b.callsign?.value ?? b.aircraftId)),
+      ),
+    [positioned, search, onlyConfirmed],
   );
   useEffect(() => {
     const map = mapRef.current;
@@ -280,13 +296,10 @@ export function LiveMapFeature({
           <div ref={container} className="map-canvas" role="region" aria-label="Map of observed aircraft" />
           {styleFailed && <small className="map-style-notice">Offline country boundaries</small>}
         </div>
-        <aside className="aircraft-list">
-          <button
-            className="aircraft-list-heading"
-            aria-expanded={expanded}
-            onClick={() => setExpanded(!expanded)}
-          >
-            Aircraft · {positioned.length} {expanded ? '▴' : '▾'}
+        <aside className="aircraft-list" aria-label={tr('Observed aircraft', 'Zaobserwowane samoloty')}>
+          <button className="aircraft-list-heading" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+            <span>{tr('Aircraft', 'Samoloty')} · {positioned.length}</span>
+            <span>{tr('Frames', 'Ramki')}: {confirmedCount} {expanded ? '▴' : '▾'}</span>
           </button>
           <small className="live-credit">
             {mode === 'live' ? (
@@ -298,23 +311,42 @@ export function LiveMapFeature({
             {error ||
               (snapshot
                 ? new Date(snapshot.generatedAt).toLocaleTimeString() +
-                  ' · ' +
-                  (mode === 'debug' ? 'fixture' : snapshot.sourceFreshness)
-                : 'Loading positions…')}
+                  ' · ' + (mode === 'debug' ? 'fixture' : snapshot.sourceFreshness)
+                : tr('Loading positions…', 'Wczytywanie pozycji…'))}
           </small>
-          {expanded && <small className="live-credit">Green ring · confirmed flight frame</small>}
-          {expanded &&
-            positioned.map((a) => (
-              <AircraftRow
-                key={a.aircraftId}
-                aircraft={a}
-                selected={a.flightId === selected?.flightId}
-                onSelect={() => {
-                  setExpanded(false);
-                  onSelectAircraft(a);
-                }}
-              />
-            ))}
+          {expanded && (
+            <>
+              <div className="aircraft-list-controls">
+                <input
+                  type="search"
+                  aria-label={tr('Find aircraft by callsign or ICAO', 'Szukaj samolotu po callsign lub ICAO')}
+                  placeholder={tr('Callsign or ICAO', 'Callsign lub ICAO')}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+                <label>
+                  <input type="checkbox" checked={onlyConfirmed} onChange={(e) => setOnlyConfirmed(e.target.checked)} />
+                  {tr('Only confirmed frames', 'Tylko potwierdzone ramki')}
+                </label>
+              </div>
+              <small className="frame-hint">
+                {tr('Airframes public API · no result does not mean no frames exist. Green ring = confirmed for this flight.',
+                    'Publiczne API Airframes · brak wyniku nie dowodzi braku ramek. Zielony pierścień = potwierdzenie dla tego lotu.')}
+              </small>
+              {listed.map((a) => (
+                <AircraftRow
+                  key={a.flightId ?? a.aircraftId}
+                  aircraft={a}
+                  selected={a.flightId === selected?.flightId}
+                  onSelect={() => {
+                    if (window.innerWidth <= 650) setExpanded(false);
+                    onSelectAircraft(a);
+                  }}
+                />
+              ))}
+              {!listed.length && <p className="aircraft-list-empty">{tr('No matching aircraft', 'Brak pasujących samolotów')}</p>}
+            </>
+          )}
         </aside>
       </div>
     </div>
@@ -325,41 +357,40 @@ function AircraftRow({
   aircraft,
   selected,
   onSelect,
-  tracked,
 }: {
-  tracked?: boolean;
   aircraft: Aircraft;
   selected: boolean;
   onSelect: () => void;
 }) {
-  const position = aircraft.position;
-  const callsign =
-    typeof aircraft.callsign?.value === 'string' ? aircraft.callsign.value : aircraft.aircraftId;
+  const p = aircraft.position;
+  const callsign = typeof aircraft.callsign?.value === 'string' ? aircraft.callsign.value : aircraft.aircraftId;
+  const status = aircraft.hasFrames ? 'confirmed' : (aircraft.frameStatus ?? 'not_checked');
+  const statusName = {
+    confirmed: tr('Confirmed frame', 'Ramka potwierdzona'),
+    unconfirmed: tr('Uncertain frame', 'Ramka niepewna'),
+    no_match: tr('None in checked window', 'Brak w sprawdzonym oknie'),
+    unavailable: tr('Airframes unavailable', 'Airframes niedostępne'),
+    not_checked: tr('Not checked', 'Nie sprawdzono'),
+  }[status];
+  const tone = status === 'confirmed' ? 'positive' : status === 'unconfirmed' ? 'warning' :
+    status === 'unavailable' ? 'danger' : 'neutral';
   return (
-    <button
-      type="button"
-      className={`aircraft-row ${selected ? 'aircraft-row-selected' : ''}`}
-      onClick={onSelect}
-    >
+    <button type="button" className={`aircraft-row ${selected ? 'aircraft-row-selected' : ''}`} onClick={onSelect}>
       <span className="aircraft-row-top">
-        <strong>
-          {callsign}
-          {tracked ? ' · Tracking' : ''}
-        </strong>
-        <StatusPill tone={position ? 'positive' : 'warning'}>
-          {position ? 'Position observed' : 'No position'}
-        </StatusPill>
+        <strong>{callsign}</strong>
+        <StatusPill tone={tone}>{statusName}</StatusPill>
       </span>
+      <span className="aircraft-row-meta">ICAO · {aircraft.aircraftId}</span>
       <span className="aircraft-row-meta">
-        {position
-          ? `${position.latitude.toFixed(3)}, ${position.longitude.toFixed(3)}`
-          : 'Coordinates not available'}
+        {p
+          ? `${p.latitude.toFixed(3)}, ${p.longitude.toFixed(3)} · ${new Date(p.observedAt).toLocaleTimeString()}`
+          : tr('No observed position', 'Brak zaobserwowanej pozycji')}
       </span>
-      <span className="aircraft-row-meta">
-        {position
-          ? `${position.source} · ${new Date(position.observedAt).toLocaleTimeString()}`
-          : `Reason: ${aircraft.noPositionReason ?? 'unknown'}`}
-      </span>
+      {aircraft.frameCheckedAt && (
+        <span className="aircraft-row-meta">
+          {tr('Airframes checked', 'Airframes sprawdzono')} · {new Date(aircraft.frameCheckedAt).toLocaleTimeString()}
+        </span>
+      )}
     </button>
   );
 }

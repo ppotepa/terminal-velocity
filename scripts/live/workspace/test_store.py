@@ -1,7 +1,8 @@
 import sqlite3
 import unittest
+from time import time
 
-from listeners import accept, debug
+from listeners import accept, debug, discovery_due, reserve_discovery_request
 from store import (
     corridor_status,
     detail,
@@ -111,6 +112,53 @@ class FlightStoreTest(unittest.TestCase):
         self.assertEqual(corridor_status(separated, c), "observation")
         self.assertEqual(len(segments(separated)), 2)
         self.assertFalse(corridor_status([(0, 19.5, 53)], c))
+
+    def test_snapshot_distinguishes_confirmed_unchecked_and_no_match(self):
+        db = self.db
+        current = next(a for a in snapshot(db, "debug")["aircraft"] if a["aircraftId"] == "demo01")
+        self.assertTrue(current["hasFrames"])
+        self.assertEqual(current["frameStatus"], "confirmed")
+        other = db.execute(
+            "SELECT * FROM flights WHERE aircraft='demo02' ORDER BY last DESC LIMIT 1"
+        ).fetchone()
+        before = next(a for a in snapshot(db, "debug")["aircraft"] if a["aircraftId"] == "demo02")
+        self.assertEqual(before["frameStatus"], "not_checked")
+        self.assertIsNone(before["frameCheckedAt"])
+        db.execute("UPDATE flights SET checked=?,airframes='waiting' WHERE id=?", (time(), other["id"]))
+        checked = next(a for a in snapshot(db, "debug")["aircraft"] if a["aircraftId"] == "demo02")
+        self.assertEqual(checked["frameStatus"], "no_match")
+        self.assertTrue(checked["frameCheckedAt"])
+        db.execute("UPDATE flights SET airframes='unavailable' WHERE id=?", (other["id"],))
+        unavailable = next(a for a in snapshot(db, "debug")["aircraft"] if a["aircraftId"] == "demo02")
+        self.assertEqual(unavailable["frameStatus"], "unavailable")
+        self.assertEqual(detail(db, self.flight)["item"]["frameStatus"], "confirmed")
+
+    def test_public_discovery_is_bounded_and_budget_survives_checks(self):
+        db = self.db
+        now = time()
+        ingest(db, "live", dict(
+            generatedAt=stamp(now),
+            aircraft=[dict(
+                aircraftId="a1b2c3",
+                callsign=dict(value="TV123"),
+                position=dict(latitude=52, longitude=20, observedAt=stamp(now), source="ADS-B"),
+            ), dict(
+                aircraftId="~123abc",
+                callsign=dict(value="TV124"),
+                position=dict(latitude=52, longitude=21, observedAt=stamp(now), source="ADS-B"),
+            )],
+        ))
+        candidate = discovery_due(db, now)
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate["aircraft"], "a1b2c3")
+        db.execute("UPDATE flights SET checked=? WHERE id=?", (now, candidate["id"]))
+        self.assertIsNone(discovery_due(db, now))
+        db.execute("UPDATE snapshots SET at=? WHERE mode='live'", (now - 400,))
+        self.assertIsNone(discovery_due(db, now))
+        self.assertTrue(reserve_discovery_request(db, now, limit=2))
+        self.assertTrue(reserve_discovery_request(db, now, limit=2))
+        self.assertFalse(reserve_discovery_request(db, now, limit=2))
+        self.assertTrue(reserve_discovery_request(db, now + 86400, limit=2))
 
     def test_cursor_stays_stable_with_new_arrivals(self):
         f = self.flight

@@ -773,6 +773,12 @@ export interface components {
         };
         MapAircraft: {
             hasFrames?: boolean;
+            /** @description Evidence from this flight only */
+            frameStatus?: "confirmed" | "unconfirmed" | "no_match" | "unavailable" | "not_checked";
+            /** Format: date-time
+             * @description Last public Airframes lookup in UTC
+             */
+            frameCheckedAt?: string | null;
             aircraftId: string;
             callsign?: components["schemas"]["EvidenceValue"] | null;
             position: components["schemas"]["Position"] | null;

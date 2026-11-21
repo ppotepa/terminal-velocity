@@ -2,6 +2,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from functools import lru_cache
 from datetime import datetime, timezone
 from time import time
@@ -196,6 +197,33 @@ def due(db, now):
     ):
         if f["preview"] > now or any(needs_frames(db, f, r) for r in rules):
             return f
+
+
+# Limit only the extra discovery traffic; saved listeners keep their cadence.
+PUBLIC_DISCOVERY_CALLS_PER_DAY = 200
+DISCOVERY_RECHECK_SECONDS = 30 * 60
+
+
+def reserve_discovery_request(db, now, limit=PUBLIC_DISCOVERY_CALLS_PER_DAY):
+    day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
+    db.execute("INSERT OR IGNORE INTO discovery_budget (day,requests) VALUES (?,0)", (day,))
+    return bool(db.execute(
+        "UPDATE discovery_budget SET requests=requests+1 WHERE day=? AND requests<?",
+        (day, limit),
+    ).rowcount)
+
+
+def discovery_due(db, now):
+    snap = db.execute("SELECT at,ids FROM snapshots WHERE mode='live'").fetchone()
+    if not snap or now - snap["at"] > 180:
+        return None
+    candidates = []
+    for fid in json.loads(snap["ids"]):
+        row = db.execute("SELECT * FROM flights WHERE id=? AND mode='live'", (fid,)).fetchone()
+        if (row and re.fullmatch(r"[0-9a-f]{6}", row["aircraft"], re.IGNORECASE)
+                and row["last"] > now - 300 and row["checked"] < now - DISCOVERY_RECHECK_SECONDS):
+            candidates.append(row)
+    return min(candidates, key=lambda f: f["checked"], default=None)
 
 
 def provider_json(path):
