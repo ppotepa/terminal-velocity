@@ -1,0 +1,43 @@
+Machine information snapshot
+Captured: 2026-11-21 11:45 CET
+Host: vmi3756763
+Provider / VM: Contabo KVM guest
+
+Operating system
+Debian GNU/Linux 13 (trixie)
+Kernel: 6.12.38+deb13-cloud-amd64
+Architecture: x86_64
+Virtualization: KVM, full guest
+
+Compute
+CPU: 4 x AMD EPYC Processor (with IBPB), one thread per core
+Topology: 1 socket, 4 cores
+CPU load average at capture: 1.95 / 1.27 / 1.12 (1 / 5 / 15 min)
+Uptime at capture: 6 days, 2 hours, 26 minutes
+
+Memory
+RAM total: 7.76 GiB
+RAM used: 2.25 GiB
+RAM available: 5.52 GiB
+Swap: none
+
+Storage
+Root filesystem: ext4 on /dev/sda1
+Virtual disk: 100 GiB
+Root filesystem used: 24.8 GiB (27%)
+Root filesystem available: 69.4 GiB
+EFI partition: /dev/sda15, 124 MiB
+
+Terminal Velocity services at capture
+terminal-velocity-mongo.service: active
+terminal-velocity-api.service: active
+terminal-velocity-web.service: active
+terminal-velocity-workspace.service: active
+terminal-velocity-live.timer: active
+Workspace collector current memory: 17.2 MiB
+Workspace collector tasks: 2
+Workspace collector CPU time: 12.55 seconds since 2026-11-21 10:44 CET
+
+Notes
+This is a point-in-time snapshot. RAM, free disk, load, uptime, and process usage change over time.
+Network addresses, credentials, and environment variables are intentionally omitted.
