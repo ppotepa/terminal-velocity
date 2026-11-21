@@ -13,7 +13,10 @@ from time import sleep, time
 from urllib.error import HTTPError
 from urllib.parse import urlsplit, parse_qs
 
-from listeners import accept, debug, debug_tick, derive_corridor, due, fetch_frames
+from listeners import (
+    accept, debug, debug_tick, derive_corridor, discovery_due, due,
+    fetch_frames, reserve_request,
+)
 from store import (
     DB,
     connect,
@@ -128,6 +131,7 @@ def collect():
     modified = None
     retry = 0
     last_debug = time()
+    next_discovery = 0
     while True:
         try:
             with closing(connect()) as db:
@@ -150,8 +154,16 @@ def collect():
                         ):
                             derive_corridor(db, f)
                     modified = version
-                f = due(db, time()) if time() >= retry else None
-                if f:
+                now = time()
+                f = None
+                if now >= retry and now >= next_discovery:
+                    next_discovery = now + 300
+                    f = discovery_due(db, now)
+                if f is None and now >= retry:
+                    f = due(db, now)
+                if f and reserve_request(db, now):
+                    # Commit the allowance before networking, even if the fetch fails.
+                    db.commit()
                     try:
                         with db:
                             frames = fetch_frames(db, f)

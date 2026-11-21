@@ -42,6 +42,7 @@ def initialize(db):
     CREATE TABLE IF NOT EXISTS receipts(event TEXT REFERENCES events(id), station TEXT, at REAL,
       PRIMARY KEY(event,station,at));
     CREATE TABLE IF NOT EXISTS frame_pages(flight TEXT PRIMARY KEY, since REAL, until REAL, before_id INTEGER);
+    CREATE TABLE IF NOT EXISTS api_budget(day TEXT PRIMARY KEY, requests INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS snapshots(mode TEXT PRIMARY KEY, at REAL, ids TEXT);
     CREATE TABLE IF NOT EXISTS corridors(id TEXT PRIMARY KEY,mode TEXT,origin TEXT,destination TEXT,
       line TEXT,width REAL);
@@ -199,20 +200,37 @@ def ingest(db, mode, snapshot):
     )
 
 
+def frame_evidence(db, f):
+    confirmed = bool(db.execute(
+        "SELECT 1 FROM events WHERE flight=? AND source='Airframes' AND confirmed LIMIT 1",
+        (f["id"],),
+    ).fetchone())
+    if confirmed:
+        state = "confirmed"
+    elif f["airframes"] == "unavailable":
+        state = "unavailable"
+    elif f["airframes"] == "uncertain":
+        state = "unconfirmed"
+    elif f["checked"] > 0:
+        state = "no_match"
+    else:
+        state = "not_checked"
+    return dict(
+        hasFrames=confirmed,
+        frameStatus=state,
+        frameCheckedAt=stamp(f["checked"]) if f["checked"] > 0 else None,
+    )
+
+
 def snapshot(db, mode):
     s = db.execute("SELECT * FROM snapshots WHERE mode=?", (mode,)).fetchone()
     if not s:
         return dict(generatedAt=stamp(0), aircraft=[], sourceFreshness="unknown")
     rows = []
     for fid in json.loads(s["ids"]):
-        f = db.execute("SELECT latest FROM flights WHERE id=?", (fid,)).fetchone()
-        item = json.loads(f[0])
-        item["hasFrames"] = bool(
-            db.execute(
-                "SELECT 1 FROM events WHERE flight=? AND source='Airframes' AND confirmed LIMIT 1",
-                (fid,),
-            ).fetchone()
-        )
+        f = db.execute("SELECT * FROM flights WHERE id=?", (fid,)).fetchone()
+        item = json.loads(f["latest"])
+        item.update(frame_evidence(db, f))
         rows.append(item)
     return dict(
         generatedAt=stamp(s["at"]),
@@ -301,7 +319,7 @@ def detail(db, f):
     if state in ("waiting", "ready"):
         state = "ready" if has_frames else "waiting"
     return dict(
-        item=json.loads(f["latest"]),
+        item=dict(json.loads(f["latest"]), **frame_evidence(db, f)),
         origin=f["origin"],
         destination=f["destination"],
         track=segments(pts),
