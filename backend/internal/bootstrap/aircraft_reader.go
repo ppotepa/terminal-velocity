@@ -80,7 +80,7 @@ func (r aircraftReader) MapSnapshot(ctx context.Context) (httpaircraft.MapSnapsh
 			v := string(current.FlightID.Value)
 			flightID = &v
 		}
-		out = append(out, httpaircraft.MapAircraft{AircraftID: string(item.aircraftID), Position: &position, FlightID: flightID})
+		out = append(out, httpaircraft.MapAircraft{AircraftID: string(item.aircraftID), Callsign: &httpaircraft.EvidenceValue{Value: item.callsign, Certainty: "inferred", Source: &position.Source, ObservedAt: &position.ObservedAt}, Position: &position, FlightID: flightID})
 	}
 	freshness := "unknown"
 	if len(out) > 0 {
