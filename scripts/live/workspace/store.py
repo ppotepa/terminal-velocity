@@ -42,7 +42,7 @@ def initialize(db):
     CREATE TABLE IF NOT EXISTS receipts(event TEXT REFERENCES events(id), station TEXT, at REAL,
       PRIMARY KEY(event,station,at));
     CREATE TABLE IF NOT EXISTS frame_pages(flight TEXT PRIMARY KEY, since REAL, until REAL, before_id INTEGER);
-    CREATE TABLE IF NOT EXISTS api_budget(day TEXT PRIMARY KEY, requests INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS discovery_budget(day TEXT PRIMARY KEY, requests INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS snapshots(mode TEXT PRIMARY KEY, at REAL, ids TEXT);
     CREATE TABLE IF NOT EXISTS corridors(id TEXT PRIMARY KEY,mode TEXT,origin TEXT,destination TEXT,
       line TEXT,width REAL);

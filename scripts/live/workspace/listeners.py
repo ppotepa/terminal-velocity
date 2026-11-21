@@ -199,16 +199,16 @@ def due(db, now):
             return f
 
 
-# All message lookups run in one worker; a conservative daily budget is shared.
-PUBLIC_MESSAGE_CALLS_PER_DAY = 300
+# Limit only the extra discovery traffic; saved listeners keep their cadence.
+PUBLIC_DISCOVERY_CALLS_PER_DAY = 200
 DISCOVERY_RECHECK_SECONDS = 30 * 60
 
 
-def reserve_request(db, now, limit=PUBLIC_MESSAGE_CALLS_PER_DAY):
+def reserve_discovery_request(db, now, limit=PUBLIC_DISCOVERY_CALLS_PER_DAY):
     day = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
-    db.execute("INSERT OR IGNORE INTO api_budget (day,requests) VALUES (?,0)", (day,))
+    db.execute("INSERT OR IGNORE INTO discovery_budget (day,requests) VALUES (?,0)", (day,))
     return bool(db.execute(
-        "UPDATE api_budget SET requests=requests+1 WHERE day=? AND requests<?",
+        "UPDATE discovery_budget SET requests=requests+1 WHERE day=? AND requests<?",
         (day, limit),
     ).rowcount)
 

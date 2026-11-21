@@ -2,7 +2,7 @@ import sqlite3
 import unittest
 from time import time
 
-from listeners import accept, debug, discovery_due, reserve_request
+from listeners import accept, debug, discovery_due, reserve_discovery_request
 from store import (
     corridor_status,
     detail,
@@ -155,10 +155,10 @@ class FlightStoreTest(unittest.TestCase):
         self.assertIsNone(discovery_due(db, now))
         db.execute("UPDATE snapshots SET at=? WHERE mode='live'", (now - 400,))
         self.assertIsNone(discovery_due(db, now))
-        self.assertTrue(reserve_request(db, now, limit=2))
-        self.assertTrue(reserve_request(db, now, limit=2))
-        self.assertFalse(reserve_request(db, now, limit=2))
-        self.assertTrue(reserve_request(db, now + 86400, limit=2))
+        self.assertTrue(reserve_discovery_request(db, now, limit=2))
+        self.assertTrue(reserve_discovery_request(db, now, limit=2))
+        self.assertFalse(reserve_discovery_request(db, now, limit=2))
+        self.assertTrue(reserve_discovery_request(db, now + 86400, limit=2))
 
     def test_cursor_stays_stable_with_new_arrivals(self):
         f = self.flight

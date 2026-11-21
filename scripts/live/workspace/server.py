@@ -15,7 +15,7 @@ from urllib.parse import urlsplit, parse_qs
 
 from listeners import (
     accept, debug, debug_tick, derive_corridor, discovery_due, due,
-    fetch_frames, reserve_request,
+    fetch_frames, reserve_discovery_request,
 )
 from store import (
     DB,
@@ -158,12 +158,15 @@ def collect():
                 f = None
                 if now >= retry and now >= next_discovery:
                     next_discovery = now + 300
-                    f = discovery_due(db, now)
+                    candidate = discovery_due(db, now)
+                    if candidate:
+                        # Reserve and commit discovery allowance before any network call.
+                        with db:
+                            if reserve_discovery_request(db, now):
+                                f = candidate
                 if f is None and now >= retry:
                     f = due(db, now)
-                if f and reserve_request(db, now):
-                    # Commit the allowance before networking, even if the fetch fails.
-                    db.commit()
+                if f:
                     try:
                         with db:
                             frames = fetch_frames(db, f)

@@ -75,12 +75,13 @@ The shared background worker probes one currently visible ICAO aircraft at
 most once every five minutes, in addition to selected flights and saved
 listeners. A flight is eligible for recheck no sooner than 30 minutes after
 its previous lookup, and only while the regional ADS-B snapshot is fresh.
-These paths share a conservative SQLite-persisted budget of 300 Airframes
-message lookups per UTC day. Occasional airline metadata requests are not
-included in this counter. The existing `429` handling respects
-`Retry-After`. This is a deliberately slow bounded discovery queue: many
-aircraft can remain "not checked". No private pages or undocumented access
-methods are used.
+The **additional automatic discovery** path has a separate,
+SQLite-persisted budget of 200 Airframes message lookups per UTC day.
+Selected flights and saved listeners retain their existing polling cadence
+and are not counted against the discovery budget. Provider-wide usage can
+therefore be higher; the existing `429` handling respects `Retry-After`.
+This is a deliberately slow bounded discovery queue: many aircraft can remain
+"not checked". No private pages or undocumented access methods are used.
 
 The collector uses the public `https://api.airframes.io/v1/messages` endpoint
 over HTTPS; anonymous access requires no key in the default configuration.
