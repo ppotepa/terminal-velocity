@@ -1,0 +1,8 @@
+[Unit]
+Description=Update live positions every three minutes
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=3min
+AccuracySec=2s
+[Install]
+WantedBy=timers.target

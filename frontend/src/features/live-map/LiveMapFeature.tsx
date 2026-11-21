@@ -13,7 +13,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 setWorkerUrl(workerUrl);
 type Snapshot = components['schemas']['MapSnapshot'];
 type Aircraft = Snapshot['aircraft'][number];
-type Props = { client?: ApiClient; tick?: number; tracked?: Set<string>; onSelectAircraft?: (aircraft: Aircraft) => void; selectedAircraftId?: string | null; onMapReady?: (map: MapLibreMap | null) => void };
+type Props = { live?: boolean; onSnapshot?: (items: Aircraft[]) => void; client?: ApiClient; tick?: number; tracked?: Set<string>; onSelectAircraft?: (aircraft: Aircraft) => void; selectedAircraftId?: string | null; onMapReady?: (map: MapLibreMap | null) => void };
 const fallbackStyle: StyleSpecification = {
   version: 8,
   sources: { countries: {type:'geojson', data:new URL('../../../../backend/data/geography/countries.geojson', import.meta.url).href, attribution:'Natural Earth'} },
@@ -24,7 +24,7 @@ const fallbackStyle: StyleSpecification = {
 };
 const styleURL = import.meta.env.VITE_MAP_STYLE_URL || 'https://tiles.openfreemap.org/styles/liberty';
 
-export function LiveMapFeature({ client: suppliedClient, onSelectAircraft, selectedAircraftId, onMapReady, tick, tracked }: Props) {
+export function LiveMapFeature({ client: suppliedClient, onSelectAircraft, selectedAircraftId, onMapReady, tick, tracked, live, onSnapshot }: Props) {
   const client = useMemo(() => suppliedClient ?? createApiClient(), [suppliedClient]);
   const container = useRef<HTMLDivElement>(null); const mapRef = useRef<MapLibreMap | null>(null); const markersRef = useRef(new Map<string, Marker>()); const fallbackUsed = useRef(false);
   const onMapReadyRef = useRef(onMapReady);
@@ -34,6 +34,14 @@ export function LiveMapFeature({ client: suppliedClient, onSelectAircraft, selec
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setError(undefined);
     try {
+      if (live) {
+        const response = await fetch('/live-snapshot.json', {signal, cache:'no-store'});
+        if (!response.ok) throw new Error('Live feed unavailable');
+        const data: Snapshot = await response.json();
+        if (!Number.isFinite(Date.parse(data.generatedAt)) || Date.now()-Date.parse(data.generatedAt)>300_000) throw new Error('Live feed is stale');
+        if (!signal?.aborted) { setSnapshot(data); onSnapshot?.(data.aircraft); }
+        return;
+      }
       const result = await client.GET('/map/snapshot', { signal });
       if (result.error) throw normalizeApiFailure(result.error, result.response.status);
       if (result.data && !signal?.aborted) {
@@ -48,14 +56,14 @@ export function LiveMapFeature({ client: suppliedClient, onSelectAircraft, selec
         }
         if (!signal?.aborted) setFrames(found);
       }
-    } catch (failure) { if (!(failure instanceof DOMException && failure.name === 'AbortError')) setError(normalizeApiFailure(failure).message); }
+    } catch (failure) { if (!(failure instanceof DOMException && failure.name === 'AbortError')) { setError(live ? 'Live feed unavailable or stale.' : normalizeApiFailure(failure).message); if (live) {setSnapshot(undefined); onSnapshot?.([]);} } }
     finally { setLoading(false); }
-  }, [client]);
-  useEffect(() => { const controller = new AbortController(); void refresh(controller.signal); const timer = window.setInterval(() => void refresh(), 20_000); return () => { controller.abort(); window.clearInterval(timer); }; }, [refresh, tick]);
+  }, [client, live, onSnapshot]);
+  useEffect(() => { const controller = new AbortController(); void refresh(controller.signal); const timer = window.setInterval(() => void refresh(controller.signal), 20_000); return () => { controller.abort(); window.clearInterval(timer); }; }, [refresh, tick]);
 
   useEffect(() => {
     if (!container.current || mapRef.current) return;
-    const map = new MapLibreMap({ container: container.current, style: styleURL, center: [0, 20], zoom: 1.4, minZoom: 0, maxZoom: 15, dragRotate: false, pitchWithRotate: false });
+    const map = new MapLibreMap({ container: container.current, style: styleURL, center: live ? [20,52] : [0,20], zoom: live ? 5 : 1.4, minZoom: 0, maxZoom: 15, dragRotate: false, pitchWithRotate: false });
     map.addControl(new NavigationControl({ showCompass: false }), 'top-right');
     map.on('error', () => {
       if (!fallbackUsed.current) {
@@ -70,7 +78,7 @@ export function LiveMapFeature({ client: suppliedClient, onSelectAircraft, selec
   const positioned = useMemo(() => snapshot?.aircraft.filter((item) => item.position) ?? [], [snapshot]);
   const unpositioned = useMemo(() => snapshot?.aircraft.filter((item) => !item.position) ?? [], [snapshot]);
   useEffect(() => {
-    const map = mapRef.current; if (!map || !snapshot) return;
+    const map = mapRef.current; if (!map) return;
     const visible = new Set(positioned.map(a => a.aircraftId));
     for (const [id, marker] of markersRef.current) if (!visible.has(id)) {
       marker.remove();
@@ -94,7 +102,7 @@ export function LiveMapFeature({ client: suppliedClient, onSelectAircraft, selec
       {error && <ErrorState title="Map data could not be loaded" message={error} onRetry={() => void refresh()} />}
       {loading && !snapshot && <LoadingState label="Loading observed aircraft" />}
       <div className="map-layout"><div className="map-canvas-wrap"><div ref={container} className="map-canvas" role="region" aria-label="Map of observed aircraft" />{styleFailed && <div className="map-style-notice" role="status">Showing offline country boundaries.</div>}{snapshot && positioned.length === 0 && <div className="map-no-positions" role="status">No current observed positions. Aircraft without coordinates remain in the list.</div>}</div>
-      <aside className="aircraft-list" aria-label="Watched aircraft list"><div className="aircraft-list-heading"><strong>Aircraft · green ring = frames</strong><span>{snapshot?.aircraft.length ?? 0}</span></div>{!loading && !snapshot?.aircraft.length && <p className="aircraft-list-empty">No aircraft match an active Watch Rule yet.</p>}{snapshot?.aircraft.map((aircraft) => <AircraftRow key={aircraft.aircraftId} aircraft={aircraft} selected={aircraft.aircraftId === selectedAircraftId} onSelect={() => { if (aircraft.position) mapRef.current?.easeTo({center:[aircraft.position.longitude,aircraft.position.latitude],zoom:6}); select(aircraft); }} tracked={tracked?.has(String(aircraft.callsign?.value))} />)}{unpositioned.length > 0 && <p className="no-position-note">Listed without a marker because no current position was returned.</p>}</aside></div>
+      <aside className="aircraft-list" aria-label="Watched aircraft list"><div className="aircraft-list-heading"><strong>{live ? 'Live · Central Poland · 150 NM' : 'Debug · green ring = frames'}</strong><span>{snapshot?.aircraft.length ?? 0}</span></div>{live && <small className="live-credit"><a href="https://www.adsb.lol/docs/open-data/api/">adsb.lol · ODbL 1.0</a><br/>{error || (snapshot ? 'Updated '+new Date(snapshot.generatedAt).toLocaleTimeString() : 'Loading positions…')}</small>}{!live && !loading && !snapshot?.aircraft.length && <p className="aircraft-list-empty">No aircraft match an active Watch Rule yet.</p>}{snapshot?.aircraft.map((aircraft) => <AircraftRow key={aircraft.aircraftId} aircraft={aircraft} selected={aircraft.aircraftId === selectedAircraftId} onSelect={() => { if (aircraft.position) mapRef.current?.easeTo({center:[aircraft.position.longitude,aircraft.position.latitude],zoom:6}); select(aircraft); }} tracked={tracked?.has(live ? aircraft.aircraftId : String(aircraft.callsign?.value))} />)}{unpositioned.length > 0 && <p className="no-position-note">Listed without a marker because no current position was returned.</p>}</aside></div>
       <p className="map-footnote">Snapshot time: {snapshot ? new Date(snapshot.generatedAt).toLocaleString() : 'not available'} · Source times are shown per aircraft.</p>
     </Panel>
   </div>;

@@ -22,6 +22,9 @@ type Aircraft = components['schemas']['MapSnapshot']['aircraft'][number];
 
 export default function AppShell() {
   const client = useMemo(() => createApiClient(), []);
+  const [live, setLive] = useState(() => localStorage.getItem('map-mode') !== 'debug');
+  const [favorites, setFavorites] = useState<Set<string>>(() => new Set(JSON.parse(localStorage.getItem('live-aircraft') || '[]')));
+  const reconcile = useCallback((items: Aircraft[]) => select(old => items.find(a => a.aircraftId === old?.aircraftId) ?? null), []);
   const [section, navigate] = useState<Section>('Map');
   const [aircraft, select] = useState<Aircraft | null>(null);
   const [tick, update] = useState(0);
@@ -32,12 +35,14 @@ export default function AppShell() {
   const choose = useCallback((item: Aircraft) => { select(item); navigate('Map'); setError(''); }, []);
   const close = () => { select(null); navigate('Map'); };
   useEffect(() => {
+    if (live) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const refresh = () => { if (!timer) timer = setTimeout(() => { timer = undefined; update(n => n + 1); }, 1000); };
     const stop = subscribeRealtime({onEvent: refresh, onStatus: s => { if (s === 'connected') refresh(); }});
     return () => { stop(); clearTimeout(timer); };
-  }, []);
+  }, [live]);
   useEffect(() => {
+    if (live) return;
     const ctrl = new AbortController();
     async function load() {
       const names = new Set<string>();
@@ -55,7 +60,7 @@ export default function AppShell() {
     }
     void load().catch(() => {});
     return () => ctrl.abort();
-  }, [client, section, tick]);
+  }, [client, section, tick, live]);
   async function track() {
     setSaving(true);
     try {
@@ -69,10 +74,12 @@ export default function AppShell() {
     finally { setSaving(false); }
   }
   return <main className="radar">
-    <Suspense fallback={<p>Loading map…</p>}><MapView client={client} onSelectAircraft={choose} selectedAircraftId={aircraft?.aircraftId} tracked={tracked} tick={tick}/></Suspense>
+    <div className="mode-switch" role="group" aria-label="Map mode">{['Debug','Live'].map(mode => <button key={mode} aria-pressed={live === (mode === 'Live')} onClick={()=>{setLive(mode==='Live'); localStorage.setItem('map-mode',mode.toLowerCase()); close();}}>{mode}</button>)}</div>
+    <Suspense fallback={<p>Loading map…</p>}><MapView key={String(live)} live={live} onSnapshot={reconcile} client={client} onSelectAircraft={choose} selectedAircraftId={aircraft?.aircraftId} tracked={live ? favorites : tracked} tick={live ? 0 : tick}/></Suspense>
     {(section !== 'Map' || aircraft) && <aside className="radar-panel" aria-label="Workspace panel">
       <header><h1>{section === 'Map' ? callsign || aircraft?.aircraftId : section}</h1><button onClick={close} aria-label="Close panel"><X/></button></header>
-      {section === 'Map' && aircraft && <>
+      {live && aircraft && section==='Map' && <section><p>ICAO · {aircraft.aircraftId}</p><p>Observed · {new Date(aircraft.position!.observedAt).toLocaleString()}</p><p>Altitude · {String(aircraft.position?.altitudeMeters?.value ?? '—')} m</p><p>Speed · {String(aircraft.position?.groundSpeedMps?.value ?? '—')} m/s</p><button className="track-action" onClick={()=>{const next=new Set(favorites); if(next.has(aircraft.aircraftId)) next.delete(aircraft.aircraftId); else next.add(aircraft.aircraftId); setFavorites(next); localStorage.setItem('live-aircraft', JSON.stringify([...next]));}}>{favorites.has(aircraft.aircraftId)?'Remove from tracking':'Add to tracking'}</button></section>}
+      {!live && section === 'Map' && aircraft && <>
         <button className="track-action" disabled={!callsign || saving || tracked.has(callsign)} onClick={track}>{tracked.has(callsign) ? 'Tracking' : saving ? 'Saving…' : 'Add to tracking'}</button>
         {error && <p role="alert">{error}</p>}
         <AircraftDetailsFeature client={client} aircraftId={aircraft.aircraftId} onViewTrack={()=>navigate('History')} onViewMessages={()=>navigate('Messages')}/>
@@ -85,6 +92,6 @@ export default function AppShell() {
       {section === 'Alerts' && <AlertsFeature client={client}/>}
       {section === 'Sources' && <SourceSettingsFeature client={client}/>}
     </aside>}
-    <nav className="radar-nav" aria-label="Workspace">{sections.map(([name,Icon])=><button key={name} aria-current={section===name?'page':undefined} onClick={()=>name==='Map'?close():navigate(name)}><Icon size={19}/>{name}</button>)}</nav>
+    <nav className="radar-nav" aria-label="Workspace">{sections.filter(([name])=>!live || name==='Map').map(([name,Icon])=><button key={name} aria-current={section===name?'page':undefined} onClick={()=>name==='Map'?close():navigate(name)}><Icon size={19}/>{name}</button>)}</nav>
   </main>;
 }

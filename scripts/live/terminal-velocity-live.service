@@ -1,0 +1,6 @@
+[Unit]
+Description=Refresh the Terminal Velocity public ADS-B snapshot
+After=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /root/work/terminal-velocity/source/scripts/live/snapshot.py /root/work/terminal-velocity/source/frontend/dist/live-snapshot.json
