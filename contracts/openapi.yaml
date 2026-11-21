@@ -858,7 +858,7 @@ components:
         generatedAt: { type: string, format: date-time }
         sourceFreshness: { type: string, enum: [fresh, stale, unknown] }
         aircraft: { type: array, items: { $ref: '#/components/schemas/MapAircraft' } }
-    MapAircraft: { type: object, required: [aircraftId, position, noPositionReason, flightId], properties: { hasFrames: { type: boolean }, aircraftId: { type: string }, callsign: { oneOf: [{ $ref: '#/components/schemas/EvidenceValue' }, { type: 'null' }] }, position: { oneOf: [{ $ref: '#/components/schemas/Position' }, { type: 'null' }] }, noPositionReason: { type: [string, 'null'], enum: [no_recent_observation, source_unavailable, null] }, flightId: { type: [string, 'null'] } } }
+    MapAircraft: { type: object, required: [aircraftId, position, noPositionReason, flightId], properties: { hasFrames: { type: boolean }, frameStatus: { type: string, enum: [confirmed, unconfirmed, no_match, unavailable, not_checked], description: Evidence from this flight only }, frameCheckedAt: { type: [string, 'null'], format: date-time, description: Last public Airframes lookup in UTC }, aircraftId: { type: string }, callsign: { oneOf: [{ $ref: '#/components/schemas/EvidenceValue' }, { type: 'null' }] }, position: { oneOf: [{ $ref: '#/components/schemas/Position' }, { type: 'null' }] }, noPositionReason: { type: [string, 'null'], enum: [no_recent_observation, source_unavailable, null] }, flightId: { type: [string, 'null'] } } }
     WorkspaceSource: { type: string, enum: [ADS-B, Airframes] }
     WorkspaceRule:
       type: object

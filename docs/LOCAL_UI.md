@@ -58,3 +58,33 @@ Debug starts with two flight dates for TV201, a second aircraft, a two-station
 frame and an observed corridor. Its clock advances locally. The second aircraft
 periodically drops out of coverage. Debug listeners and frames stay in the
 Debug namespace.
+
+
+## Aircraft list and public Airframes frame checks
+
+The Map aircraft list opens by default on desktop and can be expanded on
+mobile. Search by callsign or ICAO and use "Only confirmed frames" to see
+flights with an Airframes message *confirmed for that flight*. The ring and
+list use the same persisted evidence. States are: "not checked", "no matching
+frame in the checked window", "uncertain frame", "Airframes unavailable" and
+"confirmed". No matching frame is **not** evidence that the aircraft never
+sent a message. Rows include the last lookup time when available.
+Debug messages are synthetic, never live observations.
+
+The shared background worker probes one currently visible ICAO aircraft at
+most once every five minutes, in addition to selected flights and saved
+listeners. A flight is eligible for recheck no sooner than 30 minutes after
+its previous lookup, and only while the regional ADS-B snapshot is fresh.
+These paths share a conservative SQLite-persisted budget of 300 Airframes
+message lookups per UTC day. Occasional airline metadata requests are not
+included in this counter. The existing `429` handling respects
+`Retry-After`. This is a deliberately slow bounded discovery queue: many
+aircraft can remain "not checked". No private pages or undocumented access
+methods are used.
+
+The collector uses the public `https://api.airframes.io/v1/messages` endpoint
+over HTTPS; anonymous access requires no key in the default configuration.
+Leave `TV_AIRFRAMES_API_KEY` unset for public-only requests. Public access may
+change at the provider's discretion. Attribute displayed messages to
+Airframes.io and its community of feeders, respect provider terms and limits,
+and back up the local SQLite file for persisted historical evidence and rules.
